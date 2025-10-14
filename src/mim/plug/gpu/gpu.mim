@@ -42,7 +42,7 @@ axm %gpu.copy_mem_to_host: {T: *} → [%mem.M, %gpu.GlobalPtr T, %mem.Ptr0 T] �
 /// ### %%gpu.launch
 ///
 /// Launches a kernel function on the device
-axm %gpu.launch: [%mem.M, n_warps: Nat, n_threads: Nat, kernel: [%gpu.M, Idx n_warps, Idx n_threads, *] → %gpu.M] -> %mem.M;
+axm %gpu.launch: [%mem.M, n_warps: Nat, n_threads: Nat, kernel: [%gpu.M, Idx n_warps, Idx n_threads, *] → %gpu.M] → %mem.M;
 
 /// # TODO: for testing purposes only
 axm %gpu.const_idx: [n: Nat] → Idx n, normalize_const;
