@@ -1,0 +1,48 @@
+/// # The gpu Plugin {#gpu}
+///
+/// @see mim::plug::gpu
+///
+/// [TOC]
+///
+/// ## Dependencies
+///
+import mem;
+///
+/// ## Types
+///
+/// ### %%gpu.M {#gpuM}
+///
+/// This type tracks all kind of side-effects on a GPU.
+axm %gpu.M: %mem.M;
+
+///
+/// ### Pointer Types
+///
+
+lam %gpu.GlobalPtr(T: *): * =   %mem.Ptr (T, 1);
+lam %gpu.SharedPtr(T: *): * =   %mem.Ptr (T, 3);
+lam %gpu.ConstantPtr(T: *): * = %mem.Ptr (T, 4);
+lam %gpu.LocalPtr(T: *): * =    %mem.Ptr (T, 5);
+
+///
+/// ## Operations w/ Side Effects
+///
+/// ### %%gpu.copy_mem_host_to_device
+///
+/// Copies data from host memory to device memory
+axm %gpu.copy_mem_to_device: {T: *} → [%mem.M, %mem.Ptr0(T), %gpu.GlobalPtr(T)] → [%mem.M];
+
+///
+/// ### %%gpu.copy_mem_to_host
+///
+/// Copies data from device memory to host memory
+axm %gpu.copy_mem_to_host: {T: *} → [%mem.M, %gpu.GlobalPtr T, %mem.Ptr0 T] → [%mem.M];
+
+///
+/// ### %%gpu.launch
+///
+/// Launches a kernel function on the device
+axm %gpu.launch: [%mem.M, n_warps: Nat, n_threads: Nat, kernel: [%gpu.M, Idx n_warps, Idx n_threads, *] → %gpu.M] -> %mem.M;
+
+/// # TODO: for testing purposes only
+axm %gpu.const_idx: [n: Nat] → Idx n, normalize_const;
