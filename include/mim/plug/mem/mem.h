@@ -103,6 +103,7 @@ enum class AddrSpace : nat_t {
     Texture  = 2,
     Shared   = 3,
     Constant = 4,
+    Local    = 5,
 };
 ///@}
 
