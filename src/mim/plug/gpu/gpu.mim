@@ -6,14 +6,16 @@
 ///
 /// ## Dependencies
 ///
-import mem;
+import compile;
+plugin core;
+plugin mem;
 ///
 /// ## Types
 ///
 /// ### %%gpu.M {#gpuM}
 ///
 /// This type tracks all kind of side-effects on a GPU.
-axm %gpu.M: %mem.M;
+let %gpu.M = %mem.M; // TODO: change this from equivalence
 
 ///
 /// ### Pointer Types
@@ -27,7 +29,7 @@ lam %gpu.LocalPtr(T: *): * =    %mem.Ptr (T, 5);
 ///
 /// ## Operations w/ Side Effects
 ///
-/// ### %%gpu.copy_mem_host_to_device
+/// ### %%gpu.copy_mem_to_device
 ///
 /// Copies data from host memory to device memory
 axm %gpu.copy_mem_to_device: {T: *} → [%mem.M, %mem.Ptr0(T), %gpu.GlobalPtr(T)] → [%mem.M];
@@ -42,7 +44,8 @@ axm %gpu.copy_mem_to_host: {T: *} → [%mem.M, %gpu.GlobalPtr T, %mem.Ptr0 T] �
 /// ### %%gpu.launch
 ///
 /// Launches a kernel function on the device
-axm %gpu.launch: [%mem.M, n_warps: Nat, n_threads: Nat, kernel: [%gpu.M, Idx n_warps, Idx n_threads, *] → %gpu.M] → %mem.M;
+axm %gpu.launch: {T: *} → [%mem.M, n_warps: Nat, n_threads: Nat, kernel: Fn [%gpu.M, Idx n_warps, Idx n_threads, T] → %gpu.M] → %mem.M;
+// TODO: can we find a way of passing multiple arguments to the kernel?
 
-/// # TODO: for testing purposes only
+// TODO: for testing purposes only
 axm %gpu.const_idx: [n: Nat] → Idx n, normalize_const;
