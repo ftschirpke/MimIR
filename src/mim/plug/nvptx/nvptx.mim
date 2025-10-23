@@ -1,0 +1,16 @@
+/// # The nvptx Plugin {#nvptx}
+///
+/// @see mim::plug::nvptx
+///
+/// A minimal nvptx plugin
+///
+/// [TOC]
+///
+/// ## Operations
+///
+/// ### %%nvptx.const_idx
+///
+/// The 42 constant, evaluated using a normalizer
+///
+axm %nvptx.const_idx: [n: Nat] → Idx n, normalize_const;
+// TODO: remove - for testing purposes only
