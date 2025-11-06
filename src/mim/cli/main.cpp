@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
             | lyra::opt(output[Mim],  "file"               )["-o"]["--output-mim"           ]("Emits the Mim program again.")
             | lyra::opt(output[Nest], "file"               )      ["--output-nest"          ]("Emits program nesting tree as Dot.")
             | lyra::opt(output[DvLL], "file"               )      ["--output-device-ll"     ]("Compiles the Mim program's device code to LLVM.")
-            | lyra::opt(device_target_name, "target"       )      ["--device-target"        ]("Target for device code.")
+            | lyra::opt(device_target_name, "target"       )      ["--device-target"        ]("Target for device code ('none' or 'nvptx'). Default: 'none'")
               .choices([&device_target_names](std::string value) { return device_target_names.contains(value); })
             | lyra::opt(flags.ascii                        )["-a"]["--ascii"                ]("Use ASCII alternatives in output instead of UTF-8.")
             | lyra::opt(flags.bootstrap                    )      ["--bootstrap"            ]("Puts mim into \"bootstrap mode\". This means a 'plugin' directive has the same effect as an 'import' and will not load a library. In addition, no standard plugins will be loaded.")

@@ -15,7 +15,7 @@ plugin mem;
 /// ### %%gpu.M {#gpuM}
 ///
 /// This type tracks all kind of side-effects on a GPU.
-let %gpu.M = %mem.M; // TODO: change this from equivalence
+axm %gpu.M: *;
 
 ///
 /// ### Pointer Types
