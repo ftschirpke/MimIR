@@ -70,6 +70,10 @@ public:
         decls_.emplace(decl.str());
     }
 
+protected:
+    Emitter(World& world, std::string name, std::ostream& ostream)
+        : Super(world, std::move(name), ostream) {}
+
 private:
     std::string id(const Def*, bool force_bb = false) const;
     std::string convert(const Def*);
