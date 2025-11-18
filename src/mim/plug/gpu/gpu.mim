@@ -32,7 +32,7 @@ lam %gpu.LocalPtr(T: *): * =    %mem.Ptr (T, 5);
 /// ### %%gpu.copy_mem_to_device
 ///
 /// Copies data from host memory to device memory
-axm %gpu.copy_mem_to_device: {T: *} → [%mem.M, %mem.Ptr0(T), %gpu.GlobalPtr(T)] → [%mem.M];
+axm %gpu.copy_mem_to_device: {T: *} → [%mem.M, %mem.Ptr0 T, %gpu.GlobalPtr T] → [%mem.M];
 
 ///
 /// ### %%gpu.copy_mem_to_host

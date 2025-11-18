@@ -1,0 +1,18 @@
+// RUN: rm -f %t.ll
+// RUN: %mim %s --output-ll %t.ll --device-target nvptx -o -
+// RUN: clang %t.ll -o %t -Wno-override-module -lcuda
+// RUN: %t; test $? -eq 1
+// RUN: %t 1 2 3; test $? -eq 4
+// RUN: %t 1 2 3 4 5; test $? -eq 6
+
+plugin core;
+plugin gpu;
+
+con extern main [mem: %mem.M, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0), return: Cn [%mem.M, I32]] =
+    let (mem, ptr) = %mem.malloc (I32, 0) (mem, 4);
+    let mem = %mem.store (mem, ptr, argc);
+    let (mem, d_ptr) = %mem.malloc (I32, 1) (mem, 4);
+    let mem = %gpu.copy_mem_to_device (mem, ptr, d_ptr);
+    let (mem, val) = %mem.load (mem, ptr);
+    let mem = %mem.free (mem, ptr);
+    return (mem, val);

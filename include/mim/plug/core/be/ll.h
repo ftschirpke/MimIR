@@ -1,6 +1,7 @@
 #pragma once
 
 #include <deque>
+#include <optional>
 #include <ostream>
 
 #include "mim/be/emitter.h"
@@ -63,6 +64,12 @@ public:
     std::string prepare();
     void finalize();
 
+    virtual std::optional<std::string> isa_device_intrinsic(BB&, const Def*) { return std::nullopt; }
+    std::string as_device_intrinsic(BB& bb, const Def* def) {
+        if (auto res = isa_device_intrinsic(bb, def)) return res.value();
+        error("device intrinsic detected but not handled in LLVM backend: {} : {}", def, def->type());
+    }
+
     template<class... Args>
     void declare(const char* s, Args&&... args) {
         std::ostringstream decl;
@@ -74,11 +81,11 @@ protected:
     Emitter(World& world, std::string name, std::ostream& ostream)
         : Super(world, std::move(name), ostream) {}
 
-private:
     std::string id(const Def*, bool force_bb = false) const;
     std::string convert(const Def*);
     std::string convert_ret_pi(const Pi*);
 
+private:
     absl::btree_set<std::string> decls_;
     std::ostringstream type_decls_;
     std::ostringstream vars_decls_;

@@ -138,6 +138,10 @@ inline const Def* op_alloc(const Def* type, const Def* mem) {
     World& w = type->world();
     return w.app(w.app(w.annex<alloc>(), {type, w.lit_nat_0()}), mem);
 }
+inline const Def* op_alloc(const Def* type, const Def* addr_space, const Def* mem) {
+    World& w = type->world();
+    return w.app(w.app(w.annex<alloc>(), {type, w.lit_nat(Lit::as(addr_space))}), mem);
+}
 ///@}
 
 /// @name %%mem.slot
@@ -145,6 +149,10 @@ inline const Def* op_alloc(const Def* type, const Def* mem) {
 inline const Def* op_slot(const Def* type, const Def* mem) {
     World& w = type->world();
     return w.app(w.app(w.annex<slot>(), {type, w.lit_nat_0()}), {mem, w.lit_nat(w.curr_gid())});
+}
+inline const Def* op_slot(const Def* type, const Def* addr_space, const Def* mem) {
+    World& w = type->world();
+    return w.app(w.app(w.annex<slot>(), {type, w.lit_nat(Lit::as(addr_space))}), {mem, w.lit_nat(w.curr_gid())});
 }
 ///@}
 
@@ -155,6 +163,11 @@ inline const Def* op_malloc(const Def* type, const Def* mem) {
     auto size = w.call(core::trait::size, type);
     return w.app(w.app(w.annex<malloc>(), {type, w.lit_nat_0()}), {mem, size});
 }
+inline const Def* op_malloc(const Def* type, const Def* addr_space, const Def* mem) {
+    World& w  = type->world();
+    auto size = w.call(core::trait::size, type);
+    return w.app(w.app(w.annex<malloc>(), {type, w.lit_nat(Lit::as(addr_space))}), {mem, size});
+}
 ///@}
 
 /// @name %%mem.mslot
@@ -163,6 +176,11 @@ inline const Def* op_mslot(const Def* type, const Def* mem, const Def* id) {
     World& w  = type->world();
     auto size = w.call(core::trait::size, type);
     return w.app(w.app(w.annex<mslot>(), {type, w.lit_nat_0()}), {mem, size, id});
+}
+inline const Def* op_mslot(const Def* type, const Def* addr_space, const Def* mem, const Def* id) {
+    World& w  = type->world();
+    auto size = w.call(core::trait::size, type);
+    return w.app(w.app(w.annex<mslot>(), {type, w.lit_nat(Lit::as(addr_space))}), {mem, size, id});
 }
 ///@}
 

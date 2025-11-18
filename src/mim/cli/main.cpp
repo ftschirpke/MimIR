@@ -203,10 +203,23 @@ int main(int argc, char** argv) {
             if (auto s = os[Nest]) mim::Nest(world).dot(*s);
 
             if (auto s = os[LL]) {
-                if (auto backend = driver.backend("ll"))
+                const char* backend_name;
+                const char* plugin_name;
+                switch (device_target_names[device_target_name]) {
+                    case None:
+                        backend_name = "ll";
+                        plugin_name  = "core";
+                        break;
+                    case NVPTX:
+                        backend_name = "ll-nvptx";
+                        plugin_name  = "nvptx";
+                        break;
+                    case Num_DeviceTargets: fe::unreachable();
+                }
+                if (auto backend = driver.backend(backend_name))
                     backend(world, *s);
                 else
-                    error("'ll' emitter not loaded; try loading 'mem' plugin");
+                    error("'ll' emitter not loaded; try loading '{}' plugin", plugin_name);
             }
 
             if (auto s = os[DvLL]) {
