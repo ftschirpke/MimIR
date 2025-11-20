@@ -2,15 +2,61 @@
 ///
 /// @see mim::plug::nvptx
 ///
-/// A minimal nvptx plugin
+/// A plugin for NVPTX intrinsics
 ///
 /// [TOC]
 ///
+/// ## Dependencies
+///
+import compile;
+plugin core;
+plugin mem;
+
+///
+/// ## Internals
+///
+
+let %nvptx._cuDevice = I32;
+let %nvptx._cuContext = %mem.Ptr0 I32;
+let %nvptx._cuModule = %mem.Ptr0 I32;
+
+axm %nvptx._cuInit: %mem.M → [%mem.M, I32];
+axm %nvptx._cuDeviceGetCount: [%mem.M, count_ptr: %mem.Ptr0 I32] → [%mem.M, I32];
+axm %nvptx._cuDeviceGet: [%mem.M, dev_ptr: %mem.Ptr0 %nvptx._cuDevice, num: I32] → [%mem.M, I32];
+axm %nvptx._cuCtxCreate: [%mem.M, ctx_ptr: %mem.Ptr0 %nvptx._cuContext, flags: I32, dev: %nvptx._cuDevice] → [%mem.M, I32];
+axm %nvptx._cuModuleLoadFatBinary: {N: Nat} → [%mem.M, mod_ptr: %mem.Ptr0 %nvptx._cuModule, data: %mem.Ptr0 «N; I8»] → [%mem.M, I32];
+axm %nvptx._cuModuleUnload: [%mem.M, %nvptx._cuModule] → [%mem.M, I32];
+axm %nvptx._cuCtxDestroy: [%mem.M, %nvptx._cuContext] → [%mem.M, I32];
+///
+///
 /// ## Operations
 ///
-/// ### %%nvptx.const_idx
+/// ### %%nvptx.setup
 ///
-/// The 42 constant, evaluated using a normalizer
+/// Uses CUDA driver API calls to set up the device for kernel launches.
+// TODO: error handling
+con %nvptx.setup {N: Nat} (mem: %mem.M, dev_num: I32, data: %mem.Ptr0 «N; I8», return: Cn [%mem.M, %mem.Ptr0 %nvptx._cuContext, %mem.Ptr0 %nvptx._cuModule]) = 
+    let (mem, dev_count_ptr) = %mem.alloc (I32, 0) (mem);
+    let (mem, _) = %nvptx._cuInit (mem);
+    let (mem, _) = %nvptx._cuDeviceGetCount (mem, dev_count_ptr);
+    let (mem, dev_ptr) = %mem.alloc (%nvptx._cuDevice, 0) (mem);
+    let (mem, _) = %nvptx._cuDeviceGet (mem, dev_ptr, dev_num);
+    let (mem, ctx_ptr) = %mem.alloc (%nvptx._cuContext, 0) (mem);
+    let (mem, dev) = %mem.load (mem, dev_ptr);
+    let (mem, _) = %nvptx._cuCtxCreate (mem, ctx_ptr, 0I32, dev);
+    let (mem, mod_ptr) = %mem.alloc (%nvptx._cuModule, 0) (mem);
+    let (mem, _) = %nvptx._cuModuleLoadFatBinary (mem, mod_ptr, data);
+    return (mem, ctx_ptr, mod_ptr);
+
 ///
-axm %nvptx.const_idx: [n: Nat] → Idx n, normalize_const;
-// TODO: remove - for testing purposes only
+/// ### %%nvptx.cleanup
+///
+/// Uses CUDA driver API calls to clean up i.e. the reverse of %%nvptx.setup.
+// TODO: error handling
+con %nvptx.cleanup (mem: %mem.M, ctx_ptr: %mem.Ptr0 %nvptx._cuContext, mod_ptr: %mem.Ptr0 %nvptx._cuModule, return: Cn %mem.M) =
+    let (mem, ctx) = %mem.load (mem, ctx_ptr);
+    let (mem, mod) = %mem.load (mem, mod_ptr);
+    let (mem, _) = %nvptx._cuModuleUnload (mem, mod);
+    let (mem, _) = %nvptx._cuCtxDestroy (mem, ctx);
+    return mem;
+

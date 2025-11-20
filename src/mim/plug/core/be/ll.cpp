@@ -7,6 +7,7 @@
 #include <absl/container/btree_set.h>
 
 #include <mim/plug/clos/clos.h>
+#include <mim/plug/gpu/gpu.h>
 #include <mim/plug/math/math.h>
 #include <mim/plug/mem/mem.h>
 
@@ -32,6 +33,7 @@ namespace mim::ll {
 
 namespace clos = mim::plug::clos;
 namespace core = mim::plug::core;
+namespace gpu  = mim::plug::gpu;
 namespace math = mim::plug::math;
 namespace mem  = mim::plug::mem;
 
@@ -73,8 +75,10 @@ const char* llvm_suffix(const Def* type) {
 // [%mem.M, T] => T
 // TODO there may be more instances where we have to deal with this trickery
 const Def* isa_mem_sigma_2(const Def* type) {
-    if (auto sigma = type->isa<Sigma>())
+    if (auto sigma = type->isa<Sigma>()) {
         if (sigma->num_ops() == 2 && Axm::isa<mem::M>(sigma->op(0))) return sigma->op(1);
+        if (sigma->num_ops() == 2 && Axm::isa<gpu::M>(sigma->op(0))) return sigma->op(1);
+    }
     return {};
 }
 } // namespace
@@ -98,9 +102,11 @@ std::string Emitter::id(const Def* def, bool force_bb /*= false*/) const {
 }
 
 std::string Emitter::convert(const Def* type) {
+    ILOG("FRIEDRICH trying to convert {}", type);
     if (auto i = types_.find(type); i != types_.end()) return i->second;
 
     assert(!Axm::isa<mem::M>(type));
+    assert(!Axm::isa<gpu::M>(type));
     std::ostringstream s;
     std::string name;
 
@@ -134,6 +140,7 @@ std::string Emitter::convert(const Def* type) {
             auto doms = pi->doms();
             for (auto sep = ""; auto dom : doms.view().rsubspan(1)) {
                 if (Axm::isa<mem::M>(dom)) continue;
+                if (Axm::isa<gpu::M>(dom)) continue;
                 s << sep << convert(dom);
                 sep = ", ";
             }
@@ -151,6 +158,7 @@ std::string Emitter::convert(const Def* type) {
         print(s, "{{");
         for (auto sep = ""; auto t : sigma->ops()) {
             if (Axm::isa<mem::M>(t)) continue;
+            if (Axm::isa<gpu::M>(t)) continue;
             s << sep << convert(t);
             sep = ", ";
         }
@@ -167,7 +175,7 @@ std::string Emitter::convert(const Def* type) {
 }
 
 std::string Emitter::convert_ret_pi(const Pi* pi) {
-    auto dom = mem::strip_mem_ty(pi->dom());
+    auto dom = gpu::strip_mem_ty(mem::strip_mem_ty(pi->dom()));
     if (dom == world().sigma()) return "void";
     return convert(dom);
 }
@@ -194,6 +202,7 @@ void Emitter::emit_imported(Lam* lam) {
     auto doms = lam->doms();
     for (auto sep = ""; auto dom : doms.view().rsubspan(1)) {
         if (Axm::isa<mem::M>(dom)) continue;
+        if (Axm::isa<gpu::M>(dom)) continue;
         print(func_decls_, "{}{}", sep, convert(dom));
         sep = ", ";
     }
@@ -207,6 +216,7 @@ std::string Emitter::prepare() {
     auto vars = root()->vars();
     for (auto sep = ""; auto var : vars.view().rsubspan(1)) {
         if (Axm::isa<mem::M>(var->type())) continue;
+        if (Axm::isa<gpu::M>(var->type())) continue;
         auto name    = id(var);
         locals_[var] = name;
         print(func_impls_, "{}{} {}", sep, convert(var->type()), name);
@@ -295,6 +305,7 @@ void Emitter::emit_epilogue(Lam* lam) {
                 if (auto arg = emit_unsafe(app->arg(n, i)); !arg.empty()) {
                     auto phi = callee->var(n, i);
                     assert(!Axm::isa<mem::M>(phi->type()));
+                    assert(!Axm::isa<gpu::M>(phi->type()));
                     lam2bb_[callee].phis[phi].emplace_back(arg, id(lam, true));
                     locals_[phi] = id(phi);
                 }
@@ -320,6 +331,7 @@ void Emitter::emit_epilogue(Lam* lam) {
             if (auto arg = emit_unsafe(app->arg(n, i)); !arg.empty()) {
                 auto phi = callee->var(n, i);
                 assert(!Axm::isa<mem::M>(phi->type()));
+                assert(!Axm::isa<gpu::M>(phi->type()));
                 lam2bb_[callee].phis[phi].emplace_back(arg, id(lam, true));
                 locals_[phi] = id(phi);
             }
@@ -356,6 +368,7 @@ void Emitter::emit_epilogue(Lam* lam) {
         DefVec types(num_vars);
         for (auto var : ret_lam->vars()) {
             if (Axm::isa<mem::M>(var->type())) continue;
+            if (Axm::isa<gpu::M>(var->type())) continue;
             values[n] = var;
             types[n]  = var->type();
             ++n;
@@ -371,6 +384,7 @@ void Emitter::emit_epilogue(Lam* lam) {
             for (size_t i = 0, e = ret_lam->num_vars(); i != e; ++i) {
                 auto phi = ret_lam->var(i);
                 if (Axm::isa<mem::M>(phi->type())) continue;
+                if (Axm::isa<gpu::M>(phi->type())) continue;
 
                 auto namei = name;
                 if (e > 2) {
@@ -378,6 +392,7 @@ void Emitter::emit_epilogue(Lam* lam) {
                     bb.tail("{} = extractvalue {} {}, {}", namei, t_ret, name, i - 1);
                 }
                 assert(!Axm::isa<mem::M>(phi->type()));
+                assert(!Axm::isa<gpu::M>(phi->type()));
                 lam2bb_[ret_lam].phis[phi].emplace_back(namei, id(lam, true));
                 locals_[phi] = id(phi);
             }
@@ -435,6 +450,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
     if (def->isa<Var>()) {
         auto ts = def->type()->projs();
         if (std::ranges::any_of(ts, [](auto t) { return Axm::isa<mem::M>(t); })) return {};
+        if (std::ranges::any_of(ts, [](auto t) { return Axm::isa<gpu::M>(t); })) return {};
         return emit_tuple(def);
     }
 
@@ -481,6 +497,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         return "undef";
     } else if (auto top = def->isa<Top>()) {
         if (Axm::isa<mem::M>(top->type())) return {};
+        if (Axm::isa<gpu::M>(top->type())) return {};
         // bail out to error below
     } else if (auto tuple = def->isa<Tuple>()) {
         return emit_tuple(tuple);
@@ -501,13 +518,17 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         // this exact location is important: after emitting the tuple -> ordering of mem ops
         // before emitting the index, as it might be a weird value for mem vars.
         if (Axm::isa<mem::M>(extract->type())) return {};
+        if (Axm::isa<gpu::M>(extract->type())) return {};
 
         auto t_tup = convert(tuple->type());
         if (auto li = Lit::isa(index)) {
             if (isa_mem_sigma_2(tuple->type())) return v_tup;
             // Adjust index, if mem is present.
-            auto v_i = Axm::isa<mem::M>(tuple->proj(0)->type()) ? std::to_string(*li - 1) : std::to_string(*li);
-            return bb.assign(name, "extractvalue {} {}, {}", t_tup, v_tup, v_i);
+            auto li_v = *li;
+            if (Axm::isa<mem::M>(tuple->proj(0)->type())) li_v--;
+            if (Axm::isa<gpu::M>(tuple->proj(0)->type())) li_v--;
+            auto v_i = std::to_string(li_v);
+            return bb.assign(name, "extractvalue {} {}, {}", t_tup, v_tup, li_v);
         }
 
         auto t_elem     = convert(extract->type());
@@ -521,6 +542,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         return bb.assign(name, "load {}, {}* {}.gep", t_elem, t_elem, name);
     } else if (auto insert = def->isa<Insert>()) {
         assert(!Axm::isa<mem::M>(insert->tuple()->proj(0)->type()));
+        assert(!Axm::isa<gpu::M>(insert->tuple()->proj(0)->type()));
         auto t_tup = convert(insert->tuple()->type());
         auto t_val = convert(insert->value()->type());
         auto v_tup = emit(insert->tuple());
@@ -762,6 +784,11 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         bb.assign(name + "i8", "call i8* @malloc(i64 {})", size);
         return bb.assign(name, "bitcast i8* {} to {}", name + "i8", ptr_t);
     } else if (auto free = Axm::isa<mem::free>(def)) {
+        auto [Ta, msi]             = free->uncurry_args<2>();
+        auto [pointee, addr_space] = Ta->projs<2>();
+        auto address_space         = Lit::as<mem::AddrSpace>(addr_space);
+        if (address_space != plug::mem::AddrSpace::Generic) return as_device_intrinsic(bb, def);
+
         declare("void @free(i8*)");
         emit_unsafe(free->arg(0));
         auto ptr   = emit(free->arg(1));

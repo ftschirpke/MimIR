@@ -61,7 +61,7 @@ public:
     void emit_imported(Lam*);
     void emit_epilogue(Lam*);
     std::string emit_bb(BB&, const Def*);
-    std::string prepare();
+    virtual std::string prepare();
     void finalize();
 
     virtual std::optional<std::string> isa_device_intrinsic(BB&, const Def*) { return std::nullopt; }
@@ -85,7 +85,6 @@ protected:
     std::string convert(const Def*);
     std::string convert_ret_pi(const Pi*);
 
-private:
     absl::btree_set<std::string> decls_;
     std::ostringstream type_decls_;
     std::ostringstream vars_decls_;

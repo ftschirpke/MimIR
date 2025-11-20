@@ -6,7 +6,8 @@ class World;
 
 namespace ll::nvptx {
 
-void emit(World&, std::ostream&);
+void emit_host(World&, std::ostream&);
+void emit_device(World&, std::ostream&);
 
 } // namespace ll::nvptx
 

@@ -211,7 +211,7 @@ int main(int argc, char** argv) {
                         plugin_name  = "core";
                         break;
                     case NVPTX:
-                        backend_name = "ll-nvptx";
+                        backend_name = "ll-host-nvptx";
                         plugin_name  = "nvptx";
                         break;
                     case Num_DeviceTargets: fe::unreachable();
@@ -219,15 +219,24 @@ int main(int argc, char** argv) {
                 if (auto backend = driver.backend(backend_name))
                     backend(world, *s);
                 else
-                    error("'ll' emitter not loaded; try loading '{}' plugin", plugin_name);
+                    error("'{}' emitter not loaded; try loading '{}' plugin", backend_name, plugin_name);
             }
 
             if (auto s = os[DvLL]) {
+                const char* backend_name;
+                const char* plugin_name;
                 switch (device_target_names[device_target_name]) {
                     case None: error("no device target chosen; cannot compile device code to LLVM"); break;
-                    case NVPTX: error("'nvptx-ll' emitter not implemented yet"); break;
+                    case NVPTX:
+                        backend_name = "ll-dev-nvptx";
+                        plugin_name  = "nvptx";
+                        break;
                     case Num_DeviceTargets: fe::unreachable();
                 }
+                if (auto backend = driver.backend(backend_name))
+                    backend(world, *s);
+                else
+                    error("'{}' emitter not loaded; try loading '{}' plugin", backend_name, plugin_name);
             }
         } catch (const Error& e) { // e.loc.path doesn't exist anymore in outer scope so catch Error here
             std::cerr << e;
