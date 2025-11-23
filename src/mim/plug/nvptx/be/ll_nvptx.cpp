@@ -113,10 +113,6 @@ static bool is_gpu_type(const Def* type) {
 }
 
 bool Emitter::is_to_emit() {
-    ILOG("FRIEDRICH --- {} ---", root());
-    ILOG("FRIEDRICH root vars {}", root()->vars());
-    for (auto var : root()->vars())
-        ILOG("FRIEDRICH var  {} : {} -> is gpu? {}", var, var->type(), is_gpu_type(var->type()));
     bool is_gpu_code = std::ranges::any_of(root()->vars(), [](auto var) { return is_gpu_type(var->type()); });
     switch (target) {
         case Target::Host: return !is_gpu_code;

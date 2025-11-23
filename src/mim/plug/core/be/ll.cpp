@@ -102,7 +102,6 @@ std::string Emitter::id(const Def* def, bool force_bb /*= false*/) const {
 }
 
 std::string Emitter::convert(const Def* type) {
-    ILOG("FRIEDRICH trying to convert {}", type);
     if (auto i = types_.find(type); i != types_.end()) return i->second;
 
     assert(!Axm::isa<mem::M>(type));
