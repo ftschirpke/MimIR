@@ -4,6 +4,8 @@
 #include <optional>
 #include <ostream>
 
+#include <absl/container/btree_set.h>
+
 #include "mim/be/emitter.h"
 
 namespace mim {
