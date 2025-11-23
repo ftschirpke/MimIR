@@ -153,17 +153,17 @@ int main(int argc, char** argv) {
             auto parser = ast::Parser(ast);
             ast::Ptrs<ast::Import> imports;
 
-            if (!flags.bootstrap) {
-                plugins.insert(plugins.begin(), "compile"s);
-                if (opt >= 2) plugins.emplace_back("opt"s);
-            }
-
             if (!device_target_names.contains(device_target_name))
                 error("invalid device target name '{}'", device_target_name);
             switch (device_target_names[device_target_name]) {
                 case None: break;
                 case NVPTX: plugins.emplace_back("nvptx"s); break;
                 case Num_DeviceTargets: fe::unreachable();
+            }
+
+            if (!flags.bootstrap) {
+                plugins.insert(plugins.begin(), "compile"s);
+                if (opt >= 2) plugins.emplace_back("opt"s);
             }
 
             for (const auto& plugin : plugins) {

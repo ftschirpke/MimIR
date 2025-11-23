@@ -15,6 +15,7 @@ import autodiff;
 import clos;
 import direct;
 import matrix;
+import nvptx;
 import refly;
 import regex;
 ///
@@ -57,6 +58,11 @@ lam extern _default_compile (): %compile.Phase =
             %compile.phases ff (
                 matrix_lower_phase,
                 cond_phase "direct" direct_phases,
+            )
+        ),
+        cond_phase "nvptx" (
+            %compile.phases ff (
+                %nvptx.cuda_setup_cleanup,
             )
         ),
         cond_phase "affine" %affine.lower_for_phase,

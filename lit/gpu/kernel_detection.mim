@@ -12,20 +12,12 @@ plugin nvptx;
 con extern kernel [mem: %gpu.M, warp_id: Idx 4, thread_id: Idx 4, data: I32, return: Cn %gpu.M] =
     return mem;
 
-fun foo(mem: %mem.M, d: [I64, I32, I32]): [%mem.M, I32] =
-    let (_, x, y) = d;
-    return (mem, %core.wrap.add 0 (x, y));
-
 con extern main [mem: %mem.M, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0), return: Cn [%mem.M, I32]] =
-    let (mem, data) = %mem.alloc («32; I8», 0) (mem);
-    let (mem, ctx_ptr, mod_ptr) = %nvptx.setup(mem, 0I32, data);
     let (mem, ptr) = %mem.malloc (I32, 0) (mem, 4);
-    ret (mem, argc) = foo $ (mem, (42I64, argc, 1I32));
     let mem = %mem.store (mem, ptr, argc);
     let (mem, d_ptr) = %mem.malloc (I32, 1) (mem, 4);
     let mem = %gpu.copy_mem_to_device (mem, ptr, d_ptr);
     let mem = %gpu.launch (mem, 4, 4, kernel, argc);
     let (mem, val) = %mem.load (mem, ptr);
     let mem = %mem.free (mem, ptr);
-    let mem = %nvptx.cleanup (ctx_ptr, mod_ptr);
     return (mem, val);

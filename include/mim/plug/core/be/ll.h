@@ -61,7 +61,7 @@ public:
     bool is_valid(std::string_view s) { return !s.empty(); }
     void start() override;
     void emit_imported(Lam*);
-    void emit_epilogue(Lam*);
+    virtual void emit_epilogue(Lam*);
     std::string emit_bb(BB&, const Def*);
     virtual std::string prepare();
     void finalize();

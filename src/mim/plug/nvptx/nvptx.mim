@@ -60,3 +60,4 @@ con %nvptx.cleanup (mem: %mem.M, ctx_ptr: %mem.Ptr0 %nvptx._cuContext, mod_ptr: 
     let (mem, _) = %nvptx._cuCtxDestroy (mem, ctx);
     return mem;
 
+axm %nvptx.cuda_setup_cleanup: %compile.Phase;
