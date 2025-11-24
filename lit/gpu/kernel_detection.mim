@@ -9,7 +9,7 @@ plugin core;
 plugin gpu;
 plugin nvptx;
 
-con extern kernel [mem: %gpu.M, warp_id: Idx 4, thread_id: Idx 4, data: I32, return: Cn %gpu.M] =
+con extern kernel [mem: %gpu.M, warp_id: Idx 4, thread_id: Idx 4, data: %gpu.GlobalPtr I32, return: Cn %gpu.M] =
     return mem;
 
 con extern main [mem: %mem.M, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0), return: Cn [%mem.M, I32]] =
@@ -17,7 +17,9 @@ con extern main [mem: %mem.M, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («
     let mem = %mem.store (mem, ptr, argc);
     let (mem, d_ptr) = %mem.malloc (I32, 1) (mem, 4);
     let mem = %gpu.copy_mem_to_device (mem, ptr, d_ptr);
-    let mem = %gpu.launch (mem, 4, 4, kernel, argc);
+    let mem = %gpu.launch (mem, 4, 4, kernel, d_ptr);
+    let mem = %mem.store (mem, ptr, 0I32);
+    let mem = %gpu.copy_mem_to_host (mem, d_ptr, ptr);
     let (mem, val) = %mem.load (mem, ptr);
     let mem = %mem.free (mem, ptr);
     return (mem, val);

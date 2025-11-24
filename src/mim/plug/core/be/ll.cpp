@@ -122,8 +122,12 @@ std::string Emitter::convert(const Def* type) {
         }
     } else if (auto ptr = Axm::isa<mem::Ptr>(type)) {
         auto [pointee, addr_space] = ptr->args<2>();
-        // TODO addr_space
-        print(s, "{}*", convert(pointee));
+        auto lit                   = Lit::isa(addr_space);
+        if (lit.value_or(0L) == 0)
+            // TODO: print addrspace for zero as well?=
+            print(s, "{}*", convert(pointee));
+        else
+            print(s, "{} addrspace({})*", convert(pointee), addr_space);
     } else if (auto arr = type->isa<Arr>()) {
         auto t_elem = convert(arr->body());
         u64 size    = 0;

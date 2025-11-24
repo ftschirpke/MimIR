@@ -37,11 +37,12 @@ $mim $test_path \
     ${@:2} \
     || error "mim step"
 
-echo; echo "-----"; echo
+echo
+echo "-----  HOST LLVM  -----";
 [[ -f $host_ll_path ]] && cat $host_ll_path
-echo; echo "-----"; echo
+echo "----- DEVICE LLVM -----";
 [[ -f $dev_ll_path ]] && cat $dev_ll_path
-echo; echo "-----"; echo
+echo "-----------------------";
 
 llc -filetype=obj -relocation-model=pic $host_ll_path -o $hostobj_path || error "host object"
 

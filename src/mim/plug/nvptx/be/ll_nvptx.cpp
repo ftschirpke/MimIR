@@ -211,11 +211,8 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         // TODO: reconsider using:  emit_cu_error_handling(bb, alloc_res);
         auto raw_ptr = bb.assign(name + "i64raw", "load i64, i64* {}", alloc_ptr);
         auto ok      = bb.assign(name + "ok", "icmp eq i32 {}, 0", alloc_res);
-
-        // auto ptr_i64 = bb.assign(name + "i64", "select i1 {}, i64 {}, i64 0", ok, raw_ptr);
-        // return bb.assign(name, "inttoptr i64 {} to {}", ptr_i64, ptr_t);
-
-        return bb.assign(name, "select i1 {}, i64 {}, i64 0", ok, raw_ptr);
+        auto ptr_i64 = bb.assign(name + "i64", "select i1 {}, i64 {}, i64 0", ok, raw_ptr);
+        return bb.assign(name, "inttoptr i64 {} to {}", ptr_i64, ptr_t);
     } else if (auto free = Axm::isa<mem::free>(def)) {
         auto [Ta, msi]             = free->uncurry_args<2>();
         auto [pointee, addr_space] = Ta->projs<2>();
@@ -247,12 +244,13 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         auto type_size = w.call(core::trait::size, type);
 
         emit_unsafe(copy_mem_to_device->arg(0));
-        auto host_ptr = emit(copy_mem_to_device->arg(1));
-        auto dev_ptr  = emit(copy_mem_to_device->arg(2));
-        auto size     = emit(w.lit_nat(Lit::as(type_size)));
+        auto host_ptr    = emit(copy_mem_to_device->arg(1));
+        auto dev_ptr     = emit(copy_mem_to_device->arg(2));
+        auto size        = emit(w.lit_nat(Lit::as(type_size)));
+        auto dev_ptr_i64 = bb.assign(name + "i64", "ptrtoint ptr addrspace(1) {} to i64", dev_ptr);
 
         auto copy_res
-            = bb.assign(name + "res", "call i32 @cuMemcpyHtoD_v2(i64 {}, ptr {}, i64 {})", dev_ptr, host_ptr, size);
+            = bb.assign(name + "res", "call i32 @cuMemcpyHtoD_v2(i64 {}, ptr {}, i64 {})", dev_ptr_i64, host_ptr, size);
         emit_cu_error_handling(bb, copy_res);
         return copy_res;
     } else if (auto copy_mem_to_host = Axm::isa<gpu::copy_mem_to_host>(def)) {
@@ -263,12 +261,13 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         auto type_size = w.call(core::trait::size, type);
 
         emit_unsafe(copy_mem_to_host->arg(0));
-        auto dev_ptr  = emit(copy_mem_to_host->arg(1));
-        auto host_ptr = emit(copy_mem_to_host->arg(2));
-        auto size     = emit(w.lit_nat(Lit::as(type_size)));
+        auto dev_ptr     = emit(copy_mem_to_host->arg(1));
+        auto host_ptr    = emit(copy_mem_to_host->arg(2));
+        auto size        = emit(w.lit_nat(Lit::as(type_size)));
+        auto dev_ptr_i64 = bb.assign(name + "i64", "ptrtoint ptr addrspace(1) {} to i64", dev_ptr);
 
         auto copy_res
-            = bb.assign(name + "res", "call i32 @cuMemcpyDtoH_v2(ptr {}, i64 {}, i64 {})", host_ptr, dev_ptr, size);
+            = bb.assign(name + "res", "call i32 @cuMemcpyDtoH_v2(ptr {}, i64 {}, i64 {})", host_ptr, dev_ptr_i64, size);
         emit_cu_error_handling(bb, copy_res);
         return copy_res;
     } else if (auto launch = Axm::isa<gpu::launch>(def)) {
@@ -356,10 +355,12 @@ std::string DeviceEmitter::prepare() {
         }
         {
             // TODO: remove, just for demonstration purposes
-            // declare("i32 @printf(ptr, ...)");
+            // declare("i32 @vprintf(ptr, ptr)");
             // print(vars_decls_, "@welcome_message = private constant [13 x i8] c\"hi from t %d\\00\"\n");
             // auto thread_id = id(root()->var(2));
-            // print(bb.body().emplace_back(), "call i32 @printf(ptr @welcome_message, i32 {})", thread_id);
+            // auto buf       = bb.assign("%buf", "alloca i32");
+            // print(bb.body().emplace_back(), "store i32 {}, i32* {}", thread_id, buf);
+            // print(bb.body().emplace_back(), "call i32 @vprintf(ptr @welcome_message, ptr {})", buf);
         }
     }
 
