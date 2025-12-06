@@ -124,7 +124,7 @@ std::string Emitter::convert(const Def* type) {
         auto [pointee, addr_space] = ptr->args<2>();
         auto lit                   = Lit::isa(addr_space);
         if (lit.value_or(0L) == 0)
-            // TODO: print addrspace for zero as well?=
+            // TODO: print addrspace for zero as well?
             print(s, "{}*", convert(pointee));
         else
             print(s, "{} addrspace({})*", convert(pointee), addr_space);

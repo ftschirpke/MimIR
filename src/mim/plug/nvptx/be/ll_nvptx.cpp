@@ -25,9 +25,7 @@ public:
     using Super = mim::ll::Emitter;
 
     HostEmitter(World& world, std::ostream& ostream)
-        : Super(world, "llvm_nvptx_host_emitter", ostream)
-        , ctx_name(std::nullopt)
-        , mod_name(std::nullopt) {}
+        : Super(world, "llvm_nvptx_host_emitter", ostream) {}
 
     bool is_to_emit() override;
 
@@ -38,8 +36,8 @@ public:
     std::optional<std::string> isa_device_intrinsic(BB&, const Def*) override;
 
 private:
-    std::optional<std::string> ctx_name;
-    std::optional<std::string> mod_name;
+    static constexpr std::string_view ctx_name = "@mimir_cu_ctx";
+    static constexpr std::string_view mod_name = "@mimir_cu_mod";
     LamMap<int> kernel_ids;
 };
 
@@ -89,16 +87,12 @@ void HostEmitter::start() {
     for (auto mut : world().externals()) {
         if (auto lam = Lam::isa_mut_cn(mut.second)) {
             if (is_kernel(lam)) {
-                ILOG("FRIEDRICH detected kernel '{}'", lam);
                 assert(!kernel_ids.contains(lam));
-                auto id         = kernel_ids.size();
-                kernel_ids[lam] = id;
-                auto name       = lam->unique_name();
-                print(vars_decls_, "@.kname.{} = private constant [{} x i8] c\"{}\\00\"\n", id, name.size() + 1, name);
-            } else if (id(lam) == "@main")
-                ILOG("FRIEDRICH found main '{}'", lam);
-            else
-                ILOG("FRIEDRICH uncategorized '{}'", lam);
+                auto kid        = kernel_ids.size();
+                kernel_ids[lam] = kid;
+                auto name       = id(lam).substr(1);
+                print(vars_decls_, "@.kname.{} = private constant [{} x i8] c\"{}\\00\"\n", kid, name.size() + 1, name);
+            }
         }
     }
     Super::start();
@@ -124,35 +118,24 @@ std::string HostEmitter::prepare() {
     auto init_res = bb.assign(vname + "_init_res", "call i32 @cuInit(i32 0)");
     emit_cu_error_handling(bb, init_res);
 
-    declare("i32 @cuDeviceGetCount(ptr)");
-    auto dev_count_ptr = bb.assign(vname + "_dev_count_ptr", "alloca i32");
-    print(bb.body().emplace_back(), "store i32 0, ptr {}", dev_count_ptr);
-    auto count_res = bb.assign(vname + "_count_res", "call i32 @cuDeviceGetCount(ptr {})", dev_count_ptr);
-    emit_cu_error_handling(bb, count_res);
-
     declare("i32 @cuDeviceGet(ptr, i32)");
-    auto dev_ptr = bb.assign(vname + "_dev_ptr", "alloca i32");
-    print(bb.body().emplace_back(), "store i32 0, ptr {}", dev_count_ptr);
+    auto dev_ptr     = bb.assign(vname + "_dev_ptr", "alloca i32");
     auto dev_get_res = bb.assign(vname + "_get_res", "call i32 @cuDeviceGet(ptr {}, i32 {})", dev_ptr, dev_num);
     emit_cu_error_handling(bb, dev_get_res);
 
     declare("i32 @cuCtxCreate_v4(ptr, ptr, i32, i32)");
-    auto ctx_ptr = bb.assign(vname + "_ctx_ptr", "alloca ptr");
-    print(bb.body().emplace_back(), "store ptr null, ptr {}", ctx_ptr);
+    print(vars_decls_, "{} = global ptr null\n", ctx_name);
     auto dev     = bb.assign(vname + "_dev", "load i32, ptr {}", dev_ptr);
-    auto ctx_res = bb.assign(vname + "_ctx_res", "call i32 @cuCtxCreate_v4(ptr {}, ptr null, i32 {}, i32 {})", ctx_ptr,
+    auto ctx_res = bb.assign(vname + "_ctx_res", "call i32 @cuCtxCreate_v4(ptr {}, ptr null, i32 {}, i32 {})", ctx_name,
                              ctx_flags, dev);
     emit_cu_error_handling(bb, ctx_res);
-    ctx_name = ctx_ptr;
 
     // TODO: instead, load module using:  declare("i32 @cuModuleLoadFatBinary(ptr, ptr)");
     declare("i32 @cuModuleLoad(ptr, ptr)");
-    auto mod_ptr = bb.assign(vname + "_mod_ptr", "alloca ptr");
-    print(bb.body().emplace_back(), "store ptr null, ptr {}", mod_ptr);
+    print(vars_decls_, "{} = global ptr null\n", mod_name);
     print(vars_decls_, "@fatbin_fname = private constant [13 x i8] c\"mimir.fatbin\\00\"\n");
-    auto mod_res = bb.assign(vname + "_mod_res", "call i32 @cuModuleLoad(ptr {}, ptr {})", mod_ptr, "@fatbin_fname");
+    auto mod_res = bb.assign(vname + "_mod_res", "call i32 @cuModuleLoad(ptr {}, ptr {})", mod_name, "@fatbin_fname");
     emit_cu_error_handling(bb, mod_res);
-    mod_name = mod_ptr;
 
     return name;
 }
@@ -163,20 +146,15 @@ void HostEmitter::emit_epilogue(Lam* lam) {
         auto name = "%" + lam->unique_name();
         auto& bb  = lam2bb_[lam];
 
-        if (mod_name.has_value()) {
-            declare("i32 @cuModuleUnload(ptr)");
-            auto mod            = bb.assign(name + "_mod", "load ptr, ptr {}", mod_name.value());
-            auto mod_unload_res = bb.assign(name + "_mod_unload_res", "call i32 @cuModuleUnload(ptr {})", mod);
-            emit_cu_error_handling(bb, mod_unload_res);
-            mod_name = std::nullopt;
-        }
-        if (ctx_name.has_value()) {
-            declare("i32 @cuCtxDestroy_v2(ptr)");
-            auto ctx             = bb.assign(name + "_ctx", "load ptr, ptr {}", ctx_name.value());
-            auto ctx_destroy_res = bb.assign(name + "_ctx_destroy_res", "call i32 @cuCtxDestroy_v2(ptr {})", ctx);
-            emit_cu_error_handling(bb, ctx_destroy_res);
-            ctx_name = std::nullopt;
-        }
+        declare("i32 @cuModuleUnload(ptr)");
+        auto mod            = bb.assign(name + "_mod", "load ptr, ptr {}", mod_name);
+        auto mod_unload_res = bb.assign(name + "_mod_unload_res", "call i32 @cuModuleUnload(ptr {})", mod);
+        emit_cu_error_handling(bb, mod_unload_res);
+
+        declare("i32 @cuCtxDestroy_v2(ptr)");
+        auto ctx             = bb.assign(name + "_ctx", "load ptr, ptr {}", ctx_name);
+        auto ctx_destroy_res = bb.assign(name + "_ctx_destroy_res", "call i32 @cuCtxDestroy_v2(ptr {})", ctx);
+        emit_cu_error_handling(bb, ctx_destroy_res);
     }
 }
 
@@ -208,10 +186,8 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         auto ptr_t = convert(Axm::as<mem::Ptr>(def->proj(1)->type()));
 
         auto alloc_res = bb.assign(name + "res", "call i32 @cuMemAlloc_v2(ptr {}, i64 {})", alloc_ptr, size);
-        // TODO: reconsider using:  emit_cu_error_handling(bb, alloc_res);
-        auto raw_ptr = bb.assign(name + "i64raw", "load i64, i64* {}", alloc_ptr);
-        auto ok      = bb.assign(name + "ok", "icmp eq i32 {}, 0", alloc_res);
-        auto ptr_i64 = bb.assign(name + "i64", "select i1 {}, i64 {}, i64 0", ok, raw_ptr);
+        emit_cu_error_handling(bb, alloc_res);
+        auto ptr_i64 = bb.assign(name + "i64", "load i64, i64* {}", alloc_ptr);
         return bb.assign(name, "inttoptr i64 {} to {}", ptr_i64, ptr_t);
     } else if (auto free = Axm::isa<mem::free>(def)) {
         auto [Ta, msi]             = free->uncurry_args<2>();
@@ -231,9 +207,11 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         declare("i32 @cuMemFree_v2(i64)");
 
         emit_unsafe(free->arg(0));
-        auto ptr = emit(free->arg(1));
+        auto ptr   = emit(free->arg(1));
+        auto ptr_t = convert(free->arg(1)->type());
 
-        auto free_res = bb.assign(name + "res", "call i32 @cuMemFree_v2(i64 {})", ptr);
+        auto ptr_i64  = bb.assign(name + "i64", "ptrtoint {} {} to i64", ptr_t, ptr);
+        auto free_res = bb.assign(name + "res", "call i32 @cuMemFree_v2(i64 {})", ptr_i64);
         emit_cu_error_handling(bb, free_res);
         return free_res;
     } else if (auto copy_mem_to_device = Axm::isa<gpu::copy_mem_to_device>(def)) {
@@ -246,8 +224,9 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         emit_unsafe(copy_mem_to_device->arg(0));
         auto host_ptr    = emit(copy_mem_to_device->arg(1));
         auto dev_ptr     = emit(copy_mem_to_device->arg(2));
+        auto dev_ptr_t   = convert(copy_mem_to_device->arg(2)->type());
         auto size        = emit(w.lit_nat(Lit::as(type_size)));
-        auto dev_ptr_i64 = bb.assign(name + "i64", "ptrtoint ptr addrspace(1) {} to i64", dev_ptr);
+        auto dev_ptr_i64 = bb.assign(name + "i64", "ptrtoint {} {} to i64", dev_ptr_t, dev_ptr);
 
         auto copy_res
             = bb.assign(name + "res", "call i32 @cuMemcpyHtoD_v2(i64 {}, ptr {}, i64 {})", dev_ptr_i64, host_ptr, size);
@@ -262,23 +241,21 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
 
         emit_unsafe(copy_mem_to_host->arg(0));
         auto dev_ptr     = emit(copy_mem_to_host->arg(1));
+        auto dev_ptr_t   = convert(copy_mem_to_host->arg(1)->type());
         auto host_ptr    = emit(copy_mem_to_host->arg(2));
         auto size        = emit(w.lit_nat(Lit::as(type_size)));
-        auto dev_ptr_i64 = bb.assign(name + "i64", "ptrtoint ptr addrspace(1) {} to i64", dev_ptr);
+        auto dev_ptr_i64 = bb.assign(name + "i64", "ptrtoint {} {} to i64", dev_ptr_t, dev_ptr);
 
         auto copy_res
             = bb.assign(name + "res", "call i32 @cuMemcpyDtoH_v2(ptr {}, i64 {}, i64 {})", host_ptr, dev_ptr_i64, size);
         emit_cu_error_handling(bb, copy_res);
         return copy_res;
     } else if (auto launch = Axm::isa<gpu::launch>(def)) {
-        if (!ctx_name.has_value() || !mod_name.has_value())
-            error("Cannot launch a kernel without established CUDA context and module");
-
         declare("i32 @cuLaunchKernel(ptr, i32, i32, i32, i32, i32, i32, i32, ptr, ptr, ptr)");
 
         emit_unsafe(launch->arg(0));
         auto n_warps   = emit(launch->arg(1));
-        auto n_threads = emit(launch->arg(1));
+        auto n_threads = emit(launch->arg(2));
         auto func      = emit(launch->arg(3));
         auto arg       = emit(launch->arg(4));
         auto arg_type  = convert(launch->arg(4)->type());
@@ -290,19 +267,27 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         if (!kernel_ids.contains(lam)) error("unknown kernel {}", lam);
         auto kid = kernel_ids[lam];
 
+        auto mod_inner = bb.assign("%mod_inner", "load ptr, ptr {}", mod_name);
+
         auto func_ptr = bb.assign(name + "_funcptr", "alloca ptr");
         auto func_res = bb.assign(name + "_getfuncres", "call i32 @cuModuleGetFunction(ptr {}, ptr {}, ptr @.kname.{})",
-                                  func_ptr, mod_name.value(), kid);
+                                  func_ptr, mod_inner, kid);
         emit_cu_error_handling(bb, func_res);
 
-        auto args_ptr = bb.assign(name + "_args_ptr", "alloca ptr");
-        print(bb.body().emplace_back(), "store {} {}, ptr {}", arg_type, arg, args_ptr);
+        auto arg_wrap = bb.assign(name + "_arg_wrap", "alloca {}", arg_type);
+        print(bb.body().emplace_back(), "store {} {}, ptr {}", arg_type, arg, arg_wrap);
+
+        auto args_ptr = bb.assign(name + "_args_ptr", "alloca [1 x ptr]");
+        print(bb.body().emplace_back(), "store ptr {}, ptr {}", arg_wrap, args_ptr);
         auto shared_mem_bytes = 0;      // TODO: add shared memory support
         auto stream           = "null"; // TODO: add support for CUDA streams
-        auto launch_res       = bb.assign(name,
-                                          "call i32 @cuLaunchKernel(ptr {}, i32 {}, i32 1, i32 1, i32 {}, i32 1, i32 1,"
-                                                "i32 {}, ptr {}, ptr {}, ptr null)",
-                                          func_ptr, n_warps, n_threads, shared_mem_bytes, stream, args_ptr);
+        auto func_inner       = bb.assign(name + "_func_inner", "load ptr, ptr {}", func_ptr);
+        auto args_inner
+            = bb.assign(name + "_args_inner", "getelementptr inbounds [1 x ptr], ptr {}, i64 0, i64 0", args_ptr);
+        auto launch_res = bb.assign(name,
+                                    "call i32 @cuLaunchKernel(ptr {}, i32 {}, i32 1, i32 1, i32 {}, i32 1, i32 1,"
+                                    "i32 {}, ptr {}, ptr {}, ptr null)",
+                                    func_inner, n_warps, n_threads, shared_mem_bytes, stream, args_inner);
         emit_cu_error_handling(bb, launch_res);
         return launch_res;
     }
@@ -353,21 +338,37 @@ std::string DeviceEmitter::prepare() {
             declare("i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
             bb.assign(name, "call i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
         }
-        {
-            // TODO: remove, just for demonstration purposes
-            // declare("i32 @vprintf(ptr, ptr)");
-            // print(vars_decls_, "@welcome_message = private constant [13 x i8] c\"hi from t %d\\00\"\n");
-            // auto thread_id = id(root()->var(2));
-            // auto buf       = bb.assign("%buf", "alloca i32");
-            // print(bb.body().emplace_back(), "store i32 {}, i32* {}", thread_id, buf);
-            // print(bb.body().emplace_back(), "call i32 @vprintf(ptr @welcome_message, ptr {})", buf);
-        }
+        // {
+        //     // TODO: remove, just for demonstration purposes
+        //     declare("i32 @vprintf(ptr, ptr)");
+        //     auto printf_arg      = id(root()->var(2));
+        //     auto printf_arg_type = "i32";
+        //     print(type_decls_, "%printf_args = type {{ {} }}\n", printf_arg_type);
+        //     print(vars_decls_, "@welcome_message = private constant [15 x i8] c\"hi from t %2d\\0A\\00\"\n");
+        //     auto printf_arg_buf       = bb.assign("%printf_buf", "alloca %printf_args");
+        //     auto printf_arg_buf_inner = bb.assign(
+        //         "%printf_args_inner", "getelementptr inbounds %printf_args, ptr {}, i32 0, i32 0", printf_arg_buf);
+        //     print(bb.body().emplace_back(), "store {} {}, ptr {}", printf_arg_type, printf_arg,
+        //     printf_arg_buf_inner); print(bb.body().emplace_back(), "call i32 @vprintf(ptr @welcome_message, ptr {})",
+        //     printf_arg_buf);
+        // }
     }
 
     return root()->unique_name();
 }
 
-std::optional<std::string> DeviceEmitter::isa_device_intrinsic(BB& bb, const Def* def) { return std::nullopt; }
+std::optional<std::string> DeviceEmitter::isa_device_intrinsic(BB& bb, const Def* def) {
+    if (auto store = Axm::isa<gpu::store>(def)) {
+        emit_unsafe(store->arg(0));
+        auto v_ptr = emit(store->arg(1));
+        auto v_val = emit(store->arg(2));
+        auto t_ptr = convert(store->arg(1)->type());
+        auto t_val = convert(store->arg(2)->type());
+        print(bb.body().emplace_back(), "store {} {}, {} {}", t_val, v_val, t_ptr, v_ptr);
+        return "";
+    }
+    return std::nullopt;
+}
 
 void emit_host(World& world, std::ostream& ostream) {
     HostEmitter emitter(world, ostream);

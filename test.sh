@@ -38,12 +38,12 @@ $mim $test_path \
     || error "mim step"
 
 echo
-echo "-----  HOST LLVM  -----";
+echo "-----  HOST LLVM  -----"
 [[ -f $host_ll_path ]] && cat $host_ll_path
-echo "----- DEVICE LLVM -----";
+echo "----- DEVICE LLVM -----"
 [[ -f $dev_ll_path ]] && cat $dev_ll_path
-echo "-----------------------";
 
+echo "----- COMPILATION -----"
 llc -filetype=obj -relocation-model=pic $host_ll_path -o $hostobj_path || error "host object"
 
 clang $hostobj_path -o $hostbin_path -lcuda || error "host binary"
@@ -53,3 +53,11 @@ llc -march=nvptx64 -mcpu=sm_89 $dev_ll_path -o $ptx_path || error "llc step"
 /opt/cuda/bin/ptxas -arch=sm_89 $ptx_path -o $cubin_path || error "ptxas step"
 
 /opt/cuda/bin/nvcc -fatbin $cubin_path -o $fatbin -arch=sm_89 || error "fatbin step"
+
+echo "----- EXECUTE BIN -----"
+args="2 3 4 5 6"
+echo "$hostbin_path with args = '$args'"
+echo ">>>"
+./$hostbin_path $args
+echo "<<< rv = $(echo $?)"
+echo "-----------------------"

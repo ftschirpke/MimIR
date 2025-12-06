@@ -9,13 +9,13 @@ void CudaSetupCleanup::rewrite_external(Def* def) {
     auto new_def = rewrite(def)->as_mut();
     if (def->is_external() && !new_def->is_external()) new_def->externalize();
     if (!lam) return;
-    ILOG("FRIEDRICH checking {}", def);
+    // ILOG("FRIEDRICH checking {}", def);
     if (lam->sym().str() != "main") return;
-    ILOG("FRIEDRICH rewriting {}", def);
+    // ILOG("FRIEDRICH rewriting {}", def);
 
     assert(lam->is_set());
-    ILOG("FRIEDRICH body {}", lam->body());
-    ILOG("FRIEDRICH filter {}", lam->filter());
+    // ILOG("FRIEDRICH body {}", lam->body());
+    // ILOG("FRIEDRICH filter {}", lam->filter());
 
     // TODO: use this phase to implement the setup and cleanup phases
 }
