@@ -84,7 +84,7 @@ protected:
         : Super(world, std::move(name), ostream) {}
 
     std::string id(const Def*, bool force_bb = false) const;
-    std::string convert(const Def*);
+    virtual std::string convert(const Def*);
     std::string convert_ret_pi(const Pi*);
 
     absl::btree_set<std::string> decls_;

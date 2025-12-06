@@ -8,6 +8,8 @@
 #include <mim/plug/mem/mem.h>
 #include <mim/plug/nvptx/nvptx.h>
 
+#include "mim/util/print.h"
+
 #include "absl/container/flat_hash_map.h"
 
 using namespace std::string_literals;
@@ -36,6 +38,8 @@ public:
     std::optional<std::string> isa_device_intrinsic(BB&, const Def*) override;
 
 private:
+    std::string convert(const Def*) override;
+
     static constexpr std::string_view ctx_name = "@mimir_cu_ctx";
     static constexpr std::string_view mod_name = "@mimir_cu_mod";
     LamMap<int> kernel_ids;
@@ -180,15 +184,13 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         declare("i32 @cuMemAlloc_v2(ptr, i64)");
 
         emit_unsafe(malloc->arg(0));
-        auto alloc_ptr = bb.assign(name + "ptr", "alloca i64");
-
         auto size  = emit(malloc->arg(1));
         auto ptr_t = convert(Axm::as<mem::Ptr>(def->proj(1)->type()));
 
+        auto alloc_ptr = bb.assign(name + "ptr", "alloca {}", ptr_t);
         auto alloc_res = bb.assign(name + "res", "call i32 @cuMemAlloc_v2(ptr {}, i64 {})", alloc_ptr, size);
         emit_cu_error_handling(bb, alloc_res);
-        auto ptr_i64 = bb.assign(name + "i64", "load i64, i64* {}", alloc_ptr);
-        return bb.assign(name, "inttoptr i64 {} to {}", ptr_i64, ptr_t);
+        return bb.assign(name, "load {}, {}* {}", ptr_t, ptr_t, alloc_ptr);
     } else if (auto free = Axm::isa<mem::free>(def)) {
         auto [Ta, msi]             = free->uncurry_args<2>();
         auto [pointee, addr_space] = Ta->projs<2>();
@@ -207,11 +209,9 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         declare("i32 @cuMemFree_v2(i64)");
 
         emit_unsafe(free->arg(0));
-        auto ptr   = emit(free->arg(1));
-        auto ptr_t = convert(free->arg(1)->type());
+        auto ptr = emit(free->arg(1));
 
-        auto ptr_i64  = bb.assign(name + "i64", "ptrtoint {} {} to i64", ptr_t, ptr);
-        auto free_res = bb.assign(name + "res", "call i32 @cuMemFree_v2(i64 {})", ptr_i64);
+        auto free_res = bb.assign(name + "res", "call i32 @cuMemFree_v2(i64 {})", ptr);
         emit_cu_error_handling(bb, free_res);
         return free_res;
     } else if (auto copy_mem_to_device = Axm::isa<gpu::copy_mem_to_device>(def)) {
@@ -222,14 +222,12 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         auto type_size = w.call(core::trait::size, type);
 
         emit_unsafe(copy_mem_to_device->arg(0));
-        auto host_ptr    = emit(copy_mem_to_device->arg(1));
-        auto dev_ptr     = emit(copy_mem_to_device->arg(2));
-        auto dev_ptr_t   = convert(copy_mem_to_device->arg(2)->type());
-        auto size        = emit(w.lit_nat(Lit::as(type_size)));
-        auto dev_ptr_i64 = bb.assign(name + "i64", "ptrtoint {} {} to i64", dev_ptr_t, dev_ptr);
+        auto host_ptr = emit(copy_mem_to_device->arg(1));
+        auto dev_ptr  = emit(copy_mem_to_device->arg(2));
+        auto size     = emit(w.lit_nat(Lit::as(type_size)));
 
         auto copy_res
-            = bb.assign(name + "res", "call i32 @cuMemcpyHtoD_v2(i64 {}, ptr {}, i64 {})", dev_ptr_i64, host_ptr, size);
+            = bb.assign(name + "res", "call i32 @cuMemcpyHtoD_v2(i64 {}, ptr {}, i64 {})", dev_ptr, host_ptr, size);
         emit_cu_error_handling(bb, copy_res);
         return copy_res;
     } else if (auto copy_mem_to_host = Axm::isa<gpu::copy_mem_to_host>(def)) {
@@ -240,14 +238,12 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         auto type_size = w.call(core::trait::size, type);
 
         emit_unsafe(copy_mem_to_host->arg(0));
-        auto dev_ptr     = emit(copy_mem_to_host->arg(1));
-        auto dev_ptr_t   = convert(copy_mem_to_host->arg(1)->type());
-        auto host_ptr    = emit(copy_mem_to_host->arg(2));
-        auto size        = emit(w.lit_nat(Lit::as(type_size)));
-        auto dev_ptr_i64 = bb.assign(name + "i64", "ptrtoint {} {} to i64", dev_ptr_t, dev_ptr);
+        auto dev_ptr  = emit(copy_mem_to_host->arg(1));
+        auto host_ptr = emit(copy_mem_to_host->arg(2));
+        auto size     = emit(w.lit_nat(Lit::as(type_size)));
 
         auto copy_res
-            = bb.assign(name + "res", "call i32 @cuMemcpyDtoH_v2(ptr {}, i64 {}, i64 {})", host_ptr, dev_ptr_i64, size);
+            = bb.assign(name + "res", "call i32 @cuMemcpyDtoH_v2(ptr {}, i64 {}, i64 {})", host_ptr, dev_ptr, size);
         emit_cu_error_handling(bb, copy_res);
         return copy_res;
     } else if (auto launch = Axm::isa<gpu::launch>(def)) {
@@ -292,6 +288,18 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         return launch_res;
     }
     return std::nullopt;
+}
+
+std::string HostEmitter::convert(const Def* type) {
+    if (auto ptr = Axm::isa<mem::Ptr>(type)) {
+        auto [_, addr_space] = ptr->args<2>();
+        auto lit             = Lit::isa(addr_space);
+        if (lit.value_or(0L) != 0) {
+            // NVIDIA treats all device pointers as i64s in host code
+            return "i64";
+        }
+    }
+    return Super::convert(type);
 }
 
 bool DeviceEmitter::is_to_emit() {
