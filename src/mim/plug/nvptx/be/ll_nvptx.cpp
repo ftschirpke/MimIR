@@ -37,11 +37,16 @@ public:
 
     std::optional<std::string> isa_device_intrinsic(BB&, const Def*) override;
 
-private:
+protected:
     std::string convert(const Def*) override;
 
-    static constexpr std::string_view ctx_name = "@mimir_cu_ctx";
-    static constexpr std::string_view mod_name = "@mimir_cu_mod";
+private:
+    static constexpr std::string_view ctx_name           = "@mimir_cu_ctx";
+    static constexpr std::string_view mod_name           = "@mimir_cu_mod";
+    static constexpr std::string_view fatbin_name        = "@fatbin_fname";
+    static constexpr std::string_view fatbin_value       = "mimir.fatbin";
+    static constexpr std::string_view kernel_name_prefix = "@kname.";
+
     LamMap<int> kernel_ids;
 };
 
@@ -95,7 +100,8 @@ void HostEmitter::start() {
                 auto kid        = kernel_ids.size();
                 kernel_ids[lam] = kid;
                 auto name       = id(lam).substr(1);
-                print(vars_decls_, "@.kname.{} = private constant [{} x i8] c\"{}\\00\"\n", kid, name.size() + 1, name);
+                print(vars_decls_, "{}{} = private constant [{} x i8] c\"{}\\00\"\n", kernel_name_prefix, kid,
+                      name.size() + 1, name);
             }
         }
     }
@@ -137,8 +143,9 @@ std::string HostEmitter::prepare() {
     // TODO: instead, load module using:  declare("i32 @cuModuleLoadFatBinary(ptr, ptr)");
     declare("i32 @cuModuleLoad(ptr, ptr)");
     print(vars_decls_, "{} = global ptr null\n", mod_name);
-    print(vars_decls_, "@fatbin_fname = private constant [13 x i8] c\"mimir.fatbin\\00\"\n");
-    auto mod_res = bb.assign(vname + "_mod_res", "call i32 @cuModuleLoad(ptr {}, ptr {})", mod_name, "@fatbin_fname");
+    print(vars_decls_, "{} = private constant [{} x i8] c\"{}\\00\"\n", fatbin_name, fatbin_value.size() + 1,
+          fatbin_value);
+    auto mod_res = bb.assign(vname + "_mod_res", "call i32 @cuModuleLoad(ptr {}, ptr {})", mod_name, fatbin_name);
     emit_cu_error_handling(bb, mod_res);
 
     return name;
@@ -266,8 +273,8 @@ std::optional<std::string> HostEmitter::isa_device_intrinsic(BB& bb, const Def* 
         auto mod_inner = bb.assign("%mod_inner", "load ptr, ptr {}", mod_name);
 
         auto func_ptr = bb.assign(name + "_funcptr", "alloca ptr");
-        auto func_res = bb.assign(name + "_getfuncres", "call i32 @cuModuleGetFunction(ptr {}, ptr {}, ptr @.kname.{})",
-                                  func_ptr, mod_inner, kid);
+        auto func_res = bb.assign(name + "_getfuncres", "call i32 @cuModuleGetFunction(ptr {}, ptr {}, ptr {}{})",
+                                  func_ptr, mod_inner, kernel_name_prefix, kid);
         emit_cu_error_handling(bb, func_res);
 
         auto arg_wrap = bb.assign(name + "_arg_wrap", "alloca {}", arg_type);
