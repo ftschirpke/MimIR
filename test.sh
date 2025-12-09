@@ -22,12 +22,13 @@ ptx_path=mimir.ptx
 cubin_path=mimir.cubin
 fatbin=mimir.fatbin
 
+gpu_arch=sm_89
+
 echo "test_path: $test_path"
 echo "host_ll_path: $host_ll_path"
 echo "dev_ll_path: $dev_ll_path"
 
-rm $host_ll_path
-rm $dev_ll_path
+rm $host_ll_path $dev_ll_path $hostobj_path $hostbin_path $ptx_path $cubin_path $fatbin
 
 $mim $test_path \
     --output-ll $host_ll_path \
@@ -48,11 +49,11 @@ llc -filetype=obj -relocation-model=pic $host_ll_path -o $hostobj_path || error 
 
 clang $hostobj_path -o $hostbin_path -lcuda || error "host binary"
 
-llc -march=nvptx64 $dev_ll_path -o $ptx_path || error "llc step"
+llc -march=nvptx64 -mcpu=$gpu_arch $dev_ll_path -o $ptx_path || error "llc step"
 
-ptxas $ptx_path -o $cubin_path || error "ptxas step"
+ptxas -arch=$gpu_arch $ptx_path -o $cubin_path || error "ptxas step"
 
-nvcc -fatbin $cubin_path -o $fatbin || error "fatbin step"
+nvcc -fatbin $cubin_path -o $fatbin -arch=$gpu_arch || error "fatbin step"
 
 echo "----- EXECUTE BIN -----"
 args="2 3 4 5 6"
