@@ -50,3 +50,7 @@ axm %gpu.launch: {T: *} → [%mem.M, n_warps: Nat, n_threads: Nat, kernel: Cn [%
 axm %gpu.store: {T: *, Nat} as Ta → [%gpu.M, %mem.Ptr Ta, T] → %gpu.M, normalize_store;
 // TODO: join this with the original %mem.store, as it is just a copy at the moment
 // axm %mem.store: {T: *, Nat} as Ta → [%mem.M, %mem.Ptr Ta, T] → %mem.M, normalize_store;
+
+axm %gpu.lea: {n: Nat, Ts: «n; *», a: Nat} → [%mem.Ptr («j: n; Ts#j», a), i: Idx n] → %mem.Ptr (Ts#i, a);
+// TODO: join this with the original %mem.lea, as it is just a copy at the moment
+// axm %mem.lea: {n: Nat, Ts: «n; *», a: Nat} → [%mem.Ptr («j: n; Ts#j», a), i: Idx n] → %mem.Ptr (Ts#i, a), normalize_lea;

@@ -339,19 +339,45 @@ std::string DeviceEmitter::prepare() {
         auto& bb = lam2bb_[root()];
         {
             // block index
-            auto var     = root()->var(1);
-            auto name    = id(var);
-            locals_[var] = name;
-            declare("i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()");
-            bb.assign(name, "call i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()");
+            auto var  = root()->var(1);
+            auto name = id(var);
+            if (!name.starts_with("%_")) { // HACK: this is a bad way to check whether the argument is used later
+                auto type      = var->type();
+                auto type_name = convert(type);
+                auto idx_lit   = Idx::isa_lit(type);
+                locals_[var]   = name;
+                declare("i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()");
+                // HACK: the handling of a non-existing value and the "i0" case should be reconsidered
+                if (!idx_lit.has_value() || type_name == "i32" || type_name == "i0") {
+                    auto i32 = bb.assign(name, "call i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()");
+                } else if (idx_lit.value() < (1u << 31)) {
+                    auto i32 = bb.assign(name + "i32", "call i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()");
+                    bb.assign(name, "trunc i32 {} to {}", i32, convert(type));
+                } else {
+                    error("Warp ID too large, must fit into I32");
+                }
+            }
         }
         {
             // thread index
-            auto var     = root()->var(2);
-            auto name    = id(var);
-            locals_[var] = name;
-            declare("i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
-            bb.assign(name, "call i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
+            auto var  = root()->var(2);
+            auto name = id(var);
+            if (!name.starts_with("%_")) { // HACK: this is a bad way to check whether the argument is used later
+                auto type      = var->type();
+                auto type_name = convert(type);
+                auto idx_lit   = Idx::isa_lit(type);
+                locals_[var]   = name;
+                declare("i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
+                // HACK: the handling of a non-existing value and the "i0" case should be reconsidered
+                if (!idx_lit.has_value() || type_name == "i32" || type_name == "i0") {
+                    auto i32 = bb.assign(name, "call i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
+                } else if (idx_lit.value() < (1u << 31)) {
+                    auto i32 = bb.assign(name + "i32", "call i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
+                    bb.assign(name, "trunc i32 {} to {}", i32, type_name);
+                } else {
+                    error("Warp ID too large, must fit into I32");
+                }
+            }
         }
         // {
         //     // TODO: remove, just for demonstration purposes
@@ -373,6 +399,23 @@ std::string DeviceEmitter::prepare() {
 }
 
 std::optional<std::string> DeviceEmitter::isa_device_intrinsic(BB& bb, const Def* def) {
+    auto name           = id(def);
+    auto emit_gep_index = [&](const Def* index) {
+        auto v_i = emit(index);
+        auto t_i = convert(index->type());
+
+        if (auto size = Idx::isa(index->type())) {
+            if (auto w = Idx::size2bitwidth(size); w && *w < 64) {
+                v_i = bb.assign(name + ".zext",
+                                "zext {} {} to i{} ; add one more bit for gep index as it is treated as signed value",
+                                t_i, v_i, *w + 1);
+                t_i = "i" + std::to_string(*w + 1);
+            }
+        }
+
+        return std::pair(v_i, t_i);
+    };
+
     if (auto store = Axm::isa<gpu::store>(def)) {
         emit_unsafe(store->arg(0));
         auto v_ptr = emit(store->arg(1));
@@ -381,6 +424,20 @@ std::optional<std::string> DeviceEmitter::isa_device_intrinsic(BB& bb, const Def
         auto t_val = convert(store->arg(2)->type());
         print(bb.body().emplace_back(), "store {} {}, {} {}", t_val, v_val, t_ptr, v_ptr);
         return "";
+    } else if (auto lea = Axm::isa<gpu::lea>(def)) {
+        auto [ptr, i]  = lea->args<2>();
+        auto pointee   = Axm::as<mem::Ptr>(ptr->type())->arg(0);
+        auto v_ptr     = emit(ptr);
+        auto t_pointee = convert(pointee);
+        auto t_ptr     = convert(ptr->type());
+        if (pointee->isa<Sigma>())
+            return bb.assign(name, "getelementptr inbounds {}, {} {}, i64 0, i32 {}", t_pointee, t_ptr, v_ptr,
+                             Lit::as(i));
+
+        assert(pointee->isa<Arr>());
+        auto [v_i, t_i] = emit_gep_index(i);
+
+        return bb.assign(name, "getelementptr inbounds {}, {} {}, i64 0, {} {}", t_pointee, t_ptr, v_ptr, t_i, v_i);
     }
     return std::nullopt;
 }
