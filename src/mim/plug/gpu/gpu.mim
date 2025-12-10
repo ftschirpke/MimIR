@@ -47,7 +47,7 @@ axm %gpu.copy_mem_to_host: {T: *} → [%mem.M, %gpu.GlobalPtr T, %mem.Ptr0 T] �
 axm %gpu.launch: {T: *} → [%mem.M, n_warps: Nat, n_threads: Nat, kernel: Cn [%gpu.M, Idx n_warps, Idx n_threads, T, Cn %gpu.M], T] → %mem.M;
 // TODO: can we find a way of passing multiple arguments to the kernel?
 
-axm %gpu.store: {T: *, Nat} as Ta → [%gpu.M, %mem.Ptr Ta, T] → %gpu.M, normalize_store;
+axm %gpu.store: {T: *, Nat} as Ta → [%gpu.M, %mem.Ptr Ta, T] → %gpu.M;
 // TODO: join this with the original %mem.store, as it is just a copy at the moment
 // axm %mem.store: {T: *, Nat} as Ta → [%mem.M, %mem.Ptr Ta, T] → %mem.M, normalize_store;
 
