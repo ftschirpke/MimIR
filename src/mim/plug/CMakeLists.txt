@@ -10,6 +10,7 @@ set(MIM_PLUGINS
     math
     matrix
     mem
+    nvptx
     opt
     ord
     refly

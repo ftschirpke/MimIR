@@ -1,0 +1,6 @@
+/// # The nvptx Plugin {#nvptx}
+///
+/// @see mim::plug::nvptx
+///
+/// A plugin for NVPTX intrinsics
+///
