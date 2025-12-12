@@ -744,14 +744,25 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
 
         return bb.assign(name, "getelementptr inbounds {}, {} {}, i64 0, {} {}", t_pointee, t_ptr, v_ptr, t_i, v_i);
     } else if (auto malloc = Axm::isa<mem::malloc>(def)) {
+        auto [Ta, msi]             = malloc->uncurry_args<2>();
+        auto [pointee, addr_space] = Ta->projs<2>();
+        auto address_space         = Lit::as<mem::AddrSpace>(addr_space);
+        if (address_space != plug::mem::AddrSpace::Generic) return as_targetspecific_intrinsic(bb, def);
+
         declare("i8* @malloc(i64)");
 
         emit_unsafe(malloc->arg(0));
         auto size  = emit(malloc->arg(1));
         auto ptr_t = convert(Axm::as<mem::Ptr>(def->proj(1)->type()));
+
         bb.assign(name + "i8", "call i8* @malloc(i64 {})", size);
         return bb.assign(name, "bitcast i8* {} to {}", name + "i8", ptr_t);
     } else if (auto free = Axm::isa<mem::free>(def)) {
+        auto [Ta, msi]             = free->uncurry_args<2>();
+        auto [pointee, addr_space] = Ta->projs<2>();
+        auto address_space         = Lit::as<mem::AddrSpace>(addr_space);
+        if (address_space != plug::mem::AddrSpace::Generic) return as_targetspecific_intrinsic(bb, def);
+
         declare("void @free(i8*)");
         emit_unsafe(free->arg(0));
         auto ptr   = emit(free->arg(1));
