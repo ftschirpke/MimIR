@@ -233,7 +233,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     } else if (auto copy_mem_to_device = Axm::isa<gpu::copy_mem_to_device>(def)) {
         declare("i32 @cuMemcpyHtoD_v2(i64, ptr, i64)");
 
-        auto [type]    = copy_mem_to_device->decurry()->args<1>();
+        auto type      = copy_mem_to_device->decurry()->arg(0);
         World& w       = type->world();
         auto type_size = w.call(core::trait::size, type);
 
@@ -249,7 +249,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     } else if (auto copy_mem_to_host = Axm::isa<gpu::copy_mem_to_host>(def)) {
         declare("i32 @cuMemcpyDtoH_v2(ptr, i64, i64)");
 
-        auto [type]    = copy_mem_to_host->decurry()->args<1>();
+        auto type      = copy_mem_to_host->decurry()->arg(0);
         World& w       = type->world();
         auto type_size = w.call(core::trait::size, type);
 
@@ -266,15 +266,14 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         declare("i32 @cuLaunchKernel(ptr, i32, i32, i32, i32, i32, i32, i32, ptr, ptr, ptr)");
 
         emit_unsafe(launch->arg(0));
-        auto n_warps   = emit(launch->arg(1));
-        auto n_threads = emit(launch->arg(2));
-        auto func      = emit(launch->arg(3));
-        auto arg       = emit(launch->arg(4));
-        auto arg_type  = convert(launch->arg(4)->type());
+        auto [n_warps, n_threads] = launch->decurry()->args<2>();
+        auto func                 = emit(launch->arg(1));
+        auto arg                  = emit(launch->arg(2));
+        auto arg_type             = convert(launch->arg(2)->type());
 
         declare("i32 @cuModuleGetFunction(ptr, ptr, ptr)");
 
-        auto lam = Lam::isa_mut_cn(launch->arg(3));
+        auto lam = Lam::isa_mut_cn(launch->arg(1));
         if (!lam) error("kernel is not a lamda {}", func);
         if (!kernel_ids.contains(lam)) error("unknown kernel {}", lam);
         auto kid = kernel_ids[lam];

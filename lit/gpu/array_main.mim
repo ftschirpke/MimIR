@@ -41,7 +41,7 @@ con extern main [mem: %mem.M, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («
     let (mem, d_ptr) = %mem.alloc («4; I32», 1) mem;
     let mem = %gpu.copy_mem_to_device (mem, arr, d_ptr);
 
-    let mem = %gpu.launch (mem, 1, 4, kernel, d_ptr);
+    let mem = %gpu.launch (1, 4) (mem, kernel, d_ptr);
 
     let mem = %gpu.copy_mem_to_host (mem, d_ptr, arr);
     let mem = %mem.free (mem, d_ptr);
