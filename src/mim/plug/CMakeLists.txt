@@ -6,9 +6,11 @@ set(MIM_PLUGINS
     core
     demo
     direct
+    gpu
     math
     matrix
     mem
+    nvptx
     opt
     ord
     refly
