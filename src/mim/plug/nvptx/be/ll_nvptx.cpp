@@ -213,7 +213,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     } else if (auto copy_mem_to_device = Axm::isa<gpu::copy_mem_to_device>(def)) {
         declare("i32 @cuMemcpyHtoD_v2(i64, ptr, i64)");
 
-        auto type      = copy_mem_to_device->decurry()->arg(0);
+        auto [type]    = copy_mem_to_device->decurry()->args<1>();
         World& w       = type->world();
         auto type_size = w.call(core::trait::size, type);
 
@@ -229,7 +229,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     } else if (auto copy_mem_to_host = Axm::isa<gpu::copy_mem_to_host>(def)) {
         declare("i32 @cuMemcpyDtoH_v2(ptr, i64, i64)");
 
-        auto type      = copy_mem_to_host->decurry()->arg(0);
+        auto [type]    = copy_mem_to_host->decurry()->args<1>();
         World& w       = type->world();
         auto type_size = w.call(core::trait::size, type);
 
