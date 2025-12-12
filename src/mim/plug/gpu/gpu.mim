@@ -37,5 +37,5 @@ axm %gpu.copy_mem_to_host: {T: *} → [%mem.M, %gpu.GlobalPtr T, %mem.Ptr0 T] �
 /// ### %%gpu.launch
 ///
 /// Launches a kernel function on the device
-axm %gpu.launch: {T: *} → [%mem.M, n_warps: Nat, n_threads: Nat, kernel: Cn [%mem.M, Idx n_warps, Idx n_threads, T, Cn %mem.M], T] → %mem.M;
+axm %gpu.launch: {T: *} → [n_warps: Nat, n_threads: Nat] → [%mem.M, kernel: Cn [%mem.M, Idx n_warps, Idx n_threads, T, Cn %mem.M], T] → %mem.M;
 // TODO: can we find a way of passing multiple arguments to the kernel?
