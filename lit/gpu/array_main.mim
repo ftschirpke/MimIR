@@ -1,0 +1,52 @@
+// RUN: rm -f %t.ll %t.dev.ll
+// RUN: %mim %s --output-ll %t.ll --output-device-ll %t.dev.ll --device-target nvptx -o -
+// RUN: rm -f %t.obj
+// RUN: llc -filetype=obj -relocation-model=pic %t.ll -o %t.obj
+// RUN: rm -f %t
+// RUN: clang %t.obj -o %t -lcuda
+// RUN: rm -f %t.ptx
+// RUN: llc -march=nvptx64 %t.dev.ll -o %t.ptx
+// RUN: rm -f %t.cubin
+// RUN: ptxas %t.ptx -o %t.cubin
+// RUN: rm -f %t.fatbin
+// RUN: nvcc -fatbin %t.cubin -o %t.fatbin
+// TODO: this does not work yet because of hard-coded fatbin file name
+// RUN: %t; test $? -eq 44
+// RUN: %t 1 2 3; test $? -eq 44
+// RUN: %t 1 2 3 4 5; test $? -eq 44
+
+plugin core;
+plugin gpu;
+plugin nvptx;
+
+con extern kernel [mem: %mem.M, warp_id: Idx 1, thread_id: Idx 4, data: %gpu.GlobalPtr «4; I32», return: Cn %mem.M] =
+    let el = %mem.lea (data, thread_id);
+    let val = %core.bitcast I32 thread_id;
+    let val = %core.wrap.add 0 (val, 42I32);
+    let mem = %mem.store (mem, el, val);
+    return mem;
+
+con extern main [mem: %mem.M, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0), return: Cn [%mem.M, I32]] =
+    let (mem, arr) = %mem.alloc («4; I32», 0) mem;
+
+    let arr_0 = %mem.lea (arr, 0_4);
+    let mem = %mem.store (mem, arr_0, argc);
+    let arr_1 = %mem.lea (arr, 1_4);
+    let mem = %mem.store (mem, arr_1, argc);
+    let arr_2 = %mem.lea (arr, 2_4);
+    let mem = %mem.store (mem, arr_2, argc);
+    let arr_3 = %mem.lea (arr, 3_4);
+    let mem = %mem.store (mem, arr_3, argc);
+
+    let (mem, d_ptr) = %mem.alloc («4; I32», 1) mem;
+    let mem = %gpu.copy_mem_to_device (mem, arr, d_ptr);
+
+    let mem = %gpu.launch (mem, 1, 4, kernel, d_ptr);
+
+    let mem = %gpu.copy_mem_to_host (mem, d_ptr, arr);
+    let mem = %mem.free (mem, d_ptr);
+
+    let (mem, val) = %mem.load (mem, arr_2);
+    let mem = %mem.free (mem, arr);
+
+    return (mem, val);
