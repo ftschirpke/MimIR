@@ -29,7 +29,7 @@ void reg_stages(Flags2Stages& stages) {
             auto [Ta, mi]              = slot->uncurry_args<2>();
             auto [pointee, addr_space] = Ta->projs<2>();
             auto [mem, id]             = mi->projs<2>();
-            return mem::op_mslot(pointee, mem, id);
+            return mem::op_mslot(pointee, addr_space, mem, id);
         }
         if (auto remem = Axm::isa<mem::remem>(def)) return remem->arg();
         return {};
