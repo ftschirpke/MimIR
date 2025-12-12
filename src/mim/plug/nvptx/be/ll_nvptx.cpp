@@ -65,30 +65,21 @@ public:
 };
 
 // TODO: rethink kernel detection
-// detect kernel by checking for the signature:  extern Cn[%gpu.M, Idx N, Idx M, T, Cn %gpu.M]
+// detect kernel by checking for the signature:  extern Cn[%mem.M, Idx N, Idx M, T, Cn %mem.M]
 static bool is_kernel(Lam* lam) {
     if (!lam->is_external()) return false;
 
     auto vars = lam->vars();
     if (vars.size() != 5) return false;
-    if (!Axm::isa<gpu::M>(lam->var(0)->type())) return false;
+    if (!Axm::isa<mem::M>(lam->var(0)->type())) return false;
     if (!Idx::isa(lam->var(1)->type())) return false;
     if (!Idx::isa(lam->var(2)->type())) return false;
     return true;
 }
 
-static bool is_gpu_type(const Def* type) {
-    if (Axm::isa<gpu::M>(type)) return true;
-    if (auto sigma = type->isa<Sigma>()) {
-        for (auto op : sigma->ops())
-            if (is_gpu_type(op)) return true;
-    }
-    return false;
-}
-
 bool HostEmitter::is_to_emit() {
-    bool is_gpu_code = std::ranges::any_of(root()->vars(), [](auto var) { return is_gpu_type(var->type()); });
-    return !is_gpu_code;
+    // HACK: this should not only consider kernels but all device code
+    return !is_kernel(root());
 }
 
 void HostEmitter::start() {
@@ -308,8 +299,8 @@ std::string HostEmitter::convert(const Def* type) {
 }
 
 bool DeviceEmitter::is_to_emit() {
-    bool is_gpu_code = std::ranges::any_of(root()->vars(), [](auto var) { return is_gpu_type(var->type()); });
-    return is_gpu_code;
+    // HACK: this should not only consider kernels but all device code
+    return is_kernel(root());
 }
 
 std::string DeviceEmitter::prepare() {
@@ -324,7 +315,6 @@ std::string DeviceEmitter::prepare() {
     for (auto sep = ""; auto var : vars.view().rsubspan(1)) {
         if (is_kern && i++ < 3) continue;
         if (Axm::isa<mem::M>(var->type())) continue;
-        if (Axm::isa<gpu::M>(var->type())) continue;
         auto name    = id(var);
         locals_[var] = name;
         print(func_impls_, "{}{} {}", sep, convert(var->type()), name);
