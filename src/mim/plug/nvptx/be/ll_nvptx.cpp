@@ -64,16 +64,30 @@ public:
     std::optional<std::string> isa_targetspecific_intrinsic(BB&, const Def*) override;
 };
 
+constexpr std::array<mem::AddrSpace, 4> gpu_mem_addr_spaces
+    = {mem::AddrSpace::Global, mem::AddrSpace::Shared, mem::AddrSpace::Constant, mem::AddrSpace::Local};
 // TODO: rethink kernel detection
 // detect kernel by checking for the signature:  extern Cn[%gpu.M, Idx N, Idx M, T, Cn %gpu.M]
 static bool is_kernel(Lam* lam) {
     if (!lam->is_external()) return false;
 
     auto vars = lam->vars();
-    if (vars.size() != 5) return false;
-    if (!Axm::isa<gpu::M>(lam->var(0)->type())) return false;
+    if (lam->vars().size() != 5) return false;
+    if (lam->var(0)->num_projs() != 4) return false;
+
+    auto ms = lam->var(0)->projs();
+    for (size_t i = 0; i < 4; ++i) {
+        auto m   = ms[i]->type();
+        auto mem = Axm::isa<mem::M>(m);
+        if (!mem) return false;
+        auto addr_space = mem->arg(0);
+        auto address_space = Lit::as<plug::mem::AddrSpace>(addr_space);
+        if (address_space != gpu_mem_addr_spaces[i]) return false;
+    }
+
     if (!Idx::isa(lam->var(1)->type())) return false;
     if (!Idx::isa(lam->var(2)->type())) return false;
+
     return true;
 }
 
@@ -87,6 +101,7 @@ static bool is_gpu_type(const Def* type) {
             case mem::AddrSpace::Texture: return false;
             case mem::AddrSpace::Shared: return true;
             case mem::AddrSpace::Constant: return true;
+            case mem::AddrSpace::Local: return true;
             default: fe::unreachable();
         }
     }
@@ -103,20 +118,26 @@ bool HostEmitter::is_to_emit() {
 }
 
 void HostEmitter::start() {
+    ILOG("FRIEDRICH start start");
     DefSet done;
     for (auto mut : world().externals()) {
         if (auto lam = Lam::isa_mut_cn(mut.second)) {
             if (is_kernel(lam)) {
+                ILOG("FRIEDRICH got here");
                 assert(!kernel_ids.contains(lam));
                 auto kid        = kernel_ids.size();
                 kernel_ids[lam] = kid;
                 auto name       = id(lam).substr(1);
+                ILOG("FRIEDRICH got here 2");
                 print(vars_decls_, "{}{} = private constant [{} x i8] c\"{}\\00\"\n", kernel_name_prefix, kid,
                       name.size() + 1, name);
+                ILOG("FRIEDRICH got to end");
             }
         }
     }
+    ILOG("FRIEDRICH got to end end");
     Super::start();
+    ILOG("FRIEDRICH end start");
 }
 
 static void emit_cu_error_handling(BB& bb, const std::string& cu_result) {
@@ -125,6 +146,7 @@ static void emit_cu_error_handling(BB& bb, const std::string& cu_result) {
 }
 
 std::string HostEmitter::prepare() {
+    ILOG("FRIEDRICH start prepare");
     auto name = Super::prepare();
 
     if (id(root()) != "@main") return name;
@@ -160,6 +182,7 @@ std::string HostEmitter::prepare() {
     emit_cu_error_handling(bb, mod_res);
 
     return name;
+    ILOG("FRIEDRICH end prepare");
 }
 
 void HostEmitter::emit_epilogue(Lam* lam) {
@@ -195,6 +218,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
             case mem::AddrSpace::Texture: error("malloc cannot be used in texture memory");
             case mem::AddrSpace::Shared: error("malloc cannot be used in shared memory");
             case mem::AddrSpace::Constant: error("malloc cannot be used in constant memory");
+            case mem::AddrSpace::Local: error("malloc cannot be used in local memory");
             default: fe::unreachable();
         }
 
@@ -219,6 +243,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
             case mem::AddrSpace::Texture: error("free cannot be used in texture memory");
             case mem::AddrSpace::Shared: error("free cannot be used in shared memory");
             case mem::AddrSpace::Constant: error("free cannot be used in constant memory");
+            case mem::AddrSpace::Local: error("free cannot be used in local memory");
             default: fe::unreachable();
         }
 
@@ -238,8 +263,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         auto type_size = w.call(core::trait::size, type);
 
         emit_unsafe(copy_mem_to_device->arg(0));
-        auto host_ptr = emit(copy_mem_to_device->arg(1));
-        auto dev_ptr  = emit(copy_mem_to_device->arg(2));
+        emit_unsafe(copy_mem_to_device->arg(1));
+        auto host_ptr = emit(copy_mem_to_device->arg(2));
+        auto dev_ptr  = emit(copy_mem_to_device->arg(3));
         auto size     = emit(w.lit_nat(Lit::as(type_size)));
 
         auto copy_res
@@ -254,8 +280,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         auto type_size = w.call(core::trait::size, type);
 
         emit_unsafe(copy_mem_to_host->arg(0));
-        auto dev_ptr  = emit(copy_mem_to_host->arg(1));
-        auto host_ptr = emit(copy_mem_to_host->arg(2));
+        emit_unsafe(copy_mem_to_host->arg(1));
+        auto dev_ptr  = emit(copy_mem_to_host->arg(2));
+        auto host_ptr = emit(copy_mem_to_host->arg(3));
         auto size     = emit(w.lit_nat(Lit::as(type_size)));
 
         auto copy_res

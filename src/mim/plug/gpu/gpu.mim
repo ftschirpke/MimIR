@@ -25,13 +25,13 @@ lam %gpu.ConstPtr(T: *): *  = %mem.Ptr (T, 4);
 /// ### %%gpu.copy_mem_to_device
 ///
 /// Copies data from host memory to device memory
-axm %gpu.copy_mem_to_device: {T: *} → [%mem.M 0, %mem.M 1, %mem.Ptr0 T, %gpu.GlobalPtr T] → %mem.M;
+axm %gpu.copy_mem_to_device: {T: *} → [%mem.M 0, %mem.M 1, %mem.Ptr0 T, %gpu.GlobalPtr T] → [%mem.M 0, %mem.M 1];
 
 ///
 /// ### %%gpu.copy_mem_to_host
 ///
 /// Copies data from device memory to host memory
-axm %gpu.copy_mem_to_host: {T: *} → [%mem.M 1, %mem.M 0, %gpu.GlobalPtr T, %mem.Ptr0 T] → %mem.M;
+axm %gpu.copy_mem_to_host: {T: *} → [%mem.M 0, %mem.M 1, %gpu.GlobalPtr T, %mem.Ptr0 T] → [%mem.M 0, %mem.M 1];
 
 let %gpu.M = [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5];
 
