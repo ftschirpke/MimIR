@@ -19,24 +19,27 @@ plugin core;
 plugin gpu;
 plugin nvptx;
 
-con extern kernel [mem: %gpu.M, warp_id: Idx 4, thread_id: Idx 4, data: %gpu.GlobalPtr I32, return: Cn %gpu.M] =
-    let (m1, m3, m4, m5) = mem;
+con extern kernel [m1: %mem.M 1, m3: %mem.M 3, m4: %mem.M 4, m5: %mem.M 5,
+                   warp_id: Idx 4, thread_id: Idx 4, data: %gpu.GlobalPtr I32,
+                   return: Cn [m1: %mem.M 1, m3: %mem.M 3, m4: %mem.M 4, m5: %mem.M 5]] =
     let m1 = %mem.store (m1, data, 42I32);
     return (m1, m3, m4, m5);
 
-con extern main [mem: %mem.M 0, mem1: %mem.M 1, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0), return: Cn [%mem.M 0, I32]] =
-    let (mem, ptr) = %mem.alloc (I32, 0) mem;
-    let mem = %mem.store (mem, ptr, argc);
+con extern main [m0: %mem.M 0, m1: %mem.M 1,
+                 argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0),
+                 return: Cn [%mem.M 0, %mem.M 1, I32]] =
+    let (m0, ptr) = %mem.alloc (I32, 0) m0;
+    let m0 = %mem.store (m0, ptr, argc);
 
-    let (mem1, d_ptr) = %mem.alloc (I32, 1) mem1;
-    let (mem, mem1) = %gpu.copy_mem_to_device (mem, mem1, ptr, d_ptr);
+    let (m1, d_ptr) = %mem.alloc (I32, 1) m1;
+    let (m0, m1) = %gpu.copy_mem_to_device (m0, m1, ptr, d_ptr);
 
-    let mem = %gpu.launch (4, 4) (mem, kernel, d_ptr);
+    let m0 = %gpu.launch (4, 4) (m0, kernel, d_ptr);
 
-    let (mem, mem1) = %gpu.copy_mem_to_host (mem, mem1, d_ptr, ptr);
-    let mem1 = %mem.free (mem1, d_ptr);
+    let (m0, m1) = %gpu.copy_mem_to_host (m0, m1, d_ptr, ptr);
+    let m1 = %mem.free (m1, d_ptr);
 
-    let (mem, val) = %mem.load (mem, ptr);
-    let mem = %mem.free (mem, ptr);
+    let (m0, val) = %mem.load (m0, ptr);
+    let m0 = %mem.free (m0, ptr);
 
-    return (mem, val);
+    return (m0, m1, val);
