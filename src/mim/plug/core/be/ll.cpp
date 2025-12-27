@@ -118,8 +118,8 @@ std::string Emitter::convert(const Def* type) {
         }
     } else if (auto ptr = Axm::isa<mem::Ptr>(type)) {
         auto [pointee, addr_space] = ptr->args<2>();
-        // TODO addr_space
-        print(s, "{}*", convert(pointee));
+        // TODO: address space conversion might differ, then more work would be required here
+        print(s, "{} addrspace({})*", convert(pointee), addr_space);
     } else if (auto arr = type->isa<Arr>()) {
         auto t_elem = convert(arr->body());
         u64 size    = 0;
@@ -741,6 +741,11 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
 
         return bb.assign(name, "getelementptr inbounds {}, {} {}, i64 0, {} {}", t_pointee, t_ptr, v_ptr, t_i, v_i);
     } else if (auto malloc = Axm::isa<mem::malloc>(def)) {
+        auto [Ta, msi]             = malloc->uncurry_args<2>();
+        auto [pointee, addr_space] = Ta->projs<2>();
+        auto address_space         = Lit::as<mem::AddrSpace>(addr_space);
+        if (address_space != mem::AddrSpace::Generic) return as_targetspecific_intrinsic(bb, def);
+
         declare("i8* @malloc(i64)");
 
         emit_unsafe(malloc->arg(0));
@@ -749,6 +754,14 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         bb.assign(name + "i8", "call i8* @malloc(i64 {})", size);
         return bb.assign(name, "bitcast i8* {} to {}", name + "i8", ptr_t);
     } else if (auto free = Axm::isa<mem::free>(def)) {
+        auto [Ta, msi]             = free->uncurry_args<2>();
+        auto [pointee, addr_space] = Ta->projs<2>();
+        auto address_space         = Lit::as<mem::AddrSpace>(addr_space);
+        if (address_space != mem::AddrSpace::Generic) {
+            as_targetspecific_intrinsic(bb, def);
+            return {};
+        }
+
         declare("void @free(i8*)");
         emit_unsafe(free->arg(0));
         auto ptr   = emit(free->arg(1));
@@ -766,16 +779,6 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         // auto v_size = emit(mslot->arg(1));
         print(bb.body().emplace_back(), "{} = alloca {}", name, convert(pointee));
         return name;
-    } else if (auto free = Axm::isa<mem::free>(def)) {
-        declare("void @free(i8*)");
-
-        emit_unsafe(free->arg(0));
-        auto v_ptr = emit(free->arg(1));
-        auto t_ptr = convert(Axm::as<mem::Ptr>(free->arg(1)->type()));
-
-        bb.assign(name + "i8", "bitcast {} {} to i8*", t_ptr, v_ptr);
-        bb.tail("call void @free(i8* {})", name + "i8");
-        return {};
     } else if (auto load = Axm::isa<mem::load>(def)) {
         emit_unsafe(load->arg(0));
         auto v_ptr     = emit(load->arg(1));
