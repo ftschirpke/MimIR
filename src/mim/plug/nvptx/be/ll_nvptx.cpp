@@ -196,7 +196,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         auto alloc_ptr = bb.assign(name + "ptr", "alloca {}", ptr_t);
         auto alloc_res = bb.assign(name + "res", "call i32 @cuMemAlloc_v2(ptr {}, i64 {})", alloc_ptr, size);
         emit_cu_error_handling(bb, alloc_res);
-        return bb.assign(name, "load {}, {}* {}", ptr_t, ptr_t, alloc_ptr);
+        return bb.assign(name, "load {}, {} addrspace(0)* {}", ptr_t, ptr_t, alloc_ptr);
     } else if (auto free = Axm::isa<mem::free>(def)) {
         auto [Ta, msi]             = free->uncurry_args<2>();
         auto [pointee, addr_space] = Ta->projs<2>();
