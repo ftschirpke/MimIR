@@ -41,8 +41,8 @@ let %gpu.M = [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5];
 /// Launches a kernel function on the device
 axm %gpu.launch: [n_warps: Nat, n_threads: Nat]
     → {T: *}    
-    → [%mem.M, 
+    → [%mem.M 0, 
        kernel: Cn [%gpu.M, Idx n_warps, Idx n_threads, T, Cn %gpu.M],
        T]
-    → %mem.M;
+    → %mem.M 0;
 // TODO: passing variadic number of arguments to the kernel
