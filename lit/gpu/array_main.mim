@@ -1,19 +1,11 @@
-// RUN: rm -f %t.ll %t.dev.ll
-// RUN: %mim %s --output-ll %t.ll --output-device-ll %t.dev.ll --device-target nvptx -o -
-// RUN: rm -f %t.obj
-// RUN: llc -filetype=obj -relocation-model=pic %t.ll -o %t.obj
+// RUN: rm -f %t.ll
+// RUN: %mim %s --output-ll %t.ll --embed-device-binary --device-target nvptx -o -
 // RUN: rm -f %t
-// RUN: clang %t.obj -o %t -lcuda
-// RUN: rm -f %t.ptx
-// RUN: llc -march=nvptx64 %t.dev.ll -o %t.ptx
-// RUN: rm -f %t.cubin
-// RUN: ptxas %t.ptx -o %t.cubin
-// RUN: rm -f %t.fatbin
-// RUN: nvcc -fatbin %t.cubin -o %t.fatbin
-// TODO: this does not work yet because of hard-coded fatbin file name
-// RUN: %t; test $? -eq 44
-// RUN: %t 1 2 3; test $? -eq 44
-// RUN: %t 1 2 3 4 5; test $? -eq 44
+// RUN: clang %t.ll -o %t -lcuda -Wno-override-module
+// RUN: %t; test $? -eq 42
+// RUN: %t 1; test $? -eq 43
+// RUN: %t 1 2; test $? -eq 44
+// RUN: %t 1 2 3; test $? -eq 45
 
 plugin core;
 plugin gpu;
@@ -49,8 +41,10 @@ con extern main [m0: %mem.M 0, m1: %mem.M 1,
 
     let (m0, m1) = %gpu.copy_mem_to_host (m0, m1, d_ptr, arr);
     let m1 = %mem.free (m1, d_ptr);
-
-    let (m0, val) = %mem.load (m0, arr_2);
+    
+    let idx = %core.bitcast (Idx 4) (%core.wrap.sub 0 (argc, 1I32));
+    let val_arr = %mem.lea (arr, %core.bitcast (Idx 4) idx);
+    let (m0, val) = %mem.load (m0, val_arr);
     let m0 = %mem.free (m0, arr);
 
     return (m0, m1, val);
