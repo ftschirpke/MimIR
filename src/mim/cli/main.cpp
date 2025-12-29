@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
         auto& flags      = driver.flags();
 
         std::string device_target_name = "none"s;
+        bool embed_device_binary       = false;
 
         // clang-format off
         auto cli = lyra::cli()
@@ -72,6 +73,7 @@ int main(int argc, char** argv) {
             | lyra::opt(output[DvLL], "file"               )      ["--output-device-ll"     ]("Compiles the Mim program's device code to LLVM.")
             | lyra::opt(device_target_name, "target"       )      ["--device-target"        ]("Target for device code ('none' or 'nvptx'). Default: 'none'")
               .choices([&device_target_names](std::string value) { return device_target_names.contains(value); })
+            | lyra::opt(embed_device_binary                )      ["--embed-device-binary"  ]("Embed the compiled device code in the host LLVM.")
             | lyra::opt(flags.ascii                        )["-a"]["--ascii"                ]("Use ASCII alternatives in output instead of UTF-8.")
             | lyra::opt(flags.bootstrap                    )      ["--bootstrap"            ]("Puts mim into \"bootstrap mode\". This means a 'plugin' directive has the same effect as an 'import' and will not load a library. In addition, no standard plugins will be loaded.")
             | lyra::opt(dot_follow_types                   )      ["--dot-follow-types"     ]("Follow type dependencies in DOT output.")
@@ -211,7 +213,7 @@ int main(int argc, char** argv) {
                         plugin_name  = "core";
                         break;
                     case NVPTX:
-                        backend_name = "ll-host-nvptx";
+                        backend_name = embed_device_binary ? "ll-host-nvptx-embed" : "ll-host-nvptx";
                         plugin_name  = "nvptx";
                         break;
                     case Num_DeviceTargets: fe::unreachable();

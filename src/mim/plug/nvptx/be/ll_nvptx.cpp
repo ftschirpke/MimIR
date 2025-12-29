@@ -1,5 +1,7 @@
 #include "mim/plug/nvptx/be/ll_nvptx.h"
 
+#include <mim/util/sys.h>
+
 #include <mim/plug/core/core.h>
 #include <mim/plug/gpu/gpu.h>
 #include <mim/plug/mem/mem.h>
@@ -16,7 +18,12 @@ public:
     using Super = mim::ll::Emitter;
 
     HostEmitter(World& world, std::ostream& ostream)
-        : Super(world, "llvm_nvptx_host_emitter", ostream) {}
+        : Super(world, "llvm_nvptx_host_emitter", ostream)
+        , device_fatbin_file(std::nullopt) {}
+
+    HostEmitter(World& world, std::ostream& ostream, std::string device_fatbin_file)
+        : Super(world, "llvm_nvptx_host_emitter", ostream)
+        , device_fatbin_file(device_fatbin_file) {}
 
     bool is_to_emit() override;
     void start() override;
@@ -32,10 +39,10 @@ protected:
 private:
     static constexpr std::string_view ctx_name           = "@mimir_cu_ctx";
     static constexpr std::string_view mod_name           = "@mimir_cu_mod";
-    static constexpr std::string_view fatbin_name        = "@fatbin_fname";
-    static constexpr std::string_view fatbin_value       = "mimir.fatbin";
+    static constexpr std::string_view fatbin_name        = "@fatbin";
     static constexpr std::string_view kernel_name_prefix = "@kname.";
 
+    std::optional<std::string> device_fatbin_file;
     LamMap<int> kernel_ids;
 };
 
@@ -140,12 +147,34 @@ std::string HostEmitter::prepare() {
                              ctx_flags, dev);
     emit_cu_error_handling(bb, ctx_res);
 
-    // TODO: instead, load module using:  declare("i32 @cuModuleLoadFatBinary(ptr, ptr)");
-    declare("i32 @cuModuleLoad(ptr, ptr)");
+    declare("i32 @cuModuleLoadFatBinary(ptr, ptr)");
     print(vars_decls_, "{} = global ptr null\n", mod_name);
-    print(vars_decls_, "{} = private constant [{} x i8] c\"{}\\00\"\n", fatbin_name, fatbin_value.size() + 1,
-          fatbin_value);
-    auto mod_res = bb.assign(vname + "_mod_res", "call i32 @cuModuleLoad(ptr {}, ptr {})", mod_name, fatbin_name);
+    if (device_fatbin_file.has_value()) {
+        std::ifstream fatbin_file(device_fatbin_file.value(), std::ios::binary);
+        if (!fatbin_file) error("Could not open {} as binary file", device_fatbin_file.value());
+
+        auto start = std::istreambuf_iterator<char>(fatbin_file);
+        auto end   = std::istreambuf_iterator<char>();
+        std::vector<u8> fatbin_bytes(start, end);
+
+        print(vars_decls_, "{} = private constant [{} x i8] c\"", fatbin_name, fatbin_bytes.size());
+        for (auto byte : fatbin_bytes) {
+            if (std::isprint(byte)) {
+                print(vars_decls_, "{}", byte);
+            } else {
+                auto byte_val = static_cast<int>(byte);
+                print(vars_decls_, "\\{x}{x}", byte_val / 16, byte_val % 16);
+            }
+        }
+        print(vars_decls_, "\"\n");
+    } else {
+        print(vars_decls_, "; Add the bytes of your compiled nvptx fatbin binary here:\n");
+        print(vars_decls_,
+              "{} = private constant [YOUR_FATBIN_DATA_SIZE_GOES_HERE x i8] [ YOUR_FATBIN_DATA_GOES_HERE ]\n",
+              fatbin_name);
+    }
+    auto mod_res
+        = bb.assign(vname + "_mod_res", "call i32 @cuModuleLoadFatBinary(ptr {}, ptr {})", mod_name, fatbin_name);
     emit_cu_error_handling(bb, mod_res);
 
     return name;
@@ -389,6 +418,85 @@ void emit_host(World& world, std::ostream& ostream) {
 void emit_device(World& world, std::ostream& ostream) {
     DeviceEmitter emitter(world, ostream);
     emitter.run();
+}
+
+static std::optional<std::string> get_compute_capability() {
+    auto out      = sys::exec("nvidia-smi --query-gpu=compute_cap");
+    auto start    = out.find('\n') + 1;
+    auto newline2 = out.find('\n', start);
+    if (start < out.size()) out = out.substr(start, newline2 - start);
+    // out should now have form "7.5" referencing the compute capability "sm_75"
+
+    auto dot_pos = out.find('.');
+    assert(dot_pos < out.size());
+
+    for (size_t i = 0; i < out.size(); ++i)
+        if (i != dot_pos && !std::isdigit(out[i])) return std::nullopt;
+
+    return fmt("sm_{}{}", out.substr(0, dot_pos), out.substr(dot_pos + 1));
+}
+
+void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
+    static constexpr auto dev_ll_name     = "tmp_mimir_nvptx_dev.ll";
+    static constexpr auto dev_ptx_name    = "tmp_mimir_nvptx_dev.ptx";
+    static constexpr auto dev_cubin_name  = "tmp_mimir_nvptx_dev.cubin";
+    static constexpr auto dev_fatbin_name = "tmp_mimir_nvptx_dev.fatbin";
+    {
+        std::ofstream dev_ll_ofs;
+        dev_ll_ofs.open(dev_ll_name);
+        if (!dev_ll_ofs.is_open() || dev_ll_ofs.fail())
+            error("Error occured while trying to open temporary file '{}'", dev_ll_name);
+        emit_device(world, dev_ll_ofs);
+    }
+
+    auto compute_cap = get_compute_capability();
+    std::string comp_cap;
+
+    // TODO: find a way to pass on compute capability from CLI
+    if (compute_cap.has_value()) {
+        println(std::cout, "Determined compute capability to be '{}'", compute_cap.value());
+        comp_cap = compute_cap.value();
+    } else {
+        static constexpr auto default_comp_cap = "sm_75";
+        println(std::cout, "Could not determine compute capability, continuing with default: '{}'.", default_comp_cap);
+        comp_cap = default_comp_cap;
+    }
+    {
+        auto llc = sys::find_cmd("llc");
+        // TODO: support 32-bit version?
+        auto cmd = fmt("{} -march=nvptx64 -mcpu={} {} -o {}", llc, comp_cap, dev_ll_name, dev_ptx_name);
+        auto rc  = sys::system(cmd);
+        if (rc != 0) {
+            println(std::cout, "Command exited with error code {}", rc);
+            return;
+        }
+    }
+    {
+        auto ptxas = sys::find_cmd("ptxas");
+        auto cmd   = fmt("{} -arch={} {} -o {}", ptxas, comp_cap, dev_ptx_name, dev_cubin_name);
+        auto rc    = sys::system(cmd);
+        if (rc != 0) {
+            println(std::cout, "Command exited with error code {}", rc);
+            return;
+        }
+    }
+    {
+        auto nvcc = sys::find_cmd("nvcc");
+        auto cmd  = fmt("{} -fatbin -arch={} {} -o {}", nvcc, comp_cap, dev_cubin_name, dev_fatbin_name);
+        auto rc   = sys::system(cmd);
+        if (rc != 0) {
+            println(std::cout, "Command exited with error code {}", rc);
+            return;
+        }
+    }
+
+    HostEmitter emitter(world, ostream, dev_fatbin_name);
+    emitter.run();
+
+    std::filesystem::remove(dev_ll_name);
+    std::filesystem::remove(dev_ptx_name);
+    std::filesystem::remove(dev_cubin_name);
+    std::filesystem::remove(dev_fatbin_name);
 }
 
 } // namespace mim::ll::nvptx
