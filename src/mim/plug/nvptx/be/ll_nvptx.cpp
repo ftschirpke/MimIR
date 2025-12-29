@@ -441,11 +441,6 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     static constexpr auto dev_ptx_name    = "tmp_mimir_nvptx_dev.ptx";
     static constexpr auto dev_cubin_name  = "tmp_mimir_nvptx_dev.cubin";
     static constexpr auto dev_fatbin_name = "tmp_mimir_nvptx_dev.fatbin";
-
-    std::filesystem::remove(dev_ll_name);
-    std::filesystem::remove(dev_ptx_name);
-    std::filesystem::remove(dev_cubin_name);
-    std::filesystem::remove(dev_fatbin_name);
     {
         std::ofstream dev_ll_ofs;
         dev_ll_ofs.open(dev_ll_name);
@@ -468,6 +463,7 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     }
     {
         auto llc = sys::find_cmd("llc");
+        if (!std::filesystem::exists(llc)) error("Could not find command: llc {}", llc);
         // TODO: support 32-bit version?
         auto cmd = fmt("{} -march=nvptx64 -mcpu={} {} -o {}", llc, comp_cap, dev_ll_name, dev_ptx_name);
         auto rc  = sys::system(cmd);
@@ -478,8 +474,9 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     }
     {
         auto ptxas = sys::find_cmd("ptxas");
-        auto cmd   = fmt("{} -arch={} {} -o {}", ptxas, comp_cap, dev_ptx_name, dev_cubin_name);
-        auto rc    = sys::system(cmd);
+        if (!std::filesystem::exists(ptxas)) error("Could not find command: ptxas {}", ptxas);
+        auto cmd = fmt("{} -arch={} {} -o {}", ptxas, comp_cap, dev_ptx_name, dev_cubin_name);
+        auto rc  = sys::system(cmd);
         if (rc != 0) {
             println(std::cout, "Command exited with error code {}", rc);
             return;
@@ -487,8 +484,9 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     }
     {
         auto nvcc = sys::find_cmd("nvcc");
-        auto cmd  = fmt("{} -fatbin -arch={} {} -o {}", nvcc, comp_cap, dev_cubin_name, dev_fatbin_name);
-        auto rc   = sys::system(cmd);
+        if (!std::filesystem::exists(nvcc)) error("Could not find command: nvcc {}", nvcc);
+        auto cmd = fmt("{} -fatbin -arch={} {} -o {}", nvcc, comp_cap, dev_cubin_name, dev_fatbin_name);
+        auto rc  = sys::system(cmd);
         if (rc != 0) {
             println(std::cout, "Command exited with error code {}", rc);
             return;
@@ -497,6 +495,11 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
 
     HostEmitter emitter(world, ostream, dev_fatbin_name);
     emitter.run();
+
+    std::filesystem::remove(dev_ll_name);
+    std::filesystem::remove(dev_ptx_name);
+    std::filesystem::remove(dev_cubin_name);
+    std::filesystem::remove(dev_fatbin_name);
 }
 
 } // namespace mim::ll::nvptx
