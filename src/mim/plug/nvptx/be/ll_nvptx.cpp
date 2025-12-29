@@ -159,7 +159,7 @@ std::string HostEmitter::prepare() {
 
         print(vars_decls_, "{} = private constant [{} x i8] c\"", fatbin_name, fatbin_bytes.size());
         for (auto byte : fatbin_bytes) {
-            if (std::isprint(byte)) {
+            if (std::isprint(byte) && byte != '"') {
                 print(vars_decls_, "{}", byte);
             } else {
                 auto byte_val = static_cast<int>(byte);
@@ -441,6 +441,11 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     static constexpr auto dev_ptx_name    = "tmp_mimir_nvptx_dev.ptx";
     static constexpr auto dev_cubin_name  = "tmp_mimir_nvptx_dev.cubin";
     static constexpr auto dev_fatbin_name = "tmp_mimir_nvptx_dev.fatbin";
+
+    std::filesystem::remove(dev_ll_name);
+    std::filesystem::remove(dev_ptx_name);
+    std::filesystem::remove(dev_cubin_name);
+    std::filesystem::remove(dev_fatbin_name);
     {
         std::ofstream dev_ll_ofs;
         dev_ll_ofs.open(dev_ll_name);
@@ -492,11 +497,6 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
 
     HostEmitter emitter(world, ostream, dev_fatbin_name);
     emitter.run();
-
-    std::filesystem::remove(dev_ll_name);
-    std::filesystem::remove(dev_ptx_name);
-    std::filesystem::remove(dev_cubin_name);
-    std::filesystem::remove(dev_fatbin_name);
 }
 
 } // namespace mim::ll::nvptx
