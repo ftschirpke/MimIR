@@ -19,6 +19,12 @@ lam %gpu.SharedPtr(T: *): * = %mem.Ptr (T, 3);
 lam %gpu.ConstPtr(T: *): *  = %mem.Ptr (T, 4);
 
 ///
+/// ### Streams
+///
+
+axm %gpu.Stream: *;
+
+///
 /// ## Operations w/ Side Effects
 ///
 /// ### %%gpu.copy_mem_to_device
@@ -33,17 +39,39 @@ axm %gpu.copy_mem_to_device: {T: *} → [%mem.M 0, %mem.M 1, %mem.Ptr0 T, %gpu.G
 axm %gpu.copy_mem_to_host: {T: *} → [%mem.M 0, %mem.M 1, %gpu.GlobalPtr T, %mem.Ptr0 T] → [%mem.M 0, %mem.M 1];
 
 ///
+/// ### %%gpu.with_streams
+///
+/// Provides a number of streams to execute GPU kernels in parallel with
+axm %gpu.with_streams: [%mem.M 0,
+                        n: Nat,
+                        Cn [%mem.M 0, %mem.M 1, I32,
+                            «n; %gpu.Stream», 
+                            Cn [%mem.M 0, %mem.M 1, I32]
+                            ]
+                        ] -> %mem.M 0;
+
+///
 /// ### %%gpu.launch
 ///
 /// Launches a kernel function on the device
-axm %gpu.launch: {T: *}    
+axm %gpu.launch: {T: *}
     → [%mem.M 0, n_warps: Nat, n_threads: Nat,
        kernel: Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5,
-                   Idx n_warps, Idx n_threads, T,
-                   Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]],
+               Idx n_warps, Idx n_threads,
+               T,
+               Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]],
        T]
     → %mem.M 0;
 // TODO: passing variadic number of arguments to the kernel
+
+axm %gpu.launch_w_stream: {T: *}
+    → [%mem.M 0, n_warps: Nat, n_threads: Nat, %gpu.Stream,
+       kernel: Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5,
+               Idx n_warps, Idx n_threads,
+               T,
+               Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]],
+       T]
+    → %mem.M 0;
 
 ///
 /// ### Phases
