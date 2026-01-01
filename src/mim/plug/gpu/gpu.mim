@@ -44,30 +44,26 @@ axm %gpu.copy_mem_to_host: {T: *} → [%mem.M 0, %mem.M 1, %gpu.GlobalPtr T, %me
 /// Provides a number of streams to execute GPU kernels in parallel with
 axm %gpu.with_streams: [%mem.M 0, n: Nat, Cn «n; %gpu.Stream»] → %mem.M 0;
 
-
-lam %gpu.kernel_type [n_warps: Nat, n_threads: Nat, dyn_shared_mem: Nat, T: *] =
-    let has_shared_mem = %core.ncmp.e (0, dyn_shared_mem);
-    // (kernel_w_shared, kernel_wo_shared)#has_shared_mem
-    kernel_w_shared
-    where
-        let kernel_w_shared  = Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5,
-                                   Idx n_warps, Idx n_threads,
-                                   %gpu.SharedPtr «dyn_shared_mem; I8»,
-                                   T,
-                                   Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]];
-        let kernel_wo_shared = Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5,
-                                   Idx n_warps, Idx n_threads,
-                                   T,
-                                   Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]];
-    end;
-
 ///
 /// ### %%gpu.launch
 ///
 /// Launches a kernel function on the device
-axm %gpu.launch: {T: *}    
-    → [%mem.M 0, n_warps: Nat, n_threads: Nat, dyn_shared_mem: Nat,
-       kernel: %gpu.kernel_type (n_warps, n_threads, dyn_shared_mem, T),
+axm %gpu.launch: {T: *}
+    → [%mem.M 0, n_warps: Nat, n_threads: Nat,
+       kernel: Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5,
+               Idx n_warps, Idx n_threads,
+               T,
+               Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]],
        T]
     → %mem.M 0;
 // TODO: passing variadic number of arguments to the kernel
+
+axm %gpu.launch_w_shared_mem: {T: *, S: *}
+    → [%mem.M 0, n_warps: Nat, n_threads: Nat,
+       kernel: Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5,
+               Idx n_warps, Idx n_threads,
+               %gpu.SharedPtr S,
+               T,
+               Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]],
+       T]
+    → %mem.M 0;
