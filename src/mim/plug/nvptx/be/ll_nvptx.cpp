@@ -256,17 +256,16 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     } else if (auto launch = Axm::isa<gpu::launch>(def)) {
         declare("i32 @cuLaunchKernel(ptr, i32, i32, i32, i32, i32, i32, i32, ptr, ptr, ptr)");
 
-        auto n_warps   = emit(launch->decurry()->decurry()->arg(0));
-        auto n_threads = emit(launch->decurry()->decurry()->arg(1));
-
         emit_unsafe(launch->arg(0));
-        auto func     = emit(launch->arg(1));
-        auto arg      = emit(launch->arg(2));
-        auto arg_type = convert(launch->arg(2)->type());
+        auto n_warps   = emit(launch->arg(1));
+        auto n_threads = emit(launch->arg(2));
+        auto func      = emit(launch->arg(3));
+        auto arg       = emit(launch->arg(4));
+        auto arg_type  = convert(launch->arg(4)->type());
 
         declare("i32 @cuModuleGetFunction(ptr, ptr, ptr)");
 
-        auto lam = Lam::isa_mut_cn(launch->arg(1));
+        auto lam = Lam::isa_mut_cn(launch->arg(3));
         if (!lam) error("kernel is not a lamda {}", func);
         if (!kernel_ids.contains(lam)) error("unknown kernel {}", lam);
         auto kid = kernel_ids[lam];
