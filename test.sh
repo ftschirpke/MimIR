@@ -69,7 +69,7 @@ fi
 
 echo "----- COMPILATION -----"
 
-clang $host_ll_path -o $hostbin_path -lcuda -Wno-override-module || error "host binary"
+clang -fsanitize=address $host_ll_path -o $hostbin_path -lcuda -Wno-override-module || error "host binary"
 
 echo "----- EXECUTE BIN -----"
 

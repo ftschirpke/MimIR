@@ -297,6 +297,25 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
                                     func_inner, n_warps, n_threads, shared_mem_bytes, stream, args_inner);
         emit_cu_error_handling(bb, launch_res);
         return launch_res;
+    } else if (auto stream_init = Axm::isa<gpu::stream_init>(def)) {
+        declare("i32 @cuStreamCreate(ptr, i32)");
+
+        emit_unsafe(stream_init->arg(0));
+        auto stream_ptr = emit(stream_init->arg(1));
+
+        auto res = bb.assign(name, "call i32 @cuStreamCreate(ptr {}, i32 0)", stream_ptr);
+        emit_cu_error_handling(bb, res);
+        return res;
+    } else if (auto stream_deinit = Axm::isa<gpu::stream_deinit>(def)) {
+        declare("i32 @cuStreamDestroy(ptr)");
+
+        emit_unsafe(stream_deinit->arg(0));
+        auto stream_ptr = emit(stream_deinit->arg(1));
+        auto stream     = bb.assign(name + "_inner", "load ptr, ptr {}", stream_ptr);
+
+        auto res = bb.assign(name, "call i32 @cuStreamDestroy(ptr {})", stream);
+        emit_cu_error_handling(bb, res);
+        return res;
     }
 
     return std::nullopt;

@@ -257,6 +257,7 @@ void Emitter::emit_epilogue(Lam* lam) {
 
         for (auto arg : app->args()) {
             if (auto val = emit_unsafe(arg); !val.empty()) {
+                if (Axm::isa<mem::M>(arg->type())) continue;
                 values.emplace_back(val);
                 types.emplace_back(arg->type());
             }

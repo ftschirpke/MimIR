@@ -21,10 +21,14 @@ con extern main [m0: %mem.M 0, m1: %mem.M 1,
                  argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0),
                  return: Cn [%mem.M 0, %mem.M 1, I32]] =
 
-    let m0 = %gpu.with_streams (m0, 2, run_gpu)
+    %gpu.with_streams (m0, 2, run_gpu, m1, exit)
     where
-        con run_gpu [m0: %mem.M 0, m1: %mem.M 1, argc: I32, streams: «2; %gpu.Stream», return: Cn [%mem.M 0, %mem.M 1, I32]] =
-            let (s1, s2) = streams;
+        con run_gpu [m0: %mem.M 0, streams: %mem.Ptr0 «2; %gpu.Stream», m1: %mem.M 1, return: Cn %mem.M 0] =
+            let s1_ptr = %mem.lea (streams, 0_2);
+            let s2_ptr = %mem.lea (streams, 1_2);
+
+            let (m0, s1) = %mem.load (m0, s1_ptr);
+            let (m0, s2) = %mem.load (m0, s2_ptr);
 
             let (m0, ptr) = %mem.alloc (I32, 0) m0;
             let m0 = %mem.store (m0, ptr, argc);
@@ -40,7 +44,7 @@ con extern main [m0: %mem.M 0, m1: %mem.M 1,
 
             let (m0, val) = %mem.load (m0, ptr);
             let m0 = %mem.free (m0, ptr);
-            return (m0, m1, argc);
+            return m0;
+        con exit [m0: %mem.M 0] = return (m0, m1, argc);
     end;
-    return (m0, m1, argc);
 

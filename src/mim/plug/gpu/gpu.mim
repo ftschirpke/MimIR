@@ -22,7 +22,10 @@ lam %gpu.ConstPtr(T: *): *  = %mem.Ptr (T, 4);
 /// ### Streams
 ///
 
-axm %gpu.Stream: *;
+let %gpu.Stream = %mem.Ptr0 [ I8 ];
+
+axm %gpu.stream_init: [%mem.M 0, %mem.Ptr0 %gpu.Stream] -> [%mem.M 0];
+axm %gpu.stream_deinit: [%mem.M 0, %mem.Ptr0 %gpu.Stream] -> [%mem.M 0];
 
 ///
 /// ## Operations w/ Side Effects
@@ -42,13 +45,53 @@ axm %gpu.copy_mem_to_host: {T: *} → [%mem.M 0, %mem.M 1, %gpu.GlobalPtr T, %me
 /// ### %%gpu.with_streams
 ///
 /// Provides a number of streams to execute GPU kernels in parallel with
-axm %gpu.with_streams: [%mem.M 0,
-                        n: Nat,
-                        Cn [%mem.M 0, %mem.M 1, I32,
-                            «n; %gpu.Stream», 
-                            Cn [%mem.M 0, %mem.M 1, I32]
-                            ]
-                        ] -> %mem.M 0;
+con %gpu.with_streams {T: *, s: Nat, Ts: «s; *»}
+[
+    mem: %mem.M 0,
+    n: Nat,
+    func: Cn [
+       %mem.M 0,
+       streams: %mem.Ptr0 «n; %gpu.Stream»,
+       args: «i: s; Ts#i»,
+       Cn %mem.M 0
+    ],
+    args: «i: s; Ts#i»,
+    return: Cn %mem.M 0
+] =
+    let (mem, streams) = %mem.alloc («n; %gpu.Stream», 0) mem;
+    init mem
+    where
+        con init [mem: %mem.M 0] =
+            loop (mem, 0)
+            where
+                con loop [mem: %mem.M 0, i: Nat] =
+                    let cond = %core.ncmp.l (i, n);
+                    (run, body)#cond mem
+                    where
+                        con body [mem: %mem.M 0] =
+                            let lea = %mem.lea (streams, %core.bitcast (Idx n) i);
+                            let mem = %gpu.stream_init (mem, lea);
+                            let inc = %core.nat.add (i, 1);
+                            loop (mem, inc);
+                    end;
+            end;
+        con run [mem: %mem.M 0] =
+            func (mem, streams, args, deinit);
+        con deinit [mem: %mem.M 0] =
+            loop (mem, 0)
+            where
+                con loop [mem: %mem.M 0, i: Nat] =
+                    let cond = %core.ncmp.l (i, n);
+                    (return, body)#cond mem
+                    where
+                        con body [mem: %mem.M 0] =
+                            let lea = %mem.lea (streams, %core.bitcast (Idx n) i);
+                            let mem = %gpu.stream_deinit (mem, lea);
+                            let inc = %core.nat.add (i, 1);
+                            loop (mem, inc);
+                    end;
+            end;
+    end;
 
 ///
 /// ### %%gpu.launch
