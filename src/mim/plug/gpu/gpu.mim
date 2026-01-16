@@ -44,3 +44,9 @@ axm %gpu.launch: {T: *}
        T]
     → %mem.M 0;
 // TODO: passing variadic number of arguments to the kernel
+
+///
+/// ### Phases
+///
+axm %gpu.split_off_kernels_phase: %compile.Phase;
+

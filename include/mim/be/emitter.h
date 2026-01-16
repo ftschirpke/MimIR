@@ -47,8 +47,6 @@ protected:
         return locals_[def] = val;
     }
 
-    virtual bool is_to_emit() { return true; }
-
     void visit(const Nest& nest) override {
         if (!root()->is_set()) {
             child().emit_imported(root());
@@ -63,8 +61,6 @@ protected:
         auto old_size = lam2bb_.size();
 
         assert(root()->ret_var());
-
-        if (!child().is_to_emit()) return;
 
         auto fct = child().prepare();
 

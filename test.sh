@@ -17,8 +17,9 @@ test_dir_path=/home/friedrich/studium/master/mimir/lit/gpu
 test_path=$test_dir_path/$name.mim
 output_dir_path=$test_dir_path/Output
 host_ll_path=$output_dir_path/$name.mim.tmp.ll 
-dev_ll_path=$output_dir_path/$name.mim.tmp.dev.ll 
 hostbin_path=$output_dir_path/$name.mim.tmp.out
+
+dev_ll_path=tmp_mimir_nvptx_dev.ll
 
 mkdir -p $output_dir_path
 
@@ -37,7 +38,6 @@ rm $host_ll_path $dev_ll_path $hostbin_path
 
 $mim $test_path \
     --output-ll $host_ll_path \
-    --output-device-ll $dev_ll_path \
     --device-target nvptx \
     --embed-device-binary \
     -o - \
@@ -64,7 +64,7 @@ if [[ -f $dev_ll_path ]]; then
     fi
     cat $dev_ll_path
 else
-    error "device llvm was not created"
+    error "device llvm was not created or deleted already"
 fi
 
 echo "----- COMPILATION -----"

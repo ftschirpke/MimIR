@@ -143,6 +143,9 @@ int main(int argc, char** argv) {
             }
         }
 
+        if (os[LL] && os[DvLL]) error("Simultaneously emitting host and device code is currently not supported");
+        // TODO: allow this by performing the world splitting before invoking backends
+
         if (input.empty()) throw std::invalid_argument("error: no input given");
         if (input[0] == '-' || input.substr(0, 2) == "--")
             throw std::invalid_argument("error: unknown option " + input);

@@ -4,8 +4,11 @@
 
 #include <mim/plug/core/core.h>
 #include <mim/plug/gpu/gpu.h>
+#include <mim/plug/gpu/phase/split_off_kernels.h>
 #include <mim/plug/mem/mem.h>
 #include <mim/plug/nvptx/nvptx.h>
+
+using namespace std::string_literals;
 
 namespace mim::ll::nvptx {
 
@@ -17,15 +20,19 @@ class HostEmitter : public mim::ll::Emitter {
 public:
     using Super = mim::ll::Emitter;
 
-    HostEmitter(World& world, std::ostream& ostream)
+    HostEmitter(World& world,
+                std::ostream& ostream,
+                const LamSet& kernels,
+                std::optional<std::string> device_fatbin_file = std::nullopt)
         : Super(world, "llvm_nvptx_host_emitter", ostream)
-        , device_fatbin_file(std::nullopt) {}
+        , device_fatbin_file(device_fatbin_file)
+        , kernel_ids(kernels.size()) {
+        for (auto kernel : kernels) {
+            auto kid           = kernel_ids.size();
+            kernel_ids[kernel] = kid;
+        }
+    }
 
-    HostEmitter(World& world, std::ostream& ostream, std::string device_fatbin_file)
-        : Super(world, "llvm_nvptx_host_emitter", ostream)
-        , device_fatbin_file(device_fatbin_file) {}
-
-    bool is_to_emit() override;
     void start() override;
 
     void emit_epilogue(Lam*) override;
@@ -50,55 +57,22 @@ class DeviceEmitter : public mim::ll::Emitter {
 public:
     using Super = mim::ll::Emitter;
 
-    DeviceEmitter(World& world, std::ostream& ostream)
-        : Super(world, "llvm_nvptx_device_emitter", ostream) {}
-
-    bool is_to_emit() override;
+    DeviceEmitter(World& world, std::ostream& ostream, const LamSet& kernels)
+        : Super(world, "llvm_nvptx_device_emitter", ostream)
+        , kernels(kernels) {}
 
     std::string prepare() override;
+
+private:
+    const LamSet& kernels;
 };
-
-static bool is_gpu_type(const Def* type) {
-    if (auto m = Axm::isa<mem::M>(type)) {
-        auto addr_space = m->arg();
-        auto as         = Lit::as<nat_t>(addr_space);
-        if (as == 2) error("NVPTX does not support working in address space 2");
-        // TODO: this might not be error-proof e.g. when host writes to constant memory
-        return as > 2;
-    }
-    if (auto sigma = type->isa<Sigma>()) {
-        for (auto op : sigma->ops())
-            if (is_gpu_type(op)) return true;
-    }
-    return false;
-}
-
-static bool is_gpu_code(Lam* lam) {
-    return std::ranges::any_of(lam->vars(), [](auto var) { return is_gpu_type(var->type()); });
-}
-
-static bool is_kernel(Lam* lam) {
-    if (!lam->is_external()) return false;
-    if (!is_gpu_code(lam)) return false;
-    // TODO: better kernel detection
-    return true;
-}
-
-bool HostEmitter::is_to_emit() { return !is_gpu_code(root()); }
 
 void HostEmitter::start() {
     DefSet done;
-    for (auto mut : world().externals()) {
-        if (auto lam = Lam::isa_mut_cn(mut.second)) {
-            if (is_kernel(lam)) {
-                assert(!kernel_ids.contains(lam));
-                auto kid        = kernel_ids.size();
-                kernel_ids[lam] = kid;
-                auto name       = id(lam).substr(1);
-                print(vars_decls_, "{}{} = private constant [{} x i8] c\"{}\\00\"\n", kernel_name_prefix, kid,
-                      name.size() + 1, name);
-            }
-        }
+    for (auto [kernel, kid] : kernel_ids) {
+        auto name = id(kernel).substr(1);
+        print(vars_decls_, "{}{} = private constant [{} x i8] c\"{}\\00\"\n", kernel_name_prefix, kid, name.size() + 1,
+              name);
     }
     Super::start();
 }
@@ -159,7 +133,8 @@ std::string HostEmitter::prepare() {
 
         print(vars_decls_, "{} = private constant [{} x i8] c\"", fatbin_name, fatbin_bytes.size());
         for (auto byte : fatbin_bytes) {
-            if (std::isprint(byte) && byte != '"') {
+            bool invalid_cstr_char = byte == '"' || byte == '\\';
+            if (std::isprint(byte) && !invalid_cstr_char) {
                 print(vars_decls_, "{}", byte);
             } else {
                 auto byte_val = static_cast<int>(byte);
@@ -299,7 +274,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         if (!kernel_ids.contains(lam)) error("unknown kernel {}", lam);
         auto kid = kernel_ids[lam];
 
-        auto mod_inner = bb.assign("%mod_inner", "load ptr, ptr {}", mod_name);
+        auto mod_inner = bb.assign(name + "_mod_inner", "load ptr, ptr {}", mod_name);
 
         auto func_ptr = bb.assign(name + "_funcptr", "alloca ptr");
         auto func_res = bb.assign(name + "_getfuncres", "call i32 @cuModuleGetFunction(ptr {}, ptr {}, ptr {}{})",
@@ -317,7 +292,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         auto args_inner
             = bb.assign(name + "_args_inner", "getelementptr inbounds [1 x ptr], ptr {}, i64 0, i64 0", args_ptr);
         auto launch_res = bb.assign(name,
-                                    "call i32 @cuLaunchKernel(ptr {}, i32 {}, i32 1, i32 1, i32 {}, i32 1, i32 1,"
+                                    "call i32 @cuLaunchKernel(ptr {}, i32 {}, i32 1, i32 1, i32 {}, i32 1, i32 1, "
                                     "i32 {}, ptr {}, ptr {}, ptr null)",
                                     func_inner, n_warps, n_threads, shared_mem_bytes, stream, args_inner);
         emit_cu_error_handling(bb, launch_res);
@@ -327,12 +302,10 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     return std::nullopt;
 }
 
-bool DeviceEmitter::is_to_emit() { return is_gpu_code(root()); }
-
 std::string DeviceEmitter::prepare() {
-    auto is_kern = is_kernel(root());
+    auto is_kern = kernels.contains(root());
 
-    auto attrs = is_kern ? std::string("ptx_kernel") : "";
+    auto attrs = is_kern ? "ptx_kernel"s : ""s;
     auto sep   = attrs.empty() ? "" : " ";
     print(func_impls_, "define{}{} {} {}(", sep, attrs, convert_ret_pi(root()->type()->ret_pi()), id(root()));
 
@@ -411,12 +384,22 @@ std::string DeviceEmitter::prepare() {
 }
 
 void emit_host(World& world, std::ostream& ostream) {
-    HostEmitter emitter(world, ostream);
+    gpu::phase::SplitOffKernels split_phase(world, "nvptx_host_be_split");
+    split_phase.run();
+    auto& host_world = split_phase.old_world();
+    auto& kernels    = split_phase.old_kernels();
+
+    HostEmitter emitter(host_world, ostream, kernels);
     emitter.run();
 }
 
 void emit_device(World& world, std::ostream& ostream) {
-    DeviceEmitter emitter(world, ostream);
+    gpu::phase::SplitOffKernels split_phase(world, "nvptx_device_be_split");
+    split_phase.run();
+    auto& device_world = split_phase.new_world();
+    auto& kernels      = split_phase.new_kernels();
+
+    DeviceEmitter emitter(device_world, ostream, kernels);
     emitter.run();
 }
 
@@ -441,12 +424,21 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     static constexpr auto dev_ptx_name    = "tmp_mimir_nvptx_dev.ptx";
     static constexpr auto dev_cubin_name  = "tmp_mimir_nvptx_dev.cubin";
     static constexpr auto dev_fatbin_name = "tmp_mimir_nvptx_dev.fatbin";
+
+    gpu::phase::SplitOffKernels split_phase(world, "nvptx_embed_be_split");
+    split_phase.run();
+    auto& host_world           = split_phase.old_world();
+    auto& host_world_kernels   = split_phase.old_kernels();
+    auto& device_world         = split_phase.new_world();
+    auto& device_world_kernels = split_phase.new_kernels();
+
     {
         std::ofstream dev_ll_ofs;
         dev_ll_ofs.open(dev_ll_name);
         if (!dev_ll_ofs.is_open() || dev_ll_ofs.fail())
             error("Error occured while trying to open temporary file '{}'", dev_ll_name);
-        emit_device(world, dev_ll_ofs);
+        DeviceEmitter device_emitter(device_world, dev_ll_ofs, device_world_kernels);
+        device_emitter.run();
     }
 
     auto compute_cap = get_compute_capability();
@@ -493,13 +485,15 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
         }
     }
 
-    HostEmitter emitter(world, ostream, dev_fatbin_name);
-    emitter.run();
+    HostEmitter host_emitter(host_world, ostream, host_world_kernels, dev_fatbin_name);
+    host_emitter.run();
 
+#ifdef NDEBUG
     std::filesystem::remove(dev_ll_name);
     std::filesystem::remove(dev_ptx_name);
     std::filesystem::remove(dev_cubin_name);
     std::filesystem::remove(dev_fatbin_name);
+#endif
 }
 
 } // namespace mim::ll::nvptx
