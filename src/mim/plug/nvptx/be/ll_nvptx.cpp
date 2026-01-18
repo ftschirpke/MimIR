@@ -68,7 +68,6 @@ private:
 };
 
 void HostEmitter::start() {
-    DefSet done;
     for (auto [kernel, kid] : kernel_ids) {
         auto name = id(kernel).substr(1);
         print(vars_decls_, "{}{} = private constant [{} x i8] c\"{}\\00\"\n", kernel_name_prefix, kid, name.size() + 1,
@@ -263,13 +262,14 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         emit_unsafe(launch->arg(0));
         auto n_warps   = emit(launch->arg(1));
         auto n_threads = emit(launch->arg(2));
-        auto func      = emit(launch->arg(3));
-        auto arg       = emit(launch->arg(4));
-        auto arg_type  = convert(launch->arg(4)->type());
+        auto stream    = emit(launch->arg(3));
+        auto func      = emit(launch->arg(4));
+        auto arg       = emit(launch->arg(5));
+        auto arg_type  = convert(launch->arg(5)->type());
 
         declare("i32 @cuModuleGetFunction(ptr, ptr, ptr)");
 
-        auto lam = Lam::isa_mut_cn(launch->arg(3));
+        Lam* lam = launch->arg(4)->isa_mut<Lam>();
         if (!lam) error("kernel is not a lamda {}", func);
         if (!kernel_ids.contains(lam)) error("unknown kernel {}", lam);
         auto kid = kernel_ids[lam];
@@ -286,8 +286,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
 
         auto args_ptr = bb.assign(name + "_args_ptr", "alloca [1 x ptr]");
         print(bb.body().emplace_back(), "store ptr {}, ptr {}", arg_wrap, args_ptr);
-        auto shared_mem_bytes = 0;      // TODO: add shared memory support
-        auto stream           = "null"; // TODO: add support for CUDA streams
+        auto shared_mem_bytes = 0; // TODO: add shared memory support
         auto func_inner       = bb.assign(name + "_func_inner", "load ptr, ptr {}", func_ptr);
         auto args_inner
             = bb.assign(name + "_args_inner", "getelementptr inbounds [1 x ptr], ptr {}, i64 0, i64 0", args_ptr);

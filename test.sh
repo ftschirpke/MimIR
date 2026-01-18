@@ -36,6 +36,7 @@ fi
 
 rm $host_ll_path $dev_ll_path $hostbin_path
 
+gdb --args \
 $mim $test_path \
     --output-ll $host_ll_path \
     --device-target nvptx \

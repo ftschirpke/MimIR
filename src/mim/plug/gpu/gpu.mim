@@ -11,18 +11,27 @@ plugin mem;
 ///
 /// ## Types
 ///
+/// ### Memory Types
+///
+let %gpu.GlobalM = %mem.M 1;
+let %gpu.SharedM = %mem.M 3;
+let %gpu.ConstM  = %mem.M 4;
+let %gpu.LocalM  = %mem.M 5;
+
+///
 /// ### Pointer Types
 ///
-
 lam %gpu.GlobalPtr(T: *): * = %mem.Ptr (T, 1);
 lam %gpu.SharedPtr(T: *): * = %mem.Ptr (T, 3);
 lam %gpu.ConstPtr(T: *): *  = %mem.Ptr (T, 4);
+lam %gpu.LocalPtr(T: *): *  = %mem.Ptr (T, 5);
 
 ///
 /// ### Streams
 ///
 
 let %gpu.Stream = %mem.Ptr0 [ I8 ];
+axm %gpu.DefaultStream: %gpu.Stream;
 
 axm %gpu.stream_init: [%mem.M 0, %mem.Ptr0 %gpu.Stream] -> [%mem.M 0];
 axm %gpu.stream_deinit: [%mem.M 0, %mem.Ptr0 %gpu.Stream] -> [%mem.M 0];
@@ -33,13 +42,17 @@ axm %gpu.stream_deinit: [%mem.M 0, %mem.Ptr0 %gpu.Stream] -> [%mem.M 0];
 /// ### %%gpu.copy_mem_to_device
 ///
 /// Copies data from host memory to device memory
-axm %gpu.copy_mem_to_device: {T: *} → [%mem.M 0, %mem.M 1, %mem.Ptr0 T, %gpu.GlobalPtr T] → [%mem.M 0, %mem.M 1];
+axm %gpu.copy_mem_to_device: {T: *} 
+                           → [%mem.M 0, %gpu.GlobalM, %mem.Ptr0 T, %gpu.GlobalPtr T]
+                           → [%mem.M 0, %gpu.GlobalM];
 
 ///
 /// ### %%gpu.copy_mem_to_host
 ///
 /// Copies data from device memory to host memory
-axm %gpu.copy_mem_to_host: {T: *} → [%mem.M 0, %mem.M 1, %gpu.GlobalPtr T, %mem.Ptr0 T] → [%mem.M 0, %mem.M 1];
+axm %gpu.copy_mem_to_host: {T: *} 
+                         → [%mem.M 0, %gpu.GlobalM, %gpu.GlobalPtr T, %mem.Ptr0 T] 
+                         → [%mem.M 0, %gpu.GlobalM];
 
 ///
 /// ### %%gpu.with_streams
@@ -97,24 +110,12 @@ con %gpu.with_streams {T: *, s: Nat, Ts: «s; *»}
 /// ### %%gpu.launch
 ///
 /// Launches a kernel function on the device
-axm %gpu.launch: {T: *}
-    → [%mem.M 0, n_warps: Nat, n_threads: Nat,
-       kernel: Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5,
-               Idx n_warps, Idx n_threads,
-               T,
-               Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]],
-       T]
-    → %mem.M 0;
-// TODO: passing variadic number of arguments to the kernel
-
-axm %gpu.launch_w_stream: {T: *}
-    → [%mem.M 0, n_warps: Nat, n_threads: Nat, %gpu.Stream,
-       kernel: Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5,
-               Idx n_warps, Idx n_threads,
-               T,
-               Cn [%mem.M 1, %mem.M 3, %mem.M 4, %mem.M 5]],
-       T]
-    → %mem.M 0;
+axm %gpu.launch: {s: Nat, Ts: «s; *»}
+               → [%mem.M 0, n_warps: Nat, n_threads: Nat, %gpu.Stream,
+                  [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_warps, Idx n_threads, args: «i: s; Ts#i»]
+                  → [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM],
+                  args: «i: s; Ts#i»]
+               → %mem.M 0;
 
 ///
 /// ### Phases
