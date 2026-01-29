@@ -98,8 +98,29 @@ void HostEmitter::find_kernels(const Def* def) {
     }
 }
 
-static void emit_cu_error_handling(BB& bb, const std::string& cu_result) {
-    // TODO: implement
+void HostEmitter::emit_cu_error_handling(BB& bb, const std::string& cu_result, bool tail) {
+    // TODO: properly implement
+#ifndef NDEBUG
+    declare("i32 @cuGetErrorString(i32, ptr)");
+    declare("i32 @puts(ptr)");
+
+    auto err_name     = cu_result + "_errstr";
+    auto err_name_ptr = cu_result + "_errname";
+
+    if (tail) {
+        bb.tail("{} = alloca ptr", err_name_ptr);
+        // bb.tail("{}_issuccess = icmp eq i32 {}, 0", cu_result, cu_result);
+        bb.tail("{}_errcall = call i32 @cuGetErrorString(i32 {}, ptr {})", cu_result, cu_result, err_name_ptr);
+        bb.tail("{}_errstr = load ptr, ptr {}", cu_result, err_name_ptr);
+        bb.tail("{}_errputs = call i32 @puts(ptr {})", cu_result, err_name);
+    } else {
+        bb.assign(err_name_ptr, "alloca ptr");
+        // bb.assign(cu_result + "_issuccess", "icmp eq i32 {}, 0", cu_result);
+        bb.assign(cu_result + "_errcall", "call i32 @cuGetErrorString(i32 {}, ptr {})", cu_result, err_name_ptr);
+        bb.assign(err_name, "load ptr, ptr {}", err_name_ptr);
+        bb.assign(cu_result + "_errputs", "call i32 @puts(ptr {})", err_name);
+    }
+#endif
     return;
 }
 
