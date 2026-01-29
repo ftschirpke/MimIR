@@ -5,6 +5,7 @@
 #include <mim/phase.h>
 #include <mim/plugin.h>
 
+#include <mim/plug/gpu/phase/mem_checks.h>
 #include <mim/plug/mem/mem.h>
 
 using namespace mim;
@@ -31,6 +32,8 @@ void reg_stages(Flags2Stages& stages) {
         }
         return {};
     });
+
+    Stage::hook<gpu::mem_checks_phase, gpu::phase::MemChecks>(stages);
 }
 
 extern "C" MIM_EXPORT Plugin mim_get_plugin() { return {"gpu", nullptr, reg_stages, nullptr}; }

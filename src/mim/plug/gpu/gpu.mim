@@ -215,3 +215,8 @@ lam %gpu.synced_scope (m1: %gpu.GlobalM, m3: %gpu.SharedM,
 ///
 axm %gpu.malloc2gpualloc_repl: %compile.Repl;
 
+///
+/// ### Phases
+///
+axm %gpu.mem_checks_phase: %compile.Phase;
+
