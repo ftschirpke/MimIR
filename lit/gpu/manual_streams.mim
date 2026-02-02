@@ -1,5 +1,5 @@
 // RUN: rm -f %t.ll
-// RUN: %mim %s --output-ll %t.ll --embed-device-binary --device-target nvptx -o -
+// RUN: %mim %s --output-ll %t.ll --device-target nvptx -o -
 // RUN: rm -f %t
 // RUN: clang %t.ll -o %t -lcuda -Wno-override-module
 // RUN: %t; test $? -eq 84

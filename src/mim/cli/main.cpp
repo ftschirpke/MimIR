@@ -20,7 +20,7 @@ using namespace mim;
 using namespace std::literals;
 
 int main(int argc, char** argv) {
-    enum Backends { AST, Dot, H, LL, Md, Mim, Nest, DvLL, Num_Backends };
+    enum Backends { AST, Dot, H, LL, Md, Mim, Nest, Num_Backends };
     enum DeviceTargets { None, NVPTX, Num_DeviceTargets };
 
     absl::btree_map<std::string, DeviceTargets> device_target_names = {
@@ -51,7 +51,8 @@ int main(int argc, char** argv) {
         auto& flags      = driver.flags();
 
         std::string device_target_name = "none"s;
-        bool embed_device_binary       = false;
+        bool host_only                 = false;
+        bool device_only               = false;
 
         // clang-format off
         auto cli = lyra::cli()
@@ -70,10 +71,10 @@ int main(int argc, char** argv) {
             | lyra::opt(output[Md ],  "file"               )      ["--output-md"            ]("Emits the input formatted as Markdown.")
             | lyra::opt(output[Mim],  "file"               )["-o"]["--output-mim"           ]("Emits the Mim program again.")
             | lyra::opt(output[Nest], "file"               )      ["--output-nest"          ]("Emits program nesting tree as Dot.")
-            | lyra::opt(output[DvLL], "file"               )      ["--output-device-ll"     ]("Compiles the Mim program's device code to LLVM.")
             | lyra::opt(device_target_name, "target"       )      ["--device-target"        ]("Target for device code ('none' or 'nvptx'). Default: 'none'")
               .choices([&device_target_names](std::string value) { return device_target_names.contains(value); })
-            | lyra::opt(embed_device_binary                )      ["--embed-device-binary"  ]("Embed the compiled device code in the host LLVM.")
+            | lyra::opt(host_only                          )      ["--ll-host-only"         ]("Emit LLVM only for the host code (Default: compile both and embed device binary in host LLVM)")
+            | lyra::opt(device_only                        )      ["--ll-device-only"       ]("Emit LLVM only for the device code (Default: compile both and embed device binary in host LLVM)")
             | lyra::opt(flags.ascii                        )["-a"]["--ascii"                ]("Use ASCII alternatives in output instead of UTF-8.")
             | lyra::opt(flags.bootstrap                    )      ["--bootstrap"            ]("Puts mim into \"bootstrap mode\". This means a 'plugin' directive has the same effect as an 'import' and will not load a library. In addition, no standard plugins will be loaded.")
             | lyra::opt(dot_follow_types                   )      ["--dot-follow-types"     ]("Follow type dependencies in DOT output.")
@@ -143,8 +144,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (os[LL] && os[DvLL]) error("Simultaneously emitting host and device code is currently not supported");
-        // TODO: allow this by performing the world splitting before invoking backends
+        if (device_only && host_only) error("The options --ll-host-only and --ll-device-only are exclusive.");
 
         if (input.empty()) throw std::invalid_argument("error: no input given");
         if (input[0] == '-' || input.substr(0, 2) == "--")
@@ -160,7 +160,8 @@ int main(int argc, char** argv) {
 
             if (!device_target_names.contains(device_target_name))
                 error("invalid device target name '{}'", device_target_name);
-            switch (device_target_names[device_target_name]) {
+            auto device_target = device_target_names[device_target_name];
+            switch (device_target) {
                 case None: break;
                 case NVPTX: plugins.emplace_back("nvptx"s); break;
                 case Num_DeviceTargets: fe::unreachable();
@@ -216,25 +217,13 @@ int main(int argc, char** argv) {
                             plugin_name  = "core";
                             break;
                         case NVPTX:
-                            backend_name = embed_device_binary ? "ll-host-nvptx-embed" : "ll-host-nvptx";
-                            plugin_name  = "nvptx";
-                            break;
-                        case Num_DeviceTargets: fe::unreachable();
-                    }
-                    if (auto backend = driver.backend(backend_name))
-                        backend(world, *s);
-                    else
-                        error("'{}' emitter not loaded; try loading '{}' plugin", backend_name, plugin_name);
-                }
-
-                if (auto s = os[DvLL]) {
-                    const char* backend_name;
-                    const char* plugin_name;
-                    switch (device_target_names[device_target_name]) {
-                        case None: error("no device target chosen; cannot compile device code to LLVM"); break;
-                        case NVPTX:
-                            backend_name = "ll-dev-nvptx";
-                            plugin_name  = "nvptx";
+                            if (host_only)
+                                backend_name = "ll-host-nvptx";
+                            else if (device_only)
+                                backend_name = "ll-dev-nvptx";
+                            else
+                                backend_name = "ll-host-nvptx-embed-dev";
+                            plugin_name = "nvptx";
                             break;
                         case Num_DeviceTargets: fe::unreachable();
                     }

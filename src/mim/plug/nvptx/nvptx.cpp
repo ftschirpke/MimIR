@@ -9,8 +9,8 @@ using namespace mim;
 
 extern "C" MIM_EXPORT Plugin mim_get_plugin() {
     return {"nvptx", nullptr, nullptr, [](Backends& backends) {
-                backends["ll-host-nvptx"]       = &ll::nvptx::emit_host;
-                backends["ll-dev-nvptx"]        = &ll::nvptx::emit_device;
-                backends["ll-host-nvptx-embed"] = &ll::nvptx::emit_host_with_embedded_device;
+                backends["ll-host-nvptx"]           = &ll::nvptx::emit_host;
+                backends["ll-dev-nvptx"]            = &ll::nvptx::emit_device;
+                backends["ll-host-nvptx-embed-dev"] = &ll::nvptx::emit_host_with_embedded_device;
             }};
 }

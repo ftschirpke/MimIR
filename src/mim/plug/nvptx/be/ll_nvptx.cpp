@@ -1,10 +1,11 @@
 #include "mim/plug/nvptx/be/ll_nvptx.h"
 
+#include <mim/driver.h>
+
 #include <mim/util/sys.h>
 
 #include <mim/plug/core/core.h>
 #include <mim/plug/gpu/gpu.h>
-#include <mim/plug/gpu/phase/split_off_kernels.h>
 #include <mim/plug/mem/mem.h>
 #include <mim/plug/nvptx/nvptx.h>
 
@@ -166,6 +167,37 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     std::string op;
 
     ILOG("FRIEDRICH def {} : {}", def, def->type());
+
+    auto global_as = Lit::as(world().annex<gpu::addr_space_global>());
+    auto shared_as = Lit::as(world().annex<gpu::addr_space_shared>());
+    auto const_as  = Lit::as(world().annex<gpu::addr_space_const>());
+    auto local_as  = Lit::as(world().annex<gpu::addr_space_local>());
+
+    if (auto malloc = Axm::isa<mem::malloc>(def)) {
+        auto addr_space = Lit::as(malloc->decurry()->arg(1));
+        if (addr_space == global_as)
+            error("Unexpected %mem.malloc for global address space should be %gpu.alloc: {}", def);
+        else if (addr_space == shared_as || addr_space == const_as || addr_space == local_as)
+            error("Illegal host memory operation for address space {}: {}", addr_space, def);
+        return std::nullopt;
+    } else if (auto free = Axm::isa<mem::free>(def)) {
+        auto addr_space = Lit::as(free->decurry()->arg(1));
+        if (addr_space == global_as)
+            error("Unexpected %mem.free for global address space should be %gpu.free: {}", def);
+        else if (addr_space == shared_as || addr_space == const_as || addr_space == local_as)
+            error("Illegal host memory operation for address space {}: {}", addr_space, def);
+        return std::nullopt;
+    } else if (auto mslot = Axm::isa<mem::mslot>(def)) {
+        auto addr_space = Lit::as(mslot->decurry()->arg(1));
+        if (addr_space == global_as)
+            error("Cannot use %mem.mslot global address space from host. Use %gpu.alloc and %gpu.free "
+                  "instead: {}",
+                  def);
+        else if (addr_space == shared_as || addr_space == const_as || addr_space == local_as)
+            error("Illegal host memory operation for address space {}: {}", addr_space, def);
+        return std::nullopt;
+    }
+
     if (auto default_stream = Axm::isa<gpu::default_stream>(def)) {
         return "null";
     } else if (auto init = Axm::isa<gpu::init>(def)) {
@@ -462,9 +494,6 @@ void DeviceEmitter::start() {
     Super::start();
 }
 
-constexpr int KERNEL_NUM_ARGS      = 8;
-constexpr int SMEM_KERNEL_NUM_ARGS = KERNEL_NUM_ARGS + 1;
-
 std::string DeviceEmitter::prepare() {
     auto is_kern = kernels_.contains(root());
     if (!is_kern) return Super::prepare();
@@ -473,12 +502,12 @@ std::string DeviceEmitter::prepare() {
     print(func_impls_, "define ptx_kernel {} {}(", convert_ret_pi(kernel->type()->ret_pi()), id(kernel));
 
     auto num_vars = kernel->num_vars();
-    assert(num_vars == KERNEL_NUM_ARGS || num_vars == SMEM_KERNEL_NUM_ARGS);
+    assert(num_vars == 8 || num_vars == 9);
 
     auto groups_idx = kernel->var(4);
     auto items_idx  = kernel->var(5);
 
-    if (num_vars == SMEM_KERNEL_NUM_ARGS) {
+    if (num_vars == 9) {
         auto smem_var     = kernel->var(6);
         auto name         = id(smem_var);
         locals_[smem_var] = name;
@@ -549,21 +578,28 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
     return std::nullopt;
 }
 
-void emit_host(World& world, std::ostream& ostream) {
-    gpu::phase::SplitOffKernels split_phase(world, "nvptx_host_be_split");
-    split_phase.run();
-    auto& host_world = split_phase.old_world();
+static auto get_setup_stage(World& world) {
+    auto flags         = Annex::base<gpu::setup4backend>();
+    auto stage_funcptr = world.driver().stage(flags);
+    auto stage         = (*stage_funcptr)(world);
+    auto phase         = stage->isa<RWPhase>();
+    if (!phase) error("Found unexpected gpu::setup4backend stage");
+    return std::make_pair(std::move(stage), phase);
+}
 
-    HostEmitter emitter(host_world, ostream);
+void emit_host(World& world, std::ostream& ostream) {
+    auto [stage, setup_phase] = get_setup_stage(world);
+    setup_phase->run();
+
+    HostEmitter emitter(setup_phase->old_world(), ostream);
     emitter.run();
 }
 
 void emit_device(World& world, std::ostream& ostream) {
-    gpu::phase::SplitOffKernels split_phase(world, "nvptx_device_be_split");
-    split_phase.run();
-    auto& device_world = split_phase.new_world();
+    auto [stage, setup_phase] = get_setup_stage(world);
+    setup_phase->run();
 
-    DeviceEmitter emitter(device_world, ostream);
+    DeviceEmitter emitter(setup_phase->new_world(), ostream);
     emitter.run();
 }
 
@@ -589,17 +625,15 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     static constexpr auto dev_cubin_name  = "tmp_mimir_nvptx_dev.cubin";
     static constexpr auto dev_fatbin_name = "tmp_mimir_nvptx_dev.fatbin";
 
-    gpu::phase::SplitOffKernels split_phase(world, "nvptx_embed_be_split");
-    split_phase.run();
-    auto& host_world   = split_phase.old_world();
-    auto& device_world = split_phase.new_world();
+    auto [stage, setup_phase] = get_setup_stage(world);
+    setup_phase->run();
 
     {
         std::ofstream dev_ll_ofs;
         dev_ll_ofs.open(dev_ll_name);
         if (!dev_ll_ofs.is_open() || dev_ll_ofs.fail())
             error("Error occured while trying to open temporary file '{}'", dev_ll_name);
-        DeviceEmitter device_emitter(device_world, dev_ll_ofs);
+        DeviceEmitter device_emitter(setup_phase->new_world(), dev_ll_ofs);
         device_emitter.run();
     }
 
@@ -647,7 +681,7 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
         }
     }
 
-    HostEmitter host_emitter(host_world, ostream, dev_fatbin_name);
+    HostEmitter host_emitter(setup_phase->old_world(), ostream, dev_fatbin_name);
     host_emitter.run();
 
 #ifdef NDEBUG
