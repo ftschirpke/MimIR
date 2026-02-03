@@ -118,8 +118,7 @@ std::string Emitter::convert(const Def* type) {
         }
     } else if (auto ptr = Axm::isa<mem::Ptr>(type)) {
         auto [pointee, addr_space] = ptr->args<2>();
-        // TODO addr_space
-        print(s, "{}*", convert(pointee));
+        print(s, "{} addrspace({})*", convert(pointee), addr_space);
     } else if (auto arr = type->isa<Arr>()) {
         auto t_elem = convert(arr->body());
         u64 size    = 0;
@@ -749,10 +748,15 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         declare("i8* @malloc(i64)");
 
         emit_unsafe(malloc->arg(0));
-        auto size  = emit(malloc->arg(1));
-        auto ptr_t = convert(Axm::as<mem::Ptr>(def->proj(1)->type()));
-        bb.assign(name + "i8", "call i8* @malloc(i64 {})", size);
-        return bb.assign(name, "bitcast i8* {} to {}", name + "i8", ptr_t);
+        auto size           = emit(malloc->arg(1));
+        auto ptr_t          = convert(Axm::as<mem::Ptr>(def->proj(1)->type()));
+        auto i8ptr          = bb.assign(name + "i8", "call i8* @malloc(i64 {})", size);
+        std::string i8ptr_t = "i8*";
+        if (Lit::as(address_space) != 0) {
+            i8ptr_t = fmt("i8 addrspace({})*", address_space);
+            i8ptr   = bb.assign(name + "i8conv", "addrspacecast i8* {} to {}", i8ptr, i8ptr_t);
+        }
+        return bb.assign(name, "bitcast {} {} to {}", i8ptr_t, i8ptr, ptr_t);
     } else if (auto free = Axm::isa<mem::free>(def)) {
         auto address_space = free->decurry()->arg(1);
         if (Lit::as(address_space) != 0)
@@ -763,13 +767,15 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         auto ptr   = emit(free->arg(1));
         auto ptr_t = convert(Axm::as<mem::Ptr>(free->arg(1)->type()));
 
-        bb.assign(name + "i8", "bitcast {} {} to i8*", ptr_t, ptr);
-        bb.tail("call void @free(i8* {})", name + "i8");
+        auto i8ptr = bb.assign(name + "i8", "bitcast {} {} to i8 addrspace({})*", ptr_t, ptr, address_space);
+        if (Lit::as(address_space) != 0)
+            i8ptr = bb.assign(name + "i8conv", "addrspacecast i8 addrspace({})* {} to i8*", address_space, i8ptr);
+        bb.tail("call void @free(i8* {})", i8ptr);
         return {};
     } else if (auto mslot = Axm::isa<mem::mslot>(def)) {
         auto address_space = mslot->decurry()->arg(1);
         if (Lit::as(address_space) != 0)
-            if (auto target_specific = isa_targetspecific_intrinsic(bb, def)) return {};
+            if (auto target_specific = isa_targetspecific_intrinsic(bb, def)) return target_specific.value();
 
         auto [Ta, msi]             = mslot->uncurry_args<2>();
         auto [pointee, addr_space] = Ta->projs<2>();

@@ -29,7 +29,7 @@ void reg_stages(Flags2Stages& stages) {
             if (addr_space == shared_as || addr_space == const_as || addr_space == local_as)
                 error("Invalid use of %mem.free: cannot be used in address space {}: {}", addr_space, free);
         } else if (auto mslot = Axm::isa<mem::mslot>(def)) {
-            auto addr_space = Lit::as(free->decurry()->arg(1));
+            auto addr_space = Lit::as(mslot->decurry()->arg(1));
             if (addr_space == global_as && addr_space == const_as)
                 error("Invalid use of %mem.mslot: cannot be used in address space {}: {}", addr_space, mslot);
         }

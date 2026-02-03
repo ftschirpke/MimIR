@@ -144,7 +144,6 @@ void HostEmitter::emit_epilogue(Lam* lam) {
     auto app = lam->body()->as<App>();
     if (auto ret = isa_targetspecific_intrinsic(bb, app)) {
         assert(ret.has_value());
-        ILOG("FRIEDRICH epilogue is targetspecific {} : {} | ll: {}", app, app->type(), ret.value());
         if (app->callee() == root()->ret_var()) // return
             assert(false && "Return not implemented in NVPTX backend");
         else if (auto dispatch = Dispatch(app))
@@ -166,37 +165,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     auto name = id(def);
     std::string op;
 
-    ILOG("FRIEDRICH def {} : {}", def, def->type());
-
-    auto global_as = Lit::as(world().annex<gpu::addr_space_global>());
-    auto shared_as = Lit::as(world().annex<gpu::addr_space_shared>());
-    auto const_as  = Lit::as(world().annex<gpu::addr_space_const>());
-    auto local_as  = Lit::as(world().annex<gpu::addr_space_local>());
-
-    if (auto malloc = Axm::isa<mem::malloc>(def)) {
-        auto addr_space = Lit::as(malloc->decurry()->arg(1));
-        if (addr_space == global_as)
-            error("Unexpected %mem.malloc for global address space should be %gpu.alloc: {}", def);
-        else if (addr_space == shared_as || addr_space == const_as || addr_space == local_as)
-            error("Illegal host memory operation for address space {}: {}", addr_space, def);
-        return std::nullopt;
-    } else if (auto free = Axm::isa<mem::free>(def)) {
-        auto addr_space = Lit::as(free->decurry()->arg(1));
-        if (addr_space == global_as)
-            error("Unexpected %mem.free for global address space should be %gpu.free: {}", def);
-        else if (addr_space == shared_as || addr_space == const_as || addr_space == local_as)
-            error("Illegal host memory operation for address space {}: {}", addr_space, def);
-        return std::nullopt;
-    } else if (auto mslot = Axm::isa<mem::mslot>(def)) {
-        auto addr_space = Lit::as(mslot->decurry()->arg(1));
-        if (addr_space == global_as)
-            error("Cannot use %mem.mslot global address space from host. Use %gpu.alloc and %gpu.free "
-                  "instead: {}",
-                  def);
-        else if (addr_space == shared_as || addr_space == const_as || addr_space == local_as)
-            error("Illegal host memory operation for address space {}: {}", addr_space, def);
-        return std::nullopt;
-    }
+    ILOG("FRIEDRICH HostEmitter def {} : {}", def, def->type());
 
     if (auto default_stream = Axm::isa<gpu::default_stream>(def)) {
         return "null";
@@ -507,12 +476,8 @@ std::string DeviceEmitter::prepare() {
     auto groups_idx = kernel->var(4);
     auto items_idx  = kernel->var(5);
 
-    if (num_vars == 9) {
-        auto smem_var     = kernel->var(6);
-        auto name         = id(smem_var);
-        locals_[smem_var] = name;
-        print(func_impls_, "{} {}, ", convert(smem_var->type()), name);
-    }
+    const Def* smem_var = nullptr;
+    if (num_vars == 9) smem_var = kernel->var(6);
 
     auto arg = kernel->var(num_vars - 2);
     {
@@ -558,6 +523,14 @@ std::string DeviceEmitter::prepare() {
             error("Warp ID too large, must fit into I32");
         }
     }
+    if (smem_var) {
+        auto name         = "@" + smem_var->unique_name();
+        locals_[smem_var] = name;
+        auto ptr          = Axm::isa<mem::Ptr>(smem_var->type());
+        assert(ptr);
+        auto [T, a] = ptr->args<2>();
+        print(vars_decls_, "{} = internal addrspace({}) global {} undef\n", name, a, convert(T));
+    }
 
     return kernel->unique_name();
 }
@@ -566,8 +539,19 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
     auto name = id(def);
     std::string op;
 
-    ILOG("FRIEDRICH device def {} : {}", def, def->type());
-    if (auto sync_work_items = Axm::isa<gpu::sync_work_items>(def)) {
+    auto shared_as = Lit::as(world().annex<gpu::addr_space_shared>());
+
+    ILOG("FRIEDRICH DeviceEmitter def {} : {}", def, def->type());
+
+    if (auto mslot = Axm::isa<mem::mslot>(def)) {
+        auto [T, a] = mslot->decurry()->args<2>();
+        if (Lit::as(a) == shared_as) {
+            name = "@" + def->unique_name();
+            emit_unsafe(mslot->arg(0));
+            print(vars_decls_, "{} = internal addrspace({}) global {} undef\n", name, a, convert(T));
+            return name;
+        }
+    } else if (auto sync_work_items = Axm::isa<gpu::sync_work_items>(def)) {
         declare("void @llvm.nvvm.barrier0()");
 
         emit_unsafe(sync_work_items->arg(0));
