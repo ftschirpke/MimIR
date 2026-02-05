@@ -37,6 +37,14 @@ lam %gpu.ConstPtr(T: *): *  = %mem.Ptr (T, %gpu.addr_space_const);
 lam %gpu.LocalPtr(T: *): *  = %mem.Ptr (T, %gpu.addr_space_local);
 
 ///
+/// ### Symbol Pointer Types
+///
+/// Symbols require an additional ID but otherwise work like normal pointers
+axm %gpu.SymPtr: [id: Nat, T: *, a: Nat] → *;
+lam %gpu.GlobalSymPtr(id: Nat, T: *): * = %gpu.SymPtr (id, T, %gpu.addr_space_global);
+lam %gpu.ConstSymPtr(id: Nat, T: *): *  = %gpu.SymPtr (id, T, %gpu.addr_space_const);
+
+///
 /// ### Streams
 ///
 
@@ -45,18 +53,59 @@ axm %gpu.default_stream: %gpu.Stream;
 
 ///
 /// ## GPU Context Operations
-///
-/// ### %%gpu.init
-///
-/// Initializes the GPU runtime
-axm %gpu.init: %mem.M 0 → [%mem.M 0, %gpu.GlobalM];
 // TODO: consider allowing multiple contexts and configuration of device number or context flags
+///
+/// ### %%gpu.init(no_syms)
+///
+/// Initializes the GPU runtime with no additional module symbols
+axm %gpu.init(no_syms): %mem.M 0 → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM];
+
+///
+/// ### %%gpu.init(global_syms)
+///
+/// Initializes the GPU runtime and module symbols in global memory
+axm %gpu.init(global_syms): {n: Nat}
+                          → [Ts: «n; *»]
+                          → %mem.M 0
+                          → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM, «i: n; %gpu.GlobalSymPtr (%core.bitcast Nat i, Ts#i)»];
+
+///
+/// ### %%gpu.init(const_syms)
+///
+/// Initializes the GPU runtime and module symbols in constant memory
+axm %gpu.init(const_syms): {n: Nat}
+                         → [Ts: «n; *»]
+                         → %mem.M 0
+                         → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM, «i: n; %gpu.ConstSymPtr (%core.bitcast Nat i, Ts#i)»];
+
+///
+/// ### %%gpu.init(mem_global_const)
+///
+/// Initializes the GPU runtime and module symbols in global and constant memory
+axm %gpu.init(global_const_syms): {n: Nat, m: Nat}
+                                → [GTs: «n; *»]
+                                → [CTs: «m; *»]
+                                → %mem.M 0
+                                → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM,
+                                   «i: n; %gpu.GlobalSymPtr (%core.bitcast Nat i, GTs#i)»,
+                                   «j: m; %gpu.ConstSymPtr (%core.bitcast Nat j, CTs#j)»];
 
 ///
 /// ### %%gpu.deinit
 ///
 /// Deinitializes the GPU runtime
-axm %gpu.deinit: [%mem.M 0, %gpu.GlobalM] → %mem.M 0;
+axm %gpu.deinit: [%mem.M 0, %gpu.GlobalM, %gpu.ConstM] → %mem.M 0;
+
+///
+/// ## Operations on symbol pointers
+///
+/// ### %%gpu.symptr2ptr
+///
+/// Get the pointer for a symbol pointer
+axm %gpu.symptr2ptr: {id: Nat, T: *, a: Nat}
+                   → [%mem.M a, %gpu.SymPtr (id, T, a)]
+                   → [%mem.M a, %mem.Ptr (T, a)];
+
 
 ///
 /// ## Operations on Streams
@@ -91,6 +140,22 @@ axm %gpu.alloc(block): [T: *] → %gpu.GlobalM → [%gpu.GlobalM, %gpu.GlobalPtr
 ///
 /// Frees memory on the device (in global address space)
 axm %gpu.free(block): {T: *} → [%gpu.GlobalM, %gpu.GlobalPtr T] → %gpu.GlobalM;
+
+///
+/// ### %%gpu.symbol_copy_to_device(block)
+///
+/// Copies data from host memory to a device symbol
+axm %gpu.symbol_copy_to_device(block): {T: *, a: Nat, id: Nat} 
+                                     → [%mem.M 0, %mem.M a, %mem.Ptr0 T, %gpu.SymPtr (id, T, a)]
+                                     → [%mem.M 0, %mem.M a];
+
+///
+/// ### %%gpu.symbol_copy_to_host(block)
+///
+/// Copies data from a device symbol to host memory
+axm %gpu.symbol_copy_to_host(block): {T: *, a: Nat, id: Nat} 
+                                   → [%mem.M 0, %mem.M a, %gpu.SymPtr (id, T, a), %mem.Ptr0 T]
+                                   → [%mem.M 0, %mem.M a];
 
 ///
 /// ### %%gpu.copy_to_device(block)
@@ -136,6 +201,22 @@ axm %gpu.alloc(async): [T: *] → [%gpu.GlobalM, %gpu.Stream] → [%gpu.GlobalM,
 axm %gpu.free(async): {T: *} → [%gpu.GlobalM, %gpu.GlobalPtr T, %gpu.Stream] → %gpu.GlobalM;
 
 ///
+/// ### %%gpu.symbol_copy_to_device(async)
+///
+/// Copies data from host memory to a device symbol
+axm %gpu.symbol_copy_to_device(async): {T: *, a: Nat, id: Nat} 
+                                     → [%mem.M 0, %mem.M a, %mem.Ptr0 T, %gpu.SymPtr (id, T, a), %gpu.Stream]
+                                     → [%mem.M 0, %mem.M a];
+
+///
+/// ### %%gpu.symbol_copy_to_host(async)
+///
+/// Copies data from a device symbol to host memory
+axm %gpu.symbol_copy_to_host(async): {T: *, a: Nat, id: Nat} 
+                                   → [%mem.M 0, %mem.M a, %gpu.SymPtr (id, T, a), %mem.Ptr0 T, %gpu.Stream]
+                                   → [%mem.M 0, %mem.M a];
+
+///
 /// ### %%gpu.copy_to_device(async)
 ///
 /// Asynchronously copies data from host memory to device memory
@@ -169,23 +250,48 @@ let %gpu.alloc_copy.async = lm {T: *}
 /// ### %%gpu.launch(no_smem)
 ///
 /// Launches a kernel function on the device (without dynamic shared memory)
-axm %gpu.launch(no_smem): {s: Nat, Ts: «s; *»}
+axm %gpu.launch(no_smem): {n: Nat, Ts: «n; *»}
                         → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream]
                         → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                               «i: s; Ts#i»,
+                               «i: n; Ts#i»,
                                Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-                        → Fn «i: s; Ts#i» → %mem.M 0;
+                        → Fn «i: n; Ts#i» → %mem.M 0;
 
 ///
 /// ### %%gpu.launch(with_smem)
 ///
 /// Launches a kernel function on the device with dynamic shared memory
-axm %gpu.launch(with_smem): {s: Nat, Ts: «s; *»} 
+axm %gpu.launch(with_smem): {n: Nat, Ts: «n; *»} 
                           → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream, T: *]
                           → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                                 %gpu.SharedPtr T, «i: s; Ts#i»,
+                                 %gpu.SharedPtr T, «i: n; Ts#i»,
                                  Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-                          → Fn «i: s; Ts#i» → %mem.M 0;
+                          → Fn «i: n; Ts#i» → %mem.M 0;
+
+///
+/// ### %%gpu.launch(with_syms)
+///
+/// Launches a kernel function on the device with module symbols
+axm %gpu.launch(with_syms): {n: Nat, Ts: «n; *», s: Nat, STs: «s; [Nat, *, Nat]»}
+                          → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream, 
+                             «i: s; %gpu.SymPtr STs#i»]
+                          → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
+                                 «i: s; %gpu.SymPtr STs#i», «i: n; Ts#i»,
+                                 Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
+                          → Fn «i: n; Ts#i» → %mem.M 0;
+///
+/// ### %%gpu.launch(with_smem_syms)
+///
+/// Launches a kernel function on the device with dynamic shared memory and module symbols
+axm %gpu.launch(with_smem_syms): {n: Nat, Ts: «n; *», s: Nat, STs: «s; [Nat, *, Nat]»} 
+                               → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream, T: *,
+                                  «i: s; %gpu.SymPtr STs#i»]
+                               → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
+                                      %gpu.SharedPtr T, «i: s; %gpu.SymPtr STs#i», «i: n; Ts#i»,
+                                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
+                               → Fn «i: n; Ts#i» → %mem.M 0;
+
+
 
 ///
 /// ## Work-Item Synchronization Operations

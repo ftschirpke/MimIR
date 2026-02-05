@@ -32,6 +32,10 @@ void reg_stages(Flags2Stages& stages) {
             auto addr_space = Lit::as(mslot->decurry()->arg(1));
             if (addr_space == global_as && addr_space == const_as)
                 error("Invalid use of %mem.mslot: cannot be used in address space {}: {}", addr_space, mslot);
+        } else if (auto store = Axm::isa<mem::store>(def)) {
+            auto addr_space = Lit::as(store->decurry()->arg(1));
+            if (addr_space == const_as)
+                error("Invalid use of %mem.store: cannot be used in address space {}: {}", addr_space, store);
         }
         return {};
     });

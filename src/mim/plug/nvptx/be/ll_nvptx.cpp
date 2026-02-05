@@ -36,16 +36,18 @@ protected:
     std::string convert(const Def*) override;
 
 private:
-    static constexpr std::string_view mod_name_          = "@mimir_cu_mod";
-    static constexpr std::string_view ctx_name_          = "@mimir_cu_ctx";
-    static constexpr std::string_view fatbin_name_       = "@fatbin";
-    static constexpr std::string_view kernel_array_name_ = "@mimir_kernels";
-    static constexpr std::string_view kernel_name_prefix = "@kname.";
+    static constexpr std::string_view mod_name_          = "@.mimir_cu_mod";
+    static constexpr std::string_view ctx_name_          = "@.mimir_cu_ctx";
+    static constexpr std::string_view fatbin_name_       = "@.fatbin";
+    static constexpr std::string_view kernel_array_name_ = "@.mimir_kernels";
+    static constexpr std::string_view kernel_name_prefix = "@.kname.";
 
     void emit_cu_error_handling(BB&, const std::string&, bool at_tail = false);
 
     std::optional<std::string> device_fatbin_file_;
     LamMap<int> kernel_ids_;
+
+    absl::btree_set<std::string> var_decls_;
 
     DefSet analyzed_;
 };
@@ -64,6 +66,7 @@ public:
     std::optional<std::string> isa_targetspecific_intrinsic(BB&, const Def*) final;
 
 private:
+    absl::btree_map<std::string, int> symbols_;
     LamSet kernels_;
 };
 
@@ -92,7 +95,6 @@ void HostEmitter::find_kernels(const Def* def) {
     if (auto launch = Axm::isa<gpu::launch>(def)) {
         auto kernel = launch->decurry()->arg();
         if (auto kernel_lam = kernel->isa_mut<Lam>()) {
-            ILOG("FRIEDRICH HostEmitter thinks that '{}' is a kernel", kernel_lam);
             auto kid                = kernel_ids_.size();
             kernel_ids_[kernel_lam] = kid;
         }
@@ -133,6 +135,10 @@ std::string HostEmitter::convert(const Def* type) {
             // NVIDIA treats all device pointers as i64s in host code
             return "i64";
         }
+    } else if (auto symptr = Axm::isa<gpu::SymPtr>(type)) {
+        auto [_, T, a]      = symptr->args<3>();
+        auto ptr_equivalent = world().call<mem::Ptr>(Defs{T, a});
+        return convert(ptr_equivalent);
     }
     return Super::convert(type);
 }
@@ -161,11 +167,11 @@ void HostEmitter::emit_epilogue(Lam* lam) {
     }
 }
 
+static std::string symbol_name(int addr_space, int id) { return fmt("_symbol_addrspace{}_{}", addr_space, id); }
+
 std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, const Def* def) {
     auto name = id(def);
     std::string op;
-
-    ILOG("FRIEDRICH HostEmitter def {} : {}", def, def->type());
 
     if (auto default_stream = Axm::isa<gpu::default_stream>(def)) {
         return "null";
@@ -230,6 +236,51 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
                 = bb.assign("%" + kname + "_getfuncres", "call i32 @cuModuleGetFunction(ptr {}, ptr {}, ptr {}{})",
                             func_ptr, mod_inner, kernel_name_prefix, kid);
             emit_cu_error_handling(bb, func_res);
+        }
+
+        std::optional<Vector<const Def*>> const_syms;
+        std::optional<Vector<const Def*>> global_syms;
+        switch (init.id()) {
+            case gpu::init::no_syms: break;
+            case gpu::init::const_syms: {
+                const_syms = init->decurry()->args();
+                break;
+            }
+            case gpu::init::global_syms: global_syms = init->decurry()->args(); break;
+            case gpu::init::global_const_syms: {
+                const_syms  = init->decurry()->args();
+                global_syms = init->decurry()->decurry()->args();
+                break;
+            }
+            default: fe::unreachable();
+        }
+
+        World& w      = world();
+        auto def_size = 3 + static_cast<bool>(global_syms) + static_cast<bool>(const_syms);
+        if (global_syms) {
+            auto global_as = Lit::as(w.annex<gpu::addr_space_global>());
+            auto id        = 0;
+            for (auto global_t : global_syms.value()) {
+                auto sym_name = symbol_name(global_as, id);
+                print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(global_t));
+                const Def* sym_def = w.extract(def, w.lit_idx(def_size, 3));
+                if (global_syms->size() > 1) sym_def = w.extract(sym_def, w.lit_idx(global_syms->size(), id));
+                globals_[sym_def] = "@" + sym_name;
+                ++id;
+            }
+        }
+        if (const_syms) {
+            auto const_as = Lit::as(world().annex<gpu::addr_space_const>());
+            auto id       = 0;
+            for (auto const_t : const_syms.value()) {
+                auto sym_name = symbol_name(const_as, id);
+                print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(const_t));
+                auto const_idx     = 3 + static_cast<bool>(global_syms);
+                const Def* sym_def = w.extract(def, w.lit_idx(def_size, const_idx));
+                if (const_syms->size() > 1) sym_def = w.extract(sym_def, w.lit_idx(const_syms->size(), id));
+                globals_[sym_def] = "@" + sym_name;
+                ++id;
+            }
         }
 
         return emit_unsafe(init->arg());
@@ -331,6 +382,108 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
 
         emit_cu_error_handling(bb, free_res);
         return free_res;
+    } else if (auto symbol_copy_to_device = Axm::isa<gpu::symbol_copy_to_device>(def)) {
+        bool is_async;
+        switch (symbol_copy_to_device.id()) {
+            case gpu::symbol_copy_to_device::block: is_async = false; break;
+            case gpu::symbol_copy_to_device::async: is_async = true; break;
+            default: fe::unreachable();
+        }
+
+        declare("i32 @cuModuleGetGlobal_v2(ptr, ptr, ptr, ptr)");
+        if (is_async)
+            declare("i32 @cuMemcpyHtoDAsync_v2(i64, ptr, i64, ptr)");
+        else
+            declare("i32 @cuMemcpyHtoD_v2(i64, ptr, i64)");
+
+        auto [type, a, id] = symbol_copy_to_device->decurry()->args<3>();
+        World& w           = type->world();
+        auto type_size     = w.call(core::trait::size, type);
+
+        emit_unsafe(symbol_copy_to_device->arg(0));
+        emit_unsafe(symbol_copy_to_device->arg(1));
+        auto host_ptr   = emit(symbol_copy_to_device->arg(2));
+        auto dev_symptr = emit(symbol_copy_to_device->arg(3));
+        auto size       = emit(w.lit_nat(Lit::as(type_size)));
+
+        auto dev_ptr  = bb.assign(name + "_devptr", "alloca i64");
+        auto size_ptr = bb.assign(name + "_sizeptr", "alloca i64");
+        auto mod      = bb.assign(name + "_mod", "load ptr, ptr {}", mod_name_);
+        auto sym_name = symbol_name(Lit::as(a), Lit::as(id));
+
+        auto [_, ins] = var_decls_.emplace(fmt("@{}.name", sym_name));
+        if (ins)
+            print(vars_decls_, "@{}.name = private constant [{} x i8] c\"{}\\00\"\n", sym_name, sym_name.size() + 1,
+                  sym_name);
+
+        auto get_global_res
+            = bb.assign(name + "_devptr_res", "call i32 @cuModuleGetGlobal_v2(ptr {}, ptr {}, ptr {}, ptr @{}.name)",
+                        dev_ptr, size_ptr, mod, sym_name);
+        emit_cu_error_handling(bb, get_global_res);
+
+        dev_ptr = bb.assign(name + "_devptr_inner", "load i64, i64* {}", dev_ptr);
+        std::string copy_res;
+        if (is_async) {
+            auto stream = emit(symbol_copy_to_device->arg(4));
+            copy_res    = bb.assign(name + "res", "call i32 @cuMemcpyHtoDAsync_v2(i64 {}, ptr {}, i64 {}, ptr {})",
+                                    dev_ptr, host_ptr, size, stream);
+        } else
+            copy_res
+                = bb.assign(name + "res", "call i32 @cuMemcpyHtoD_v2(i64 {}, ptr {}, i64 {})", dev_ptr, host_ptr, size);
+
+        emit_cu_error_handling(bb, copy_res);
+        return copy_res;
+    } else if (auto symbol_copy_to_host = Axm::isa<gpu::symbol_copy_to_host>(def)) {
+        bool is_async;
+        switch (symbol_copy_to_host.id()) {
+            case gpu::symbol_copy_to_host::block: is_async = false; break;
+            case gpu::symbol_copy_to_host::async: is_async = true; break;
+            default: fe::unreachable();
+        }
+
+        declare("i32 @cuModuleGetGlobal_v2(ptr, ptr, ptr, ptr)");
+        if (is_async)
+            declare("i32 @cuMemcpyDtoHAsync_v2(ptr, i64, i64, ptr)");
+        else
+            declare("i32 @cuMemcpyDtoH_v2(ptr, i64, i64)");
+
+        auto [type, a, id] = symbol_copy_to_host->decurry()->args<3>();
+        World& w           = type->world();
+        auto type_size     = w.call(core::trait::size, type);
+
+        emit_unsafe(symbol_copy_to_host->arg(0));
+        emit_unsafe(symbol_copy_to_host->arg(1));
+        auto dev_symptr = emit(symbol_copy_to_host->arg(2));
+        auto host_ptr   = emit(symbol_copy_to_host->arg(3));
+        auto size       = emit(w.lit_nat(Lit::as(type_size)));
+
+        auto dev_ptr  = bb.assign(name + "_devptr", "alloca i64");
+        auto size_ptr = bb.assign(name + "_sizeptr", "alloca i64");
+        auto mod      = bb.assign(name + "_mod", "load ptr, ptr {}", mod_name_);
+        auto sym_name = symbol_name(Lit::as(a), Lit::as(id));
+
+        auto [_, ins] = var_decls_.emplace(fmt("@{}.name", sym_name));
+        if (ins)
+            print(vars_decls_, "@{}.name = private constant [{} x i8] c\"{}\\00\"\n", sym_name, sym_name.size() + 1,
+                  sym_name);
+
+        auto get_global_res
+            = bb.assign(name + "_devptr_res", "call i32 @cuModuleGetGlobal_v2(ptr {}, ptr {}, ptr {}, ptr @{}.name)",
+                        dev_ptr, size_ptr, mod, sym_name);
+        emit_cu_error_handling(bb, get_global_res);
+
+        dev_ptr = bb.assign(name + "_devptr_inner", "load i64, i64* {}", dev_ptr);
+        std::string copy_res;
+        if (is_async) {
+            auto stream = emit(symbol_copy_to_host->arg(4));
+            copy_res    = bb.assign(name + "res", "call i32 @cuMemcpyDtoHAsync_v2(ptr {}, i64 {}, i64 {}, ptr {})",
+                                    host_ptr, dev_ptr, size, stream);
+        } else
+            copy_res
+                = bb.assign(name + "res", "call i32 @cuMemcpyDtoH_v2(ptr {}, i64 {}, i64 {})", host_ptr, dev_ptr, size);
+
+        emit_cu_error_handling(bb, copy_res);
+        return copy_res;
     } else if (auto copy_to_device = Axm::isa<gpu::copy_to_device>(def)) {
         bool is_async;
         switch (copy_to_device.id()) {
@@ -401,21 +554,20 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
     } else if (auto launch = Axm::isa<gpu::launch>(def)) {
         bool with_smem;
         switch (launch.id()) {
-            case gpu::launch::no_smem: with_smem = false; break;
-            case gpu::launch::with_smem: with_smem = true; break;
+            case gpu::launch::no_smem:
+            case gpu::launch::with_syms: with_smem = false; break;
+            case gpu::launch::with_smem:
+            case gpu::launch::with_smem_syms: with_smem = true; break;
             default: fe::unreachable();
         }
 
         declare("i32 @cuLaunchKernel(ptr, i32, i32, i32, i32, i32, i32, i32, ptr, ptr, ptr)");
 
-        auto decurry1 = launch->decurry();
-        auto decurry2 = decurry1->decurry();
-
-        auto kernel_def = decurry1->arg();
+        auto [launch_config, kernel_def, call_args] = launch->uncurry_args<3>();
 
         auto shared_mem_bytes = 0;
         if (with_smem) {
-            auto def_smem_type = decurry2->arg(4);
+            auto def_smem_type = launch_config->proj(4);
             shared_mem_bytes   = Lit::as(world().call(core::trait::size, def_smem_type));
         }
 
@@ -424,10 +576,10 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         if (!kernel_ids_.contains(lam)) error("unknown kernel {}", lam);
         auto kid = kernel_ids_[lam];
 
-        emit_unsafe(decurry2->arg(0));
-        auto n_groups = emit(decurry2->arg(1));
-        auto n_items  = emit(decurry2->arg(2));
-        auto stream   = emit(decurry2->arg(3));
+        emit_unsafe(launch_config->proj(0));
+        auto n_groups = emit(launch_config->proj(1));
+        auto n_items  = emit(launch_config->proj(2));
+        auto stream   = emit(launch_config->proj(3));
         auto kernel   = emit(kernel_def);
         auto arg      = emit(launch->arg(0));
         auto arg_type = convert(launch->arg(0)->type());
@@ -456,11 +608,17 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
 
 void DeviceEmitter::start() {
     for (auto kernel : world().externals().muts())
-        if (auto kernel_lam = kernel->isa_mut<Lam>()) {
-            ILOG("FRIEDRICH DeviceEmitter thinks that '{}' is a kernel", kernel_lam);
-            kernels_.emplace(kernel_lam);
-        }
+        if (auto kernel_lam = kernel->isa_mut<Lam>()) kernels_.emplace(kernel_lam);
     Super::start();
+
+    if (symbols_.empty()) return;
+    print(ostream(), "@llvm.compiler.used = appending global [{} x ptr] [", symbols_.size());
+    auto sep = "";
+    for (auto [sym, a] : symbols_) {
+        print(ostream(), "{}ptr addrspacecast (ptr addrspace({}) {} to ptr)", sep, a, sym);
+        sep = ", ";
+    }
+    print(ostream(), "], section \"llvm.metadata\"\n");
 }
 
 std::string DeviceEmitter::prepare() {
@@ -471,13 +629,30 @@ std::string DeviceEmitter::prepare() {
     print(func_impls_, "define ptx_kernel {} {}(", convert_ret_pi(kernel->type()->ret_pi()), id(kernel));
 
     auto num_vars = kernel->num_vars();
-    assert(num_vars == 8 || num_vars == 9);
+    assert(num_vars >= 8 || num_vars <= 10);
 
     auto groups_idx = kernel->var(4);
     auto items_idx  = kernel->var(5);
 
     const Def* smem_var = nullptr;
-    if (num_vars == 9) smem_var = kernel->var(6);
+    const Def* syms_var = nullptr;
+    if (num_vars == 10) {
+        smem_var = kernel->var(6);
+        syms_var = kernel->var(7);
+    }
+    if (num_vars == 9) {
+        auto unknown_var = kernel->var(6);
+        bool is_smem     = false;
+        if (auto ptr_t = Axm::isa<mem::Ptr>(unknown_var->type())) {
+            auto shared_as = Lit::as(world().annex<gpu::addr_space_shared>());
+            auto [T, a]    = ptr_t->args<2>();
+            if (Lit::as(a) == shared_as) is_smem = true;
+        }
+        if (is_smem)
+            smem_var = unknown_var;
+        else
+            syms_var = unknown_var;
+    }
 
     auto arg = kernel->var(num_vars - 2);
     {
@@ -531,6 +706,33 @@ std::string DeviceEmitter::prepare() {
         auto [T, a] = ptr->args<2>();
         print(vars_decls_, "{} = internal addrspace({}) global {} undef\n", name, a, convert(T));
     }
+    if (syms_var) {
+        DLOG("Found symbol variables in kernel definition: {} : {}", syms_var, syms_var->type());
+        Vector<const Def*> syms;
+        if (auto sigma = syms_var->type()->isa<Sigma>())
+            for (auto op : sigma->ops())
+                syms.emplace_back(op);
+        else
+            syms.emplace_back(syms_var->type());
+
+        World& w = world();
+        auto idx = 0;
+        for (auto sym : syms) {
+            auto ptr_t = Axm::isa<gpu::SymPtr>(sym);
+            if (!ptr_t) error("Unexpected argument for symbols in kernel: {} : {}", syms_var, syms_var->type());
+            auto [id, T, a] = ptr_t->args<3>();
+            auto sym_name   = "@" + symbol_name(Lit::as(a), Lit::as(id));
+            auto var        = syms_var;
+            if (syms.size() > 1) var = w.extract(syms_var, w.lit_idx(syms.size(), idx));
+
+            globals_[var] = sym_name;
+            auto [_, ins] = symbols_.emplace(sym_name, Lit::as(a));
+            if (ins)
+                print(vars_decls_, "{} = dso_local addrspace({}) externally_initialized global {} undef\n", sym_name, a,
+                      convert(T));
+            ++idx;
+        }
+    }
 
     return kernel->unique_name();
 }
@@ -541,8 +743,6 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
 
     auto shared_as = Lit::as(world().annex<gpu::addr_space_shared>());
 
-    ILOG("FRIEDRICH DeviceEmitter def {} : {}", def, def->type());
-
     if (auto mslot = Axm::isa<mem::mslot>(def)) {
         auto [T, a] = mslot->decurry()->args<2>();
         if (Lit::as(a) == shared_as) {
@@ -551,6 +751,9 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
             print(vars_decls_, "{} = internal addrspace({}) global {} undef\n", name, a, convert(T));
             return name;
         }
+    } else if (auto symptr2ptr = Axm::isa<gpu::symptr2ptr>(def)) {
+        emit_unsafe(symptr2ptr->arg(0));
+        return emit(symptr2ptr->arg(1));
     } else if (auto sync_work_items = Axm::isa<gpu::sync_work_items>(def)) {
         declare("void @llvm.nvvm.barrier0()");
 
