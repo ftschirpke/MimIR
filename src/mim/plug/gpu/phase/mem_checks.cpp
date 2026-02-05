@@ -8,6 +8,8 @@ namespace mim::plug::gpu::phase {
 
 class MemFinder {
 public:
+    MemFinder(const Def* to_search)
+        : to_search({to_search}) {}
     MemFinder(DefVec&& to_search)
         : to_search(std::move(to_search)) {}
 
@@ -38,10 +40,25 @@ const Def* MemChecks::rewrite(const Def* def) {
         auto kernel_args   = launch->arg();
         auto kernel_args_t = kernel_args->type();
 
-        MemFinder mem_finder({kernel_args_t});
+        MemFinder mem_finder(kernel_args_t);
         if (mem_finder.next_mem()) {
             error("You may not pass any %mem.M across device boundaries: passing {} : {} from host to kernel '{}'",
                   kernel_args, kernel_args_t, kernel);
+        }
+    } else if (auto init = Axm::isa<gpu::init>(def)) {
+        auto [_, global_syms, const_syms] = init->args<3>();
+
+        MemFinder global_mem_finder(global_syms);
+        if (global_mem_finder.next_mem()) {
+            error("You may not pass any %mem.M across device boundaries: creating symbol(s) {} in global address space "
+                  "with {}",
+                  global_syms, def);
+        }
+        MemFinder const_mem_finder(const_syms);
+        if (const_mem_finder.next_mem()) {
+            error("You may not pass any %mem.M across device boundaries: creating symbol(s) {} in constant address "
+                  "space with {}",
+                  const_syms, def);
         }
     }
     return Super::rewrite(def);
@@ -50,17 +67,13 @@ const Def* MemChecks::rewrite(const Def* def) {
 const Def* MemChecks::rewrite_mut_Lam(Lam* lam) {
     auto name = lam->sym().str();
     if (name == "main") {
-        DefVec intypes;
-        for (auto var : lam->vars())
-            intypes.emplace_back(var->type());
-
-        MemFinder intype_mem_finder(std::move(intypes));
+        MemFinder intype_mem_finder(lam->type()->dom());
         while (auto mem = intype_mem_finder.next_mem()) {
             auto addr_space = mem->arg();
             if (Lit::as(addr_space) != 0) error("The main function may not take %mem.M n with n != 0 as an argument");
         }
 
-        MemFinder outtype_mem_finder({lam->type()->ret_dom()});
+        MemFinder outtype_mem_finder(lam->type()->ret_dom());
         while (auto mem = outtype_mem_finder.next_mem()) {
             auto addr_space = mem->arg();
             if (Lit::as(addr_space) != 0) error("The main function may not return any %mem.M n with n != 0");

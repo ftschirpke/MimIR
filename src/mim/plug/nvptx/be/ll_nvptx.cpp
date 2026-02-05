@@ -181,7 +181,7 @@ void HostEmitter::emit_epilogue(Lam* lam) {
             assert(false && "Dispatch not implemented in NVPTX backend");
         else if (app->callee()->isa<Bot>())
             assert(false && "Bot not implemented in NVPTX backend");
-        else if (auto callee = Lam::isa_mut_basicblock(app->callee())) // ordinary jump
+        else if (auto _ = Lam::isa_mut_basicblock(app->callee())) // ordinary jump
             assert(false && "Ordinary Jump not implemented in NVPTX backend");
         else if (Pi::isa_returning(app->callee_type())) // function call
             bb.tail("br label {}", ret.value());
@@ -263,37 +263,46 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
             emit_cu_error_handling(bb, func_res);
         }
 
-        auto const_syms  = init->decurry()->args();
-        auto global_syms = init->decurry()->decurry()->args();
+        auto [mem, global_syms_def, const_syms_def] = init->args<3>();
 
-        World& w      = world();
-        auto def_size = 5;
-        if (!global_syms.empty()) {
-            auto global_as = Lit::as(w.annex<gpu::addr_space_global>());
-            auto id        = 0;
-            for (auto global_t : global_syms) {
-                auto sym_name = symbol_name(global_as, id);
-                print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(global_t));
-                const Def* sym_def = w.extract(def, w.lit_idx(def_size, 3));
-                if (global_syms.size() > 1) sym_def = w.extract(sym_def, w.lit_idx(global_syms.size(), id));
-                globals_[sym_def] = "@" + sym_name;
-                ++id;
-            }
+        DefVec global_syms;
+        DefVec const_syms;
+
+        if (global_syms_def->type()->isa<Sigma>())
+            for (auto op : global_syms_def->ops())
+                global_syms.emplace_back(op);
+        else
+            global_syms = {global_syms_def};
+        if (const_syms_def->type()->isa<Sigma>())
+            for (auto op : const_syms_def->ops())
+                const_syms.emplace_back(op);
+        else
+            const_syms = {const_syms_def};
+
+        World& w       = world();
+        auto def_size  = 5;
+        auto global_as = Lit::as(w.annex<gpu::addr_space_global>());
+        auto const_as  = Lit::as(w.annex<gpu::addr_space_const>());
+        auto id        = 0;
+        for (auto global_t : global_syms) {
+            auto sym_name = symbol_name(global_as, id);
+            print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(global_t));
+            const Def* sym_def = w.extract(def, w.lit_idx(def_size, 3));
+            if (global_syms.size() > 1) sym_def = w.extract(sym_def, w.lit_idx(global_syms.size(), id));
+            globals_[sym_def] = "@" + sym_name;
+            ++id;
         }
-        if (!const_syms.empty()) {
-            auto const_as = Lit::as(world().annex<gpu::addr_space_const>());
-            auto id       = 0;
-            for (auto const_t : const_syms) {
-                auto sym_name = symbol_name(const_as, id);
-                print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(const_t));
-                const Def* sym_def = w.extract(def, w.lit_idx(def_size, 4));
-                if (const_syms.size() > 1) sym_def = w.extract(sym_def, w.lit_idx(const_syms.size(), id));
-                globals_[sym_def] = "@" + sym_name;
-                ++id;
-            }
+        id = 0;
+        for (auto const_t : const_syms) {
+            auto sym_name = symbol_name(const_as, id);
+            print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(const_t));
+            const Def* sym_def = w.extract(def, w.lit_idx(def_size, 4));
+            if (const_syms.size() > 1) sym_def = w.extract(sym_def, w.lit_idx(const_syms.size(), id));
+            globals_[sym_def] = "@" + sym_name;
+            ++id;
         }
 
-        return emit_unsafe(init->arg());
+        return emit_unsafe(mem);
     } else if (auto deinit = Axm::isa<gpu::deinit>(def)) {
         declare("i32 @{}(ptr)", CU_MODULE_UNLOAD);
         bb.tail("{}_mod = load ptr, ptr {}", name, mod_name_);
