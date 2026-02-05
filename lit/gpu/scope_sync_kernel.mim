@@ -48,7 +48,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m0, ptr) = %mem.alloc (I32, 0) m0;
     let m0 = %mem.store (m0, ptr, argc);
 
-    let (m0, m1, m4) = %gpu.init.no_syms m0;
+    let (m0, m1, m4, _, _) = %gpu.init @(0, 0) (m0, (), ());
 
     let (m1, d_ptr) = %mem.alloc (I32, 1) m1;
     let (m0, m1) = %gpu.copy_to_device.block (m0, m1, ptr, d_ptr);

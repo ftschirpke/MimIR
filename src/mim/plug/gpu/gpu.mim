@@ -55,40 +55,14 @@ axm %gpu.default_stream: %gpu.Stream;
 /// ## GPU Context Operations
 // TODO: consider allowing multiple contexts and configuration of device number or context flags
 ///
-/// ### %%gpu.init(no_syms)
+/// ### %%gpu.init
 ///
-/// Initializes the GPU runtime with no additional module symbols
-axm %gpu.init(no_syms): %mem.M 0 → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM];
-
-///
-/// ### %%gpu.init(global_syms)
-///
-/// Initializes the GPU runtime and module symbols in global memory
-axm %gpu.init(global_syms): {n: Nat}
-                          → [Ts: «n; *»]
-                          → %mem.M 0
-                          → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM, «i: n; %gpu.GlobalSymPtr (%core.bitcast Nat i, Ts#i)»];
-
-///
-/// ### %%gpu.init(const_syms)
-///
-/// Initializes the GPU runtime and module symbols in constant memory
-axm %gpu.init(const_syms): {n: Nat}
-                         → [Ts: «n; *»]
-                         → %mem.M 0
-                         → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM, «i: n; %gpu.ConstSymPtr (%core.bitcast Nat i, Ts#i)»];
-
-///
-/// ### %%gpu.init(mem_global_const)
-///
-/// Initializes the GPU runtime and module symbols in global and constant memory
-axm %gpu.init(global_const_syms): {n: Nat, m: Nat}
-                                → [GTs: «n; *»]
-                                → [CTs: «m; *»]
-                                → %mem.M 0
-                                → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM,
-                                   «i: n; %gpu.GlobalSymPtr (%core.bitcast Nat i, GTs#i)»,
-                                   «j: m; %gpu.ConstSymPtr (%core.bitcast Nat j, CTs#j)»];
+/// Initializes the GPU runtime and module-level symbols in global and constant memory
+axm %gpu.init: {n m: Nat}
+             → [%mem.M 0, GTs: «n; *», CTs: «m; *»]
+             → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM,
+                «i: n; %gpu.GlobalSymPtr (%core.bitcast Nat i, GTs#i)»,
+                «j: m; %gpu.ConstSymPtr (%core.bitcast Nat j, CTs#j)»];
 
 ///
 /// ### %%gpu.deinit
@@ -332,6 +306,8 @@ axm %gpu.setup4backend: %compile.Phase;
 ///
 /// ### Pipelines
 ///
+
+// TODO: consider moving (some) pipelines to their own plugin "gpu_opt"
 
 let %gpu.general_repls = %compile.repls (
     %gpu.check_addr_spaces_repl,

@@ -12,7 +12,7 @@ class Setup4Backend : public RWPhase {
 public:
     Setup4Backend(World& world, flags_t annex)
         : RWPhase(world, annex)
-        , split_phase(world, annex) {}
+        , split_phase(world, "splitoff_kernels_in_setup4backend") {}
 
     void start() final;
 

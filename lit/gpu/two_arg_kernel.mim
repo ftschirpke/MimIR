@@ -23,7 +23,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let m0 = %mem.store (m0, ptr1, argc);
     let m0 = %mem.store (m0, ptr2, argc);
 
-    let (m0, m1, m4) = %gpu.init.no_syms m0;
+    let (m0, m1, m4, _, _) = %gpu.init @(0, 0) (m0, (), ());
 
     let (m1, d_ptr1) = %mem.alloc (I32, 1) m1;
     let (m1, d_ptr2) = %mem.alloc (I32, 1) m1;
