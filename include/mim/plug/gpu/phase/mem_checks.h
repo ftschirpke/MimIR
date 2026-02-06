@@ -14,7 +14,7 @@ public:
         : Analysis(world, annex) {}
 
 private:
-    const Def* rewrite(const Def*) final;
+    const Def* rewrite_imm_App(const App*) final;
     const Def* rewrite_mut_Lam(Lam*) final;
 
     DefSet analyzed_;

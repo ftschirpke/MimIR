@@ -14,7 +14,7 @@ public:
         : Super(world, annex) {}
 
 private:
-    const Def* rewrite(const Def*) final;
+    const Def* rewrite_imm_App(const App*) final;
 };
 
 } // namespace mim::plug::gpu::phase

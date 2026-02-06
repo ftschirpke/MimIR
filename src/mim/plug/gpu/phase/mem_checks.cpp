@@ -34,8 +34,8 @@ MemFinder::IsaMem MemFinder::next_mem() {
     return IsaMem();
 }
 
-const Def* MemChecks::rewrite(const Def* def) {
-    if (auto launch = Axm::isa<gpu::launch>(def)) {
+const Def* MemChecks::rewrite_imm_App(const App* app) {
+    if (auto launch = Axm::isa<gpu::launch>(app)) {
         auto kernel        = launch->decurry()->arg();
         auto kernel_args   = launch->arg();
         auto kernel_args_t = kernel_args->type();
@@ -45,23 +45,23 @@ const Def* MemChecks::rewrite(const Def* def) {
             error("You may not pass any %mem.M across device boundaries: passing {} : {} from host to kernel '{}'",
                   kernel_args, kernel_args_t, kernel);
         }
-    } else if (auto init = Axm::isa<gpu::init>(def)) {
+    } else if (auto init = Axm::isa<gpu::init>(app)) {
         auto [_, global_syms, const_syms] = init->args<3>();
 
         MemFinder global_mem_finder(global_syms);
         if (global_mem_finder.next_mem()) {
             error("You may not pass any %mem.M across device boundaries: creating symbol(s) {} in global address space "
                   "with {}",
-                  global_syms, def);
+                  global_syms, app);
         }
         MemFinder const_mem_finder(const_syms);
         if (const_mem_finder.next_mem()) {
             error("You may not pass any %mem.M across device boundaries: creating symbol(s) {} in constant address "
                   "space with {}",
-                  const_syms, def);
+                  const_syms, app);
         }
     }
-    return Super::rewrite(def);
+    return Super::rewrite_imm_App(app);
 }
 
 const Def* MemChecks::rewrite_mut_Lam(Lam* lam) {
