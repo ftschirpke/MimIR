@@ -11,7 +11,7 @@ plugin gpu;
 
 con kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM,
             group_id: Idx 4, item_id: Idx 4,
-            (global_sym: %gpu.GlobalSymPtr (0, I32), const_sym: %gpu.ConstSymPtr (0, I32)), dummy: %gpu.GlobalPtr I32,
+            (global_sym: %gpu.GlobalSymPtr (0, I32), const_sym: %gpu.ConstSymPtr (0, I32)), (), dummy: %gpu.GlobalPtr I32,
             return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
     let (m1, global) = %gpu.symptr2ptr (m1, global_sym);
     let (m4, const) = %gpu.symptr2ptr (m4, const_sym);
@@ -25,7 +25,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m0, ptr) = %mem.alloc (I32, 0) m0;
     let m0 = %mem.store (m0, ptr, argc);
 
-    let (m0, m1, m4, global_ptr, const_ptr) = %gpu.init (m0, I32, I32);
+    let (m0, m1, m4, global_ptr, const_ptr) = %gpu.init (1, 1, m0, I32, I32);
 
     let (m0, const_val) = %mem.slot (I32, 0) (m0, 0);
     let m0 = %mem.store (m0, const_val, 42I32);
@@ -35,7 +35,11 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
 
     let (m1, dummy_global) = %gpu.alloc.block I32 m1;
 
-    ret m0 = %gpu.launch.with_syms (m0, 4, 4, %gpu.default_stream, (global_ptr, const_ptr)) kernel $ (dummy_global);
+    ret m0 = %gpu.launch (
+        m0, 4, 4, %gpu.default_stream, 0, 2,
+        ((0, I32, %gpu.addr_space_global), (0, I32, %gpu.addr_space_const)),
+        (global_ptr, const_ptr), ()
+    ) kernel $ dummy_global;
 
     let (m0, m1) = %gpu.symbol_copy_to_host.block (m0, m1, global_ptr, ptr);
 

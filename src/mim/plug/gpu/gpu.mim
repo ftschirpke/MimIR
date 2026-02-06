@@ -57,8 +57,8 @@ axm %gpu.default_stream: %gpu.Stream;
 ///
 /// Initializes the GPU runtime and module-level symbols in global and constant memory
 // TODO: consider allowing multiple contexts and configuration of device number or context flags
-axm %gpu.init: {n m: Nat}
-             → [%mem.M 0, GTs: «n; *», CTs: «m; *»]
+// TODO: refactor to {n m: Nat} as soon as bug is fixed
+axm %gpu.init: [n m: Nat, %mem.M 0, GTs: «n; *», CTs: «m; *»]
              → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM,
                 «i: n; %gpu.GlobalSymPtr (%core.bitcast Nat i, GTs#i)»,
                 «j: m; %gpu.ConstSymPtr (%core.bitcast Nat j, CTs#j)»];
@@ -82,17 +82,17 @@ axm %gpu.symptr2ptr: {id: Nat, T: *, a: Nat}
 /// #### %%gpu.stream_init
 ///
 /// Initializes a stream
-axm %gpu.stream_init: [%mem.M 0, %mem.Ptr0 %gpu.Stream] → %mem.M 0;
+axm %gpu.stream_init: [%mem.M 0, %gpu.GlobalM, %mem.Ptr0 %gpu.Stream] → [%mem.M 0, %gpu.GlobalM];
 ///
 /// #### %%gpu.stream_deinit
 ///
 /// Deinitializes a stream
-axm %gpu.stream_deinit: [%mem.M 0, %gpu.Stream] → %mem.M 0;
+axm %gpu.stream_deinit: [%mem.M 0, %gpu.GlobalM, %gpu.Stream] → [%mem.M 0, %gpu.GlobalM];
 ///
 /// #### %%gpu.stream_sync
 ///
 /// Waits for a stream to finish all its work
-axm %gpu.stream_sync: [%mem.M 0, %gpu.Stream] → %mem.M 0;
+axm %gpu.stream_sync: [%mem.M 0, %gpu.GlobalM, %gpu.Stream] → [%mem.M 0, %gpu.GlobalM];
 ///
 /// ### Blocking Memory Operations
 ///
@@ -198,47 +198,17 @@ let %gpu.alloc_copy.async = lm {T: *}
 ///
 /// ### Kernel Launch
 ///
-/// #### %%gpu.launch(no_smem)
-///
-/// Launches a kernel function on the device (without dynamic shared memory)
-axm %gpu.launch(no_smem): {n: Nat, Ts: «n; *»}
-                        → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream]
-                        → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                               «i: n; Ts#i»,
-                               Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-                        → Fn «i: n; Ts#i» → %mem.M 0;
-///
-/// #### %%gpu.launch(with_smem)
-///
-/// Launches a kernel function on the device with dynamic shared memory
-axm %gpu.launch(with_smem): {n: Nat, Ts: «n; *»}
-                          → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream, T: *]
-                          → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                                 %gpu.SharedPtr T, «i: n; Ts#i»,
-                                 Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-                          → Fn «i: n; Ts#i» → %mem.M 0;
-///
-/// ### %%gpu.launch(with_syms)
-///
-/// Launches a kernel function on the device with module symbols
-axm %gpu.launch(with_syms): {n: Nat, Ts: «n; *», s: Nat, STs: «s; [Nat, *, Nat]»}
-                          → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream,
-                             «i: s; %gpu.SymPtr STs#i»]
-                          → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                                 «i: s; %gpu.SymPtr STs#i», «i: n; Ts#i»,
-                                 Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-                          → Fn «i: n; Ts#i» → %mem.M 0;
-///
-/// ### %%gpu.launch(with_smem_syms)
+/// #### %%gpu.launch
 ///
 /// Launches a kernel function on the device with dynamic shared memory and module symbols
-axm %gpu.launch(with_smem_syms): {n: Nat, Ts: «n; *», s: Nat, STs: «s; [Nat, *, Nat]»}
-                               → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream, T: *,
-                                  «i: s; %gpu.SymPtr STs#i»]
-                               → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                                      %gpu.SharedPtr T, «i: s; %gpu.SymPtr STs#i», «i: n; Ts#i»,
-                                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-                               → Fn «i: n; Ts#i» → %mem.M 0;
+// TODO: refactor to {n m s: Nat, STs: «s; [Nat, *, Nat]»} as soon as bug is fixed
+axm %gpu.launch: {n: Nat, Ts: «n; *»}
+               → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream,
+                  m s: Nat, STs: «s; [Nat, *, Nat]», «i: s; %gpu.SymPtr STs#i», MT: «m; *»]
+               → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
+                     «i: s; %gpu.SymPtr STs#i», «i: m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
+                     Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
+               → Fn «i: n; Ts#i» → %mem.M 0;
 ///
 /// ### Work-Item Synchronization
 ///
@@ -250,7 +220,7 @@ axm %gpu.sync_work_items: [%gpu.GlobalM, %gpu.SharedM] → [%gpu.GlobalM, %gpu.S
 /// #### %%gpu.synced_scope
 ///
 /// Operation to provide scoped parallelism to work items
-// TODO: this is an initial idea that needs to be optimized with a RWPhase and maybe variadic arguments for the scope
+// TODO: consider variadic arguments and returns values for the scope
 lam %gpu.synced_scope (m1: %gpu.GlobalM, m3: %gpu.SharedM,
                        scope: [%gpu.GlobalM, %gpu.SharedM] → [%gpu.GlobalM, %gpu.SharedM])
                     : [%gpu.GlobalM, %gpu.SharedM] =
@@ -263,14 +233,15 @@ lam %gpu.synced_scope (m1: %gpu.GlobalM, m3: %gpu.SharedM,
 ///
 /// ### Repls
 ///
-axm %gpu.check_addr_spaces_repl: %compile.Repl;
+axm %gpu.check_addr_spaces_repl:    %compile.Repl;
 axm %gpu.host_malloc2gpualloc_repl: %compile.Repl;
 ///
 /// ### Phases
 ///
-axm %gpu.mem_checks_phase: %compile.Phase;
+axm %gpu.mem_checks_phase:                 %compile.Phase;
+axm %gpu.remove_double_syncs:              %compile.Phase;
 axm %gpu.device_rewrite_kernel_args_phase: %compile.Phase;
-axm %gpu.setup4backend: %compile.Phase;
+axm %gpu.setup4backend:                    %compile.Phase;
 ///
 /// ### Pipelines
 ///
@@ -285,5 +256,6 @@ lam %gpu.host_specific_phases () = %compile.phases ff (
     %compile.repl2phase %gpu.host_malloc2gpualloc_repl,
 );
 lam %gpu.device_specific_phases () = %compile.phases ff (
+    %gpu.remove_double_syncs,
     %gpu.device_rewrite_kernel_args_phase,
 );

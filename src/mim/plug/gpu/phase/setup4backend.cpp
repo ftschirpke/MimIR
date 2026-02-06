@@ -24,15 +24,12 @@ static void run_stage(World& world, flags_t annex) {
 }
 
 void Setup4Backend::start() {
-    old_world().dump();
     split_phase.run();
     swap(old_world(), split_phase.old_world());
     swap(new_world(), split_phase.new_world());
 
     run_stage(old_world(), Annex::base<gpu::host_specific_phases>());
-    old_world().dump();
     run_stage(new_world(), Annex::base<gpu::device_specific_phases>());
-    new_world().dump();
 }
 
 } // namespace mim::plug::gpu::phase

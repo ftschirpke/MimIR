@@ -5,7 +5,7 @@ plugin core;
 plugin gpu;
 
 con kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM,
-            group_id: Idx 4, item_id: Idx 4, (),
+            group_id: Idx 4, item_id: Idx 4, (), (), (),
             return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
     return (m1, m3, m4, m5);
 
@@ -14,11 +14,11 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m0, ptr) = %mem.alloc (I32, 0) m0;
     let m0 = %mem.store (m0, ptr, argc);
 
-    let (m0, m1, m4, _, _) = %gpu.init @(0, 0) (m0, (), ());
+    let (m0, m1, m4, _, _) = %gpu.init (0, 0, m0, (), ());
 
     let (m0, m1, d_ptr) = %gpu.alloc_copy.block (m0, m1, ptr);
 
-    ret m0 = %gpu.launch.no_smem (m0, 4, 4, %gpu.default_stream) kernel $ ();
+    ret m0 = %gpu.launch (m0, 4, 4, %gpu.default_stream, 0, 0, (), (), ()) kernel $ ();
 
     let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_ptr, ptr);
     let m1 = %gpu.free.block (m1, d_ptr);
