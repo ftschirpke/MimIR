@@ -36,7 +36,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m1, dummy_global) = %gpu.alloc.block I32 m1;
 
     ret m0 = %gpu.launch (
-        m0, 4, 4, %gpu.default_stream, 0, 2,
+        m0, 4, 4, %gpu.default_stream, ff, 2,
         ((0, I32, %gpu.addr_space_global), (0, I32, %gpu.addr_space_const)),
         (global_ptr, const_ptr), ()
     ) kernel $ dummy_global;

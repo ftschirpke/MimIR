@@ -18,7 +18,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
 
     let (m0, m1, d_ptr) = %gpu.alloc_copy.block (m0, m1, ptr);
 
-    ret m0 = %gpu.launch (m0, 4, 4, %gpu.default_stream, 0, 0, (), (), ()) kernel $ ();
+    ret m0 = %gpu.launch (m0, 4, 4, %gpu.default_stream, ff, 0, (), (), ()) kernel $ ();
 
     let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_ptr, ptr);
     let m1 = %gpu.free.block (m1, d_ptr);

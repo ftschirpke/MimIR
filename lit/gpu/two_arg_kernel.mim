@@ -30,7 +30,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m0, m1) = %gpu.copy_to_device.block (m0, m1, ptr1, d_ptr1);
     let (m0, m1) = %gpu.copy_to_device.block (m0, m1, ptr2, d_ptr2);
 
-    ret m0 = %gpu.launch (m0, 4, 4, %gpu.default_stream, 0, 0, (), (), ()) kernel $ (d_ptr1, d_ptr2);
+    ret m0 = %gpu.launch (m0, 4, 4, %gpu.default_stream, ff, 0, (), (), ()) kernel $ (d_ptr1, d_ptr2);
 
     let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_ptr1, ptr1);
     let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_ptr2, ptr2);
