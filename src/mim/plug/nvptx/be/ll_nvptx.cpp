@@ -163,8 +163,6 @@ std::string HostEmitter::convert(const Def* type) {
         auto [_, T, a]      = symptr->args<3>();
         auto ptr_equivalent = world().call<mem::Ptr>(Defs{T, a});
         return convert(ptr_equivalent);
-    } else if (auto stream = Axm::isa<gpu::Stream>(type)) {
-        return "{i8}*";
     }
     return Super::convert(type);
 }

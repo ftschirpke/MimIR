@@ -74,8 +74,14 @@ const char* llvm_suffix(const Def* type) {
 // [%mem.M 0, T] => T
 // TODO there may be more instances where we have to deal with this trickery
 const Def* isa_mem_sigma_2(const Def* type) {
-    if (auto sigma = type->isa<Sigma>())
-        if (sigma->num_ops() == 2 && Axm::isa<mem::M>(sigma->op(0))) return sigma->op(1);
+    if (auto sigma = type->isa<Sigma>()) {
+        auto num_ops = sigma->num_ops();
+        if (num_ops == 0) return {};
+        auto last_idx = num_ops - 1;
+        for (size_t i = 0; i < last_idx; ++i)
+            if (!Axm::isa<mem::M>(sigma->op(i))) return {};
+        return sigma->op(last_idx);
+    }
     return {};
 }
 } // namespace
@@ -311,7 +317,7 @@ void Emitter::emit_epilogue(Lam* lam) {
         for (size_t i = 0; i != n; ++i) {
             if (auto arg = emit_unsafe(app->arg(n, i)); !arg.empty()) {
                 auto phi = callee->var(n, i);
-                assert(!Axm::isa<mem::M>(phi->type()));
+                if (Axm::isa<mem::M>(phi->type())) continue;
                 lam2bb_[callee].phis[phi].emplace_back(arg, id(lam, true));
                 locals_[phi] = id(phi);
             }

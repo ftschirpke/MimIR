@@ -6,10 +6,26 @@
 ///
 /// [TOC]
 ///
-/// ## Operations
+/// ## Dependencies
 ///
-/// ### %%nvptx.const_idx
+import compile;
+import mem;
 ///
-/// The 42 constant, evaluated using a normalizer
+/// ## Types
 ///
-axm %nvptx.const_idx: [n: Nat] → Idx n, normalize_const;
+/// ### Streams
+///
+let %nvptx.Stream = %mem.Ptr0 I8;
+///
+/// ## Stages
+///
+/// ### Repls
+///
+axm %nvptx.stream_impl_repl: %compile.Repl;
+///
+/// ### Pipelines
+///
+// TODO: consider moving (some) pipelines to their own plugin "gpu_opt"
+let %nvptx.general_repls = %compile.repls (
+    %nvptx.stream_impl_repl,
+);
