@@ -650,9 +650,6 @@ std::string DeviceEmitter::prepare() {
 
     auto [m1, m3, m4, m5, group_id, item_id, symptrs, smem, arg, ret_lam] = kernel->vars<10>();
 
-    auto groups_id = kernel->var(4);
-    auto items_id  = kernel->var(5);
-
     auto arg_name = id(arg);
     locals_[arg]  = arg_name;
     print(func_impls_, "{} {}) {{\n", convert(arg->type()), arg_name);
