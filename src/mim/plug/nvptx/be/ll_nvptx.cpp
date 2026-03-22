@@ -676,8 +676,8 @@ std::string DeviceEmitter::prepare() {
             error("Warp ID too large, must fit into I32");
         }
     };
-    register_sreg_idx(groups_id, "ctaid.x");
-    register_sreg_idx(items_id, "tid.x");
+    register_sreg_idx(group_id, "ctaid.x");
+    register_sreg_idx(item_id, "tid.x");
 
     auto shared_as = Lit::as(world().annex<gpu::addr_space_shared>());
     if (auto sigma = smem->type()->isa<Sigma>()) {
