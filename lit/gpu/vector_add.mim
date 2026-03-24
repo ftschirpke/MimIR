@@ -1,0 +1,99 @@
+// RUN: rm -f %t.ll
+// RUN: %mim %s --output-ll %t.ll --device-target nvptx -o -
+// RUN: rm -f %t
+// RUN: clang %t.ll -o %t -lcuda -Wno-override-module
+// RUN: %t; test $? -eq 3
+
+plugin core;
+plugin gpu;
+
+let work_groups = 16;
+let work_items = 128;
+let total_work_items = %core.nat.mul (work_groups, work_items);
+let elements_per_work_item = 100;
+let elements = %core.nat.mul (total_work_items, elements_per_work_item);
+let IdxT = Idx elements;
+
+let Vector = «elements; I32»;
+
+con kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM,
+            group_id: Idx work_groups, item_id: Idx work_items, (), (),
+            (data1: %gpu.GlobalPtr Vector, data2: %gpu.GlobalPtr Vector),
+            return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
+    let group_offset = %core.wrap.mul 0 (%core.bitcast IdxT group_id, %core.idx elements 0 work_groups);
+    let item_offset = %core.bitcast IdxT item_id;
+    let total_offset = %core.wrap.add 0 (group_offset, item_offset);
+
+    let loop_end = %core.bitcast I32 elements_per_work_item;
+    loop (m1, 0I32)
+    where
+        con loop (m1: %gpu.GlobalM, i: I32) =
+            let cond = %core.icmp.ul (i, loop_end);
+            (exit, body)#cond (m1, i)
+            where
+                con body (m1: %gpu.GlobalM, i: I32) =
+                    let current = %core.wrap.mul 0 (i, %core.bitcast I32 total_work_items);
+                    let idx = %core.wrap.add 0 (current, %core.bitcast I32 total_offset);
+                    let idx = %core.bitcast IdxT idx;
+                    let loc1 = %mem.lea (data1, idx);
+                    let loc2 = %mem.lea (data2, idx);
+
+                    let (m1, val1) = %mem.load (m1, loc1);
+                    let (m1, val2) = %mem.load (m1, loc2);
+                    let sum = %core.wrap.add 0 (val1, val2);
+                    let m1 = %mem.store (m1, loc1, sum);
+
+                    let next_i = %core.wrap.add 0 (i, 1I32);
+                    loop (m1, next_i);
+
+                con exit (m1: %gpu.GlobalM, i: I32) = return (m1, m3, m4, m5);
+            end;
+    end;
+
+fun fill_vectors (m0: %mem.M 0, ptr1: %mem.Ptr0 Vector, ptr2: %mem.Ptr0 Vector) =
+    let loop_end = %core.bitcast I32 elements;
+    con loop (m0: %mem.M 0, i: I32) =
+        let cond = %core.icmp.ul (i, loop_end);
+        (exit, body)#cond m0
+        where
+            con body (m0: %mem.M 0) =
+                let idx = %core.bitcast IdxT i;
+                let loc1 = %mem.lea (ptr1, idx);
+                let loc2 = %mem.lea (ptr2, idx);
+
+                let m0 = %mem.store (m0, loc1, 1I32);
+                let m0 = %mem.store (m0, loc2, 2I32);
+
+                let next_i = %core.wrap.add 0 (i, 1I32);
+                loop (m0, next_i);
+            con exit (m0: %mem.M 0) = return m0;
+        end;
+    loop (m0, 0I32);
+
+fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0))
+              : [%mem.M 0, I32] =
+    let (m0, ptr1) = %mem.alloc (Vector, 0) m0;
+    let (m0, ptr2) = %mem.alloc (Vector, 0) m0;
+
+    ret m0 = fill_vectors $ (m0, ptr1, ptr2);
+
+    let (m0, m1, m4, _, _) = %gpu.init (0, 0, m0, (), ());
+
+    let (m0, m1, d_ptr1) = %gpu.alloc_copy.block (m0, m1, ptr1);
+    let (m0, m1, d_ptr2) = %gpu.alloc_copy.block (m0, m1, ptr2);
+
+    ret m0 = %gpu.launch (m0, work_groups, work_items, %gpu.default_stream, ff, 0, (), (), ()) kernel $ (d_ptr1, d_ptr2);
+
+    let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_ptr1, ptr1);
+    let m1 = %mem.free (m1, d_ptr1);
+    let m1 = %mem.free (m1, d_ptr2);
+
+    let m0 = %gpu.deinit (m0, m1, m4);
+
+    let idx = %core.idx elements 0 0;
+    let loc = %mem.lea (ptr1, idx);
+    let (m0, val) = %mem.load (m0, loc);
+    let m0 = %mem.free (m0, ptr1);
+    let m0 = %mem.free (m0, ptr2);
+
+    return (m0, val);
