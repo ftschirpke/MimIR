@@ -127,6 +127,7 @@ constexpr auto CU_STREAM_SYNC         = "cuStreamSynchronize_ptsz";
 
 void HostEmitter::emit_cu_error_handling(BB& bb, const std::string& cu_result, bool tail) {
     // TODO: properly implement
+    return;
 #ifndef NDEBUG
     declare("i32 @{}(i32, ptr)", CU_GET_ERROR_STRING);
     declare("i32 @puts(ptr)");
@@ -786,7 +787,7 @@ static std::optional<std::string> get_compute_capability() {
     for (size_t i = 0; i < out.size(); ++i)
         if (i != dot_pos && !std::isdigit(out[i])) return std::nullopt;
 
-    return fmt("sm_{}{}", out.substr(0, dot_pos), out.substr(dot_pos + 1));
+    return fmt("{}{}", out.substr(0, dot_pos), out.substr(dot_pos + 1));
 }
 
 void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
@@ -815,7 +816,7 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
         println(std::cout, "Determined compute capability to be '{}'", compute_cap.value());
         comp_cap = compute_cap.value();
     } else {
-        static constexpr auto default_comp_cap = "sm_75";
+        static constexpr auto default_comp_cap = "75";
         println(std::cout, "Could not determine compute capability, continuing with default: '{}'.", default_comp_cap);
         comp_cap = default_comp_cap;
     }
@@ -823,7 +824,7 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
         auto llc = sys::find_cmd("llc");
         if (!std::filesystem::exists(llc)) error("Could not find command: llc {}", llc);
         // TODO: support 32-bit version?
-        auto cmd = fmt("{} -march=nvptx64 -mcpu={} {} -o {}", llc, comp_cap, dev_ll_name, dev_ptx_name);
+        auto cmd = fmt("{} -march=nvptx64 -mcpu=sm_{} {} -o {}", llc, comp_cap, dev_ll_name, dev_ptx_name);
         auto rc  = sys::system(cmd);
         if (rc != 0) {
             println(std::cout, "Command exited with error code {}", rc);
@@ -833,7 +834,7 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     {
         auto ptxas = sys::find_cmd("ptxas");
         if (!std::filesystem::exists(ptxas)) error("Could not find command: ptxas {}", ptxas);
-        auto cmd = fmt("{} -arch={} {} -o {}", ptxas, comp_cap, dev_ptx_name, dev_cubin_name);
+        auto cmd = fmt("{} -arch=sm_{} {} -o {}", ptxas, comp_cap, dev_ptx_name, dev_cubin_name);
         auto rc  = sys::system(cmd);
         if (rc != 0) {
             println(std::cout, "Command exited with error code {}", rc);
@@ -841,9 +842,10 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
         }
     }
     {
-        auto nvcc = sys::find_cmd("nvcc");
-        if (!std::filesystem::exists(nvcc)) error("Could not find command: nvcc {}", nvcc);
-        auto cmd = fmt("{} -fatbin -arch={} {} -o {}", nvcc, comp_cap, dev_cubin_name, dev_fatbin_name);
+        auto fatbinary = sys::find_cmd("fatbinary");
+        if (!std::filesystem::exists(fatbinary)) error("Could not find command: fatbinary {}", fatbinary);
+        auto cmd = fmt("{} --create={} -64 --image3=kind=elf,sm={},file={}", fatbinary, dev_fatbin_name, comp_cap,
+                       dev_cubin_name);
         auto rc  = sys::system(cmd);
         if (rc != 0) {
             println(std::cout, "Command exited with error code {}", rc);
