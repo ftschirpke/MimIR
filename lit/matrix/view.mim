@@ -14,7 +14,7 @@ con extern f [mem : %mem.M a, return: Cn[%mem.M a, T]] =
     let (mem, ptr) = %mem.alloc («n; T», a) mem;
     let nTa        = (n, T, a);
     let mat        = %matrix.mat_from_mem ptr;
-    let val_ptr    = %matrix.get (mat, %core.idx n 0 4);
+    let val_ptr    = %matrix.get mat (%core.idx n 0 4);
     let (mem, val) = %mem.load (mem, val_ptr);
     let mem        = %mem.free (mem, ptr);
     return (mem, val);
