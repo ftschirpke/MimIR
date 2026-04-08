@@ -26,7 +26,55 @@ plugin affine;
 ///
 axm %matrix.Mat: [n: Nat, S: «n; Nat», T: *] → *;
 ///
+/// ### %%matrix.Dims
+///
+/// Matrix dimensions are potentially recursive tuples of natural numbers
+lam %matrix.Dims {n: Nat, ms: «n; Nat»} = «i: n; «j: ms#i; Nat»»;
+///
+/// ### %%matrix.Idx
+///
+/// Matrix indices are potentially recursive tuples of indices
+lam %matrix.Idx {n: Nat, ms: «n; Nat»} as nms (dims: %matrix.Dims@nms) = «i: n; «j: ms#i; Idx dims#i#j»»;
+///
+/// ### %%matrix.MatView
+///
+/// A matrix view is a view into memory of some dimensions and strides of type T.
+axm %matrix.MatView: {n: Nat, ms: «n; Nat»} as nms
+                   → [dims: %matrix.Dims@nms, strides: %matrix.Dims@nms, T: *, a: Nat,
+                      %matrix.Idx dims → %mem.Ptr (T, a)]
+                   → *;
+///
 /// ## Operations
+///
+/// ### %%matrix.mat_view
+///
+/// Creates a MatView.
+axm %matrix.mat_view: {n: Nat, ms: «n; Nat»} as nms
+                    → [dims: %matrix.Dims@nms, strides: %matrix.Dims@nms, T: *, a: Nat,
+                       %matrix.Idx dims → %mem.Ptr (T, a)] as matconf
+                    → %matrix.MatView matconf;
+///
+/// ### %%matrix.mat_from_mem
+///
+/// Creates a MatView from a pointer to contiguous memory.
+// axm %matrix.mat_from_mem: {n: Nat, T: *, a: Nat} as nTa
+//                         → (%mem.Ptr («n; T», a))
+//                         → %matrix.MatView (n, 1, T, a, %matrix.Idx n → %mem.Ptr (T, a));
+lam %matrix.mat_from_mem {n: Nat, T: *, a: Nat} as nTa (ptr: %mem.Ptr («n; T», a)) =
+    let dims = n;
+    let strides = 1;
+    %matrix.mat_view (dims, strides, T, a, get)
+    where
+        lam get (idx: %matrix.Idx dims): %mem.Ptr (T, a) = %mem.lea (ptr, idx);
+    end;
+///
+/// ### %%matrix.get
+///
+/// Gets an element from a MatView given an index.
+lam %matrix.get {n: Nat, ms: «n; Nat»} as nms
+    {dims: %matrix.Dims@nms, strides: %matrix.Dims@nms, T: *, a: Nat, get: %matrix.Idx dims → %mem.Ptr (T, a)}
+    (mat: %matrix.MatView (dims, strides, T, a, get), idx: %matrix.Idx dims) : %mem.Ptr (T, a) =
+        get idx;
 ///
 /// ### %%matrix.shape
 ///
