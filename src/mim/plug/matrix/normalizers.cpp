@@ -1,94 +1,72 @@
-#include <iostream>
-
-#include "mim/axm.h"
 #include "mim/world.h"
 
 #include "mim/plug/matrix/matrix.h"
 
-// TODO: combine map_reduce calls
-
 namespace mim::plug::matrix {
 
-/// Normalizer for read opertions
-/// - read(constMat v) -> v
-/// - read(insert m v i, i) -> v (TODO: check with map_reduce)
-/// - read(insert m v i, j) -> read(m, i) if i <> j (TODO: wanted? useful?)
-/// - read(transpose m, (i,j)) -> read(m, (j,i)) (TODO: check for map_reduce)
-/// - read(product m1 m2, (i,j)) -> ... (TODO: check with map_reduce)
-/// - read (map_reduce f) idx = loop f idx (TODO: implement => use inner loop from lowering phase)
-const Def* normalize_read(const Def* type, const Def*, const Def* arg) {
-    auto& world            = type->world();
-    auto [mem, mat, index] = arg->projs<3>();
+static std::vector<nat_t> multiply_flatten_tuple(const Tuple* tuple) {
+    auto& w = tuple->world();
 
-    world.DLOG("normalizing read: mat: {}\n", mat);
+    std::vector<nat_t> result;
 
-    if (auto mex = mat->isa<Extract>()) {
-        world.DLOG("  extract: {}\n", mex);
-        auto ccall = mex->tuple();
-        world.DLOG("  ex_mat: {}\n", ccall);
-        if (auto mcm = Axm::isa<constMat>(ccall)) {
-            world.DLOG("  const mat: {}\n", mcm);
-            auto [cmem, v] = mcm->arg()->projs<2>();
-            return world.tuple({mem, v});
+    auto n    = Lit::as<nat_t>(tuple->op(0));
+    auto ms   = tuple->op(1);
+    auto dims = tuple->op(2);
+    for (size_t i = 0; i < n; ++i) {
+        w.DLOG("[i={}] n={} ...", i, n);
+        auto m_op = (n == 1) ? ms : ms->op(i);
+        auto m    = Lit::as<nat_t>(m_op);
+        w.DLOG("[i={}] n={} m={} ...", i, n, m);
+        auto dim_op       = (n == 1) ? dims : dims->op(i);
+        nat_t dim_product = 1;
+        for (size_t j = 0; j < m; ++j) {
+            auto op = (m == 1) ? dim_op : dim_op->op(j);
+            dim_product *= Lit::as<nat_t>(op);
         }
+        w.DLOG("[i={}] n={} m={} => dim={}", i, n, m, dim_product);
+        result.push_back(dim_product);
     }
-
-    return {};
+    return result;
 }
 
-/// Normalizer for write operations
-/// TODO: implement
-const Def* normalize_insert(const Def*, const Def*, const Def*) { return {}; }
-
-/// Normalizer for transpose operations
-/// - transpose (constMat v) -> cosntMat v (TODO: implement)
-/// - transpose (insert m v (i,j)) -> insert (transpose m) v (j,i) (TODO: implement, maybe other way around?)
-/// - transpose (tranpose m) -> m (TODO: implement)
-
-/// - shape (\@mat n (k1,k2,...,kn) i) -> (k1,k2,...,kn)\#i (TODO: implement)
 const Def* normalize_shape(const Def* type, const Def* callee, const Def* arg) {
-    auto& world                   = type->world();
-    auto [mat, index]             = arg->projs<2>();
-    auto [dims, sizes, body_type] = Axm::isa<Mat, false>(mat->type())->args<3>();
+    auto& w = type->world();
+    w.DLOG("shape start");
+    auto tuple = arg->isa<Tuple>();
+    if (!tuple) return nullptr;
+
+    (void)type;
     (void)callee;
+    auto dims = multiply_flatten_tuple(tuple);
 
-    return world.extract(sizes, index);
+    DefVec def_vec;
+    for (auto dim : dims)
+        def_vec.push_back(w.lit_nat(dim));
+
+    auto n        = tuple->op(0);
+    auto ms       = w.pack(n, w.lit_nat_1());
+    auto new_dims = w.tuple(def_vec);
+    w.DLOG("shape end");
+    return w.tuple(DefVec{n, ms, new_dims});
 }
 
-/// Matrix normalizer for product on two-dimensional matrices
-/// - product (constMat v1, constMat v2) -> constMat v1 * v2 * dim (TODO: implement)
-/// - product (constMat v, m) -> ... (TODO: implement)
-/// - product (m, constMat v) -> ... (TODO: implement)
-/// - product (id, m) -> m (TODO: check)
-/// - product (m, id) -> m
+const Def* normalize_size(const Def* type, const Def* callee, const Def* arg) {
+    auto& w = type->world();
+    w.DLOG("size start");
+    auto tuple = arg->isa<Tuple>();
+    if (!tuple) return nullptr;
 
-/// - map(constMat v, f) -> constMat f(v) (TODO: implement)
-/// - map f (map g m) -> map (f . g) m (TODO: implement)
-/// - map f (zipWith g m1 m2) -> zipWith (f . g) m1 m2 (TODO: implement)
-u64 get_max_index(u64 init, Defs inputs) {
-    auto max_idx = init;
+    (void)type;
+    (void)callee;
+    auto dims = multiply_flatten_tuple(tuple);
 
-    for (auto inp : inputs) {
-        auto [indices, mat] = inp->projs<2>();
-        auto indice_count   = Lit::isa(indices->arity());
-        if (!indice_count) return -1;
-        for (auto idx : indices->projs()) {
-            auto idx_val = Lit::isa(idx);
-            if (!idx_val) return -1;
-            if (idx_val > max_idx) max_idx = idx_val.value();
-        }
-    }
+    nat_t product = 1;
+    for (auto dim : dims)
+        product *= dim;
 
-    return max_idx;
+    w.DLOG("size end");
+    return w.lit_nat(product);
 }
-
-/// map_reduce normalizers
-/// - TODO: map_reduce (..., ((idx,map_reduce([out, ]...), ...))) -> unify idx, out (out is implicit), name vars apart
-///   requires: same reduction, distributive reduction
-/// we assume distributivity of the reduction function
-const Def* normalize_map_reduce(const Def*, const Def*, const Def*) { return {}; }
-const Def* normalize_prod(const Def*, const Def*, const Def*) { return {}; }
-const Def* normalize_transpose(const Def*, const Def*, const Def*) { return {}; }
 
 MIM_matrix_NORMALIZER_IMPL
 
