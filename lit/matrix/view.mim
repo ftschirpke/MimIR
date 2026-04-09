@@ -9,7 +9,7 @@ let n = 1024;
 let a = 0;
 let T = I32;
 
-con extern f [mem : %mem.M a, return: Cn[%mem.M a, T]] =
+con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, %matrix.Dims, Nat]] =
     let val = 4I32;
     let (mem, ptr) = %mem.alloc («n; T», a) mem;
     let nTa        = (n, T, a);
@@ -17,5 +17,7 @@ con extern f [mem : %mem.M a, return: Cn[%mem.M a, T]] =
     let val_ptr    = %matrix.get mat (%core.idx n 0 4);
     let (mem, val) = %mem.load (mem, val_ptr);
     let mem        = %mem.free (mem, ptr);
-    return (mem, val);
+    let shape      = %matrix.shape (%matrix.dims mat);
+    let size       = %matrix.size (%matrix.dims mat);
+    return (mem, val, shape, size);
 
