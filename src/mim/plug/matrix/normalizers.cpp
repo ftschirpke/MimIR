@@ -51,8 +51,7 @@ const Def* normalize_shape(const Def* type, const Def* callee, const Def* arg) {
 }
 
 const Def* normalize_size(const Def* type, const Def* callee, const Def* arg) {
-    auto& w = type->world();
-    w.DLOG("size start");
+    auto& w    = type->world();
     auto tuple = arg->isa<Tuple>();
     if (!tuple) return nullptr;
 
@@ -64,8 +63,17 @@ const Def* normalize_size(const Def* type, const Def* callee, const Def* arg) {
     for (auto dim : dims)
         product *= dim;
 
-    w.DLOG("size end");
     return w.lit_nat(product);
+}
+
+const Def* normalize_strides2extract(const Def* type, const Def* callee, const Def* arg) {
+    auto& w = type->world();
+    w.DLOG("s2e start");
+
+    w.DLOG("s2e: t {}, c {}, a {}", type, callee, arg);
+
+    w.DLOG("s2e end");
+    return nullptr;
 }
 
 MIM_matrix_NORMALIZER_IMPL

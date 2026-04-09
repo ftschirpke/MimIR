@@ -1,9 +1,39 @@
 // RUN: rm -f %t.ll
 // RUN: %mim %s
 
+// let %nvptx.warp = %matrix.ThreadMat 32 1;
+//
+// ldmatrix per thread: i.e. (%matrix.Mat (2, 2) (2, 1) (%matrix.ThreadMat 8 1))
+// thus:
+//     (maybe integrate into op)
+//      %matrix.Idx (2, 2) (2, 1) (%matrix.Idx 8 1) // thread index - 2nd part = Idx 8
+// axm %nvptx.ldmatrix: [%matrix.MemMat (1, 8) (8, 1) (%math.F16, %gpu.addr_space_shared)]
+//                   -> [%matrix.Mat (2, 2) (2, 1) (%matrix.MemMat (1, 2) (2, 1) (%math.F16, %gpu_addr_space_local))]
+//
+// for quad pairs:
+// ... execute block with %matrix.ThreadMat (4, 2) (1, 16) -> %matrix.Idx (4, 2)  i.e. multi-dimensional indices
+
 plugin core;
 plugin matrix;
 plugin mem;
+
+let Ex = [
+    IdxT: *,
+    T:    *,
+    get:  IdxT → T,
+];
+
+lam IN1 (n: Nat, T: *, v: T) = (
+    Idx n,
+    T,
+    lm (idx: Idx n) = v,
+);
+
+lam use (in: Ex) (idx: in#IdxT) = in#get idx;
+
+fun extern g () =
+    let instance: Ex = IN1 (42, Nat, 58);
+    return (use instance (%core.idx 42 0 14));
 
 let n = 1024;
 let a = 0;
@@ -13,11 +43,11 @@ con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, %matrix.Dims, Nat]] =
     let val = 4I32;
     let (mem, ptr) = %mem.alloc («n; T», a) mem;
     let nTa        = (n, T, a);
-    let mat        = %matrix.mat_from_mem ptr;
-    let val_ptr    = %matrix.get mat (%core.idx n 0 4);
-    let (mem, val) = %mem.load (mem, val_ptr);
-    let mem        = %mem.free (mem, ptr);
-    let shape      = %matrix.shape (%matrix.dims mat);
-    let size       = %matrix.size (%matrix.dims mat);
+    let mat = %matrix.mem_mat (%matrix.dims n) (%matrix.dims 1) ptr;
+//     // let val = 42I32;
+//     let val_ptr = mat (%core.idx n 0 4);
+//     let (mem, val) = %mem.load (mem, val_ptr);
+    let shape = %matrix.dims n;
+    let size = n;
     return (mem, val, shape, size);
 
