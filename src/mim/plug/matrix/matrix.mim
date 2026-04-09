@@ -24,53 +24,24 @@ lam %matrix.Idx (dims: %matrix.Dims) =
     let (n, ms, dims) = dims;
     «i: n; «j: ms#i; Idx dims#i#j»»;
 ///
-/// ### %%matrix.Data
-///
-/// An existential type for any kind of contiguous datastructure that can be used as the underlying data for a matrix.
-let %matrix.Data = [
-    n:       Nat,
-    T:       *,
-    extract: Idx n → T,
-];
-///
 /// ### %%matrix.Mat
 ///
 /// Matrices are a multi-dimensional interpretation of a contiguous datastracture.
 /// A matrix is identified by its dimensions and the strides on the underlying data.
-let %matrix.Mat = [
-    dims:    %matrix.Dims,
-    strides: %matrix.Dims,
-    data:    %matrix.Data,
-];
-// axm %matrix.Mat: [data: %matrix.Data]
-//                → [dims: %matrix.Dims]
-//                → [strides: %matrix.Dims]
-//                → *;
-
-// → «dims#n; Nat», normalize_shape;
-
+axm %matrix.Mat: [dims: %matrix.Dims] → [strides: %matrix.Dims] → [T: *] → *;
 ///
 /// ## Operations
 ///
 /// ### %%matrix.dims
 ///
-/// Extracts the dimensions of a matrix.
-// lam %matrix.dims (mat: %matrix.Mat) : %matrix.Dims = mat#dims;
-///
-/// ### %%matrix.strides
-///
-/// Extracts the strides of a matrix.
-// lam %matrix.strides (mat: %matrix.Mat) : %matrix.Dims = mat#strides;
-///
-/// ### %%matrix.data
-///
-/// Extracts the data of a matrix.
-// lam %matrix.data (mat: %matrix.Mat) : mat#DataT = mat#data;
-///
-/// ### %%matrix.create_dims
-///
 /// Creates a %%matrix.Dims object from just its third component - the actual (nested) array
-// lam %matrix.create_dims {n: Nat, ms: «n; Nat»} (dims: «i: n; «j: ms#i; Nat»») : %matrix.Dims = (n, ms, dims);
+lam %matrix.dims {n: Nat, ms: «n; Nat»} (dims: «i: n; «j: ms#i; Nat»») : %matrix.Dims = (n, ms, dims);
+///
+/// ### %%matrix.mem_mat
+///
+/// Create a %%matrix.Mat based on a pointer to continguous memory
+axm %matrix.mem_mat: {T: *, a n: Nat} → [dims: %matrix.Dims] → [strides: %matrix.Dims] → [%mem.Ptr («n; T», a)]
+                   → [%matrix.Mat dims strides (%mem.Ptr (T, a))];
 ///
 /// ### %%matrix.shape
 ///
@@ -83,47 +54,20 @@ axm %matrix.shape: [dims: %matrix.Dims] → «dims#n; Nat», normalize_shape;
 /// Calculates the total number elements expected for a matrix of the form of a given %%matrix.Dims object
 axm %matrix.size: %matrix.Dims → Nat, normalize_size;
 ///
-/// ### %%matrix.mem_data
+/// ### %%matrix.idx_1DtoND
 ///
-/// Creates a simple instance of the %%matrix.Data existential type from contiguous memory
-// lam %matrix.mem_data {n: Nat, T: *, a: Nat} (data: %mem.Ptr(«n; T», a)) =
-//     let OutT = %mem.Ptr(T, a);
-//     lam extract (idx: Idx n) : OutT = %mem.lea (data, idx);
-//     [n, OutT, extract];
+/// Converts one-dimensional index to multi-dimensional equivalent for given dimensions and strides.
+axm %matrix.idx_1DtoND: [dims: %matrix.Dims] → [strides: %matrix.Dims] → Idx (%matrix.size dims) → %matrix.Idx dims;
 ///
-/// ### %%matrix.mat_from_mem
+/// ### %%matrix.idx_NDto1D
 ///
-/// Creates a one-dimensional matrix from a pointer to contiguous memory.
-// lam %matrix.mat_from_mem {n: Nat, T: *, a: Nat} as nTa (ptr: %mem.Ptr («n; T», a)) : %matrix.Mat =
-//     let dims    = %matrix.create_dims n;
-//     let strides = %matrix.create_dims 1;
-//     let data    = %matrix.mem_data ptr;
-//     (dims, %mem.Ptr (T, a), get)
-//     where
-//         lam get (idx: %matrix.Idx dims): %mem.Ptr (T, a) = %mem.lea (ptr, idx);
-//     end;
+/// Converts multi-dimensional index to one-dimensional equivalent for given strides.
+axm %matrix.idx_NDto1D: {dims: %matrix.Dims} → %matrix.Idx dims → [strides: %matrix.Dims] → Idx (%matrix.size dims);
 ///
-/// ### %%matrix.reshape
+/// ### %%matrix.strides2extract
 ///
-/// Reshapes the given matrix into a new shape.
-// axm %matrix.reshape: [mat: %matrix.Mat, new_dims: %matrix.Dims]
-//                    → %matrix.Mat;
-// TODO: make refly check for equal sizes work (below)
-//                   → %refly.check (%core.ncmp.e (%matrix.size mat#dims, %matrix.size new_dims), %matrix.Mat,
-//                                   "new dimensions do not match the size of the given matrix");
-///
-/// ### %%matrix.get
-///
-/// Extracts an element from a matrix using a %%matrix.Idx
-// axm %matrix.get: [mat: %matrix.Mat, idx: %matrix.Idx] → mat#data#T, normalize_get;
-///
-/// ### %%matrix.get1d
-///
-/// Extracts an element from a matrix using a 1-dimensional array of indices per dimension
-// axm %matrix.get1d: [mat: %matrix.Mat, idx: «i: mat#dims#n; Idx (%matrix.shape mat#dims)#i»]
-//     → mat#data#T, normalize_get1d;
-///
-/// ### %%matrix.getidx
-///
-/// Extracts an element from a matrix using a simple Idx
-// axm %matrix.getidx: [mat: %matrix.Mat, idx: Idx (%matrix.size mat#dims)] → mat#data#T, normalize_getidx;
+/// Generates an extraction function for given dimensions and strides.
+axm %matrix.strides2extract: [dims: %matrix.Dims]
+                           → [strides: %matrix.Dims]
+                           → %matrix.Idx dims
+                           → Idx (%matrix.size dims), normalize_strides2extract;
