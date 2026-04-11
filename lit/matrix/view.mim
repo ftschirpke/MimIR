@@ -35,19 +35,22 @@ fun extern g () =
     let instance: Ex = IN1 (42, Nat, 58);
     return (use instance (%core.idx 42 0 14));
 
+let d = 1;
 let n = 1024;
 let a = 0;
 let T = I32;
 
-con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, %matrix.Dims, Nat]] =
-    let val = 4I32;
+con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «d; Nat», Nat, Nat]] =
     let (mem, ptr) = %mem.alloc («n; T», a) mem;
-    let nTa        = (n, T, a);
-    let mat = %matrix.mem_mat (%matrix.dims n) (%matrix.dims 1) ptr;
-//     // let val = 42I32;
-//     let val_ptr = mat (%core.idx n 0 4);
-//     let (mem, val) = %mem.load (mem, val_ptr);
-    let shape = %matrix.dims n;
-    let size = n;
-    return (mem, val, shape, size);
+    let dims = %matrix.dims n;
+    let strides = %matrix.dims 1;
+    let mat = %matrix.create_mat (%matrix.MemMat (T, a, n)) dims strides ptr;
+    let val_ptr = mat (%core.idx n 0 4);
+    let (mem, val) = %mem.load (mem, val_ptr);
+    let shape = %matrix.shape dims;
+    let size = %matrix.size dims;
+
+    let strides2 = (2, (1, 1), (4, 4));
+    let test = %matrix.tile mat dims strides2;
+    return (mem, val, shape, size, test);
 

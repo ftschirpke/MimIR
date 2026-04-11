@@ -15,7 +15,7 @@ plugin refly;
 ///
 /// Matrix dimensions are potentially nested arrays of natural numbers
 /// The dimension array (4, (3, 2), 5) identifies 4x6x5 dimensions with the 2 blocks of 3 in the second dimension.
-let %matrix.Dims = [n: Nat, ms: «n; Nat», «i: n; «j: ms#i; Nat»»];
+let %matrix.Dims = [n: Nat, ms: «n; Nat», d: «i: n; «j: ms#i; Nat»»];
 ///
 /// ### %%matrix.Idx
 ///
@@ -26,9 +26,11 @@ lam %matrix.Idx (dims: %matrix.Dims) =
 ///
 /// ### %%matrix.Mat
 ///
-/// Matrices are a multi-dimensional interpretation of a contiguous datastracture.
-/// A matrix is identified by its dimensions and the strides on the underlying data.
-axm %matrix.Mat: [dims: %matrix.Dims] → [strides: %matrix.Dims] → [T: *] → *;
+/// TODO: description
+// axm %matrix.Mat: [dims: %matrix.Dims] → [strides: %matrix.Dims] → [T: *] → *;
+lam %matrix.Mat (dims: %matrix.Dims) (strides: %matrix.Dims) (T: *) : * =
+    [get: %matrix.Idx dims → T];
+// TODO: ensure dims and strides have equal n and ms
 ///
 /// ## Operations
 ///
@@ -37,37 +39,114 @@ axm %matrix.Mat: [dims: %matrix.Dims] → [strides: %matrix.Dims] → [T: *] →
 /// Creates a %%matrix.Dims object from just its third component - the actual (nested) array
 lam %matrix.dims {n: Nat, ms: «n; Nat»} (dims: «i: n; «j: ms#i; Nat»») : %matrix.Dims = (n, ms, dims);
 ///
-/// ### %%matrix.mem_mat
-///
-/// Create a %%matrix.Mat based on a pointer to continguous memory
-axm %matrix.mem_mat: {T: *, a n: Nat} → [dims: %matrix.Dims] → [strides: %matrix.Dims] → [%mem.Ptr («n; T», a)]
-                   → [%matrix.Mat dims strides (%mem.Ptr (T, a))];
-///
 /// ### %%matrix.shape
 ///
 /// Creates a 1-dimensional array of the dimensions of the matrix by flattening the given %%matrix.Dims object.
 /// In this context, flatten means multiplying the elements of the nested arrays into one number each
-axm %matrix.shape: [dims: %matrix.Dims] → «dims#n; Nat», normalize_shape;
+lam %matrix.shape (dims: %matrix.Dims) : «dims#n; Nat» =
+    let (n, ms, dims) = dims;
+    lam return_acc (nidx: Idx n, mi acc: Nat) : Nat = acc;
+    lam inner (nidx: Idx n, mi acc: Nat) : Nat =
+        let m = ms#nidx;
+        let dim = dims#nidx;
+        let next_mi = %core.nat.add (mi, 1);
+        let mend = %core.ncmp.e (next_mi, m);
+        let midx = %core.idx m 0 mi;
+        let val = dim#midx;
+        let new_acc = %core.nat.mul (acc, val);
+        (inner, return_acc)#mend (nidx, next_mi, new_acc);
+    <i: n; inner (i, 0, 1)>;
+
 ///
 /// ### %%matrix.size
 ///
 /// Calculates the total number elements expected for a matrix of the form of a given %%matrix.Dims object
-axm %matrix.size: %matrix.Dims → Nat, normalize_size;
+lam %matrix.size (dims: %matrix.Dims) : Nat =
+    let (n, ms, dims) = dims;
+    lam return_acc (idx acc: Nat) : Nat = acc;
+    lam outer (ni outer_acc: Nat) : Nat =
+        let next_ni = %core.nat.add (ni, 1);
+        let nend = %core.ncmp.e (next_ni, n);
+        let nidx = %core.idx n 0 ni;
+        let m = ms#nidx;
+        let dim = dims#nidx;
+        lam inner (mi inner_acc: Nat) : Nat =
+            let next_mi = %core.nat.add (mi, 1);
+            let mend = %core.ncmp.e (next_mi, m);
+            let midx = %core.idx m 0 mi;
+            let val = dim#midx;
+            let new_inner_acc = %core.nat.mul (inner_acc, val);
+            (inner, return_acc)#mend (next_mi, new_inner_acc);
+        let inner_val = inner (0, 1);
+        let new_outer_acc = %core.nat.mul (outer_acc, inner_val);
+        (outer, return_acc)#nend (next_ni, new_outer_acc);
+    outer (0, 1);
+///
+/// ### %%matrix.get
+///
+/// Retrieve an element from a %%matrix.Mat
+// axm %matrix.get: {dims: %matrix.Dims, strides: %matrix.Dims, T: *} → %matrix.Mat dims strides T
+//                → %matrix.Idx dims → T, normalize_get;
+// lam %matrix.get {dims: %matrix.Dims, strides: %matrix.Dims, T: *} (mat: %matrix.Mat dims strides T)
+//                 (idx: %matrix.Idx dims) : T = mat idx;
+// TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_1DtoND
 ///
 /// Converts one-dimensional index to multi-dimensional equivalent for given dimensions and strides.
 axm %matrix.idx_1DtoND: [dims: %matrix.Dims] → [strides: %matrix.Dims] → Idx (%matrix.size dims) → %matrix.Idx dims;
+// TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_NDto1D
 ///
 /// Converts multi-dimensional index to one-dimensional equivalent for given strides.
 axm %matrix.idx_NDto1D: {dims: %matrix.Dims} → %matrix.Idx dims → [strides: %matrix.Dims] → Idx (%matrix.size dims);
+// TODO: ensure dims and strides have equal n and ms
+
+let %matrix.MatrixCreateOptions = [n: Nat, DataT: *, OutT: *, extract: [DataT, Idx n] → OutT];
+
+lam %matrix.MemMat (T: *, a n: Nat) : %matrix.MatrixCreateOptions =
+    (n, %mem.Ptr(«n; T», a), %mem.Ptr(T, a), lm (data: %mem.Ptr(«n; T», a), idx: Idx n) = %mem.lea (data, idx));
+
 ///
-/// ### %%matrix.strides2extract
+/// ### %%matrix.create_mat
 ///
-/// Generates an extraction function for given dimensions and strides.
-axm %matrix.strides2extract: [dims: %matrix.Dims]
-                           → [strides: %matrix.Dims]
-                           → %matrix.Idx dims
-                           → Idx (%matrix.size dims), normalize_strides2extract;
+/// Create a %%matrix.Mat
+lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (dims: %matrix.Dims) (strides: %matrix.Dims)
+                       (data: Opts#DataT) : %matrix.Mat dims strides (Opts#OutT) =
+    (get)
+    where
+        lam get (idx: %matrix.Idx dims) : Opts#OutT =
+            let idx1d = %matrix.idx_NDto1D idx strides;
+            let idx1d = %core.bitcast (Idx Opts#n) idx1d; // TODO: remove - this should be checked via refly
+            Opts#extract (data, idx1d);
+    end;
+// TODO: ensure dims and strides have equal n and ms, and are of size Opts#n
+// TODO: validate strides
+///
+/// ### %%matrix.reshape
+///
+/// Reshapes a %%matrix.Mat given the dimensions and strides of the new shape.
+// lam %matrix.reshape {old_dims old_strides: %matrix.Dims, T: *}
+//                     (mat: %matrix.Mat old_dims old_strides T) (new_dims: %matrix.Dims) (new_strides: %matrix.Dims)
+//                   : %matrix.Mat new_dims new_strides T =
+//     (new_get)
+//     where
+//         lam new_get (idx: %matrix.Idx new_dims) : T =
+//             let idx1d = %matrix.idx_NDto1D idx new_strides;
+//             let idx1d = %core.bitcast (Idx (%matrix.size old_dims)) idx1d; // TODO: remove - refly
+//             let old_idx = %matrix.idx_1DtoND old_dims old_strides idx1d;
+//             mat old_idx;
+//     end;
+// TODO: ensure dims and strides have equal n and ms
+///
+/// ### %%matrix.tile
+///
+/// Tiles a %%matrix.Mat given the dimensions and strides of the tiles.
+lam %matrix.tile {dims strides: %matrix.Dims, T: *}
+                 (mat: %matrix.Mat dims strides T) (tdims: %matrix.Dims) (tstrides: %matrix.Dims) =
+    let tn = %refly.check(%core.ncmp.e (tdims#n, tstrides#n), tdims#n, "Tile dimensions and strides must match");
+    let n = %refly.check(%core.ncmp.e (dims#n, tn), dims#n, "Tile dimensions must match matrix dimensions");
+    n;
+// TODO: ensure dims and strides have equal n and ms
+// TODO: implement tiling
