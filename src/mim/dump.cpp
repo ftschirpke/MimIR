@@ -205,6 +205,7 @@ std::ostream& operator<<(std::ostream& os, Inline u) {
         return print(os, "{}:{}", lit->get(), lit->type());
     } else if (auto ex = u->isa<Extract>()) {
         if (ex->tuple()->isa<Var>() && ex->index()->isa<Lit>()) return print(os, "{}", ex->unique_name());
+        if (ex->index()->isa<Extract>()) return print(os, "{}#({})", ex->tuple(), ex->index());
         return print(os, "{}#{}", ex->tuple(), ex->index());
     } else if (auto var = u->isa<Var>()) {
         return print(os, "{}", var->unique_name());
