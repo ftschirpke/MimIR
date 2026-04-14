@@ -17,24 +17,6 @@ plugin core;
 plugin matrix;
 plugin mem;
 
-let Ex = [
-    IdxT: *,
-    T:    *,
-    get:  IdxT → T,
-];
-
-lam IN1 (n: Nat, T: *, v: T) = (
-    Idx n,
-    T,
-    lm (idx: Idx n) = v,
-);
-
-lam use (in: Ex) (idx: in#IdxT) = in#get idx;
-
-fun extern g () =
-    let instance: Ex = IN1 (42, Nat, 58);
-    return (use instance (%core.idx 42 0 14));
-
 let d = 1;
 let n = 1024;
 let a = 0;
@@ -47,10 +29,13 @@ con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «d; Nat», Nat, Nat]] =
     let mat = %matrix.create_mat (%matrix.MemMat (T, a, n)) dims strides ptr;
     let val_ptr = mat (%core.idx n 0 4);
     let (mem, val) = %mem.load (mem, val_ptr);
-    let shape = %matrix.shape dims;
-    let size = %matrix.size dims;
+    // let shape = %matrix.shape dims;
+    // let size = %matrix.size dims;
+    let shape = 111;
+    let size = 222;
 
-    let strides2 = (2, (1, 1), (4, 4));
-    let test = %matrix.tile mat dims strides2;
+//     let strides2 = (2, (1, 1), (4, 4));
+//     let test = %matrix.tile mat dims strides2;
+    let test = 333;
     return (mem, val, shape, size, test);
 

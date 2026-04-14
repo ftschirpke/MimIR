@@ -87,8 +87,8 @@ lam %matrix.size (dims: %matrix.Dims) : Nat =
 /// Retrieve an element from a %%matrix.Mat
 // axm %matrix.get: {dims: %matrix.Dims, strides: %matrix.Dims, T: *} → %matrix.Mat dims strides T
 //                → %matrix.Idx dims → T, normalize_get;
-// lam %matrix.get {dims: %matrix.Dims, strides: %matrix.Dims, T: *} (mat: %matrix.Mat dims strides T)
-//                 (idx: %matrix.Idx dims) : T = mat idx;
+lam %matrix.get {dims: %matrix.Dims, strides: %matrix.Dims, T: *} (mat: %matrix.Mat dims strides T)
+                (idx: %matrix.Idx dims) : T = mat idx;
 // TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_1DtoND
