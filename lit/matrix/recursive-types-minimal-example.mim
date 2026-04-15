@@ -1,0 +1,47 @@
+rec RecNatTup : * = [n: Nat, tup: «n; Nat ∪ RecNatTup»];
+
+lam matrix_size (dims: RecNatTup) : Nat =
+    let (n, tup) = dims;
+    lam return_acc (idx acc: Nat) : Nat = acc;
+    lam loop (i acc: Nat) : Nat =
+        let next_i = %core.nat.add (i, 1);
+        let at_end = %core.ncmp.e (next_i, n);
+        let idx = %core.idx n 0 i;
+        let dim = tup#idx;
+        let inner_val = match dim with
+            | num: Nat => num
+            | rec_tup: RecNatTup => matrix_size rec_tup;
+        let new_acc = %core.nat.mul (acc, inner_val);
+        (loop, return_acc)#at_end (next_i, new_acc);
+    loop (0, 1);
+
+lam dumb_dims1 {n: Nat} (tup: «n; Nat») : RecNatTup = (n, <i: n; tup#i inj Nat ∪ RecNatTup>);
+lam dumb_dims2 {n: Nat} (tup: «n; Nat ∪ RecNatTup») : RecNatTup = (n, tup);
+
+lam f (x: Nat) : Nat ∪ RecNatTup =
+    x inj Nat ∪ RecNatTup;
+
+lam r (x: RecNatTup) : Nat ∪ RecNatTup =
+    x inj Nat ∪ RecNatTup;
+
+fun extern func (g: RecNatTup → Nat) =
+    let inner: RecNatTup = (2, (f 1301, f 1302));
+    let outer: RecNatTup = (4, (f 11, f 12, r inner, f 14));
+
+    let inner_result = g inner; // works
+    let outer_result = g outer; // ERROR: cannot apply argument to callee
+    // domain type:   'RecNatTup_12537'
+    // argument type: '[Nat, [∪(Nat, RecNatTup_12537), ... ]]'
+
+    return (inner_result, outer_result);
+
+fun extern main () =
+    let inner: RecNatTup = (2, (f 1301, f 1302));
+    let outer: RecNatTup = (4, (f 11, f 12, r inner, f 14));
+
+    let inner_size = matrix_size inner;
+    let size = matrix_size outer;
+    return (inner_size, size);
+//     return a;
+//     let size = matrix_size a;
+//     return size;
