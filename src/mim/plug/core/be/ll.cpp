@@ -261,6 +261,7 @@ void Emitter::emit_epilogue(Lam* lam) {
         std::vector<const Def*> types;
 
         for (auto arg : app->args()) {
+            if (auto mem = Axm::isa<mem::M>(arg->type())) continue;
             if (auto val = emit_unsafe(arg); !val.empty()) {
                 values.emplace_back(val);
                 types.emplace_back(arg->type());

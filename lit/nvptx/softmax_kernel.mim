@@ -1,0 +1,85 @@
+// RUN: rm -f %t.ll
+// RUN: %mim %s --output-ll %t.ll --device-target nvptx -o -
+// RUN: rm -f %t
+// RUN: clang %t.ll -o %t -lcuda -Wno-override-module
+
+plugin nvptx;
+import core;
+import gpu;
+import math;
+import mem;
+
+let size = 100; // TODO: this is definitely wrong
+let gridSize = 4;
+let blockSize = 4;
+
+// This is a close re-implementation of A. Karphathy's softmax kernel in llm.c
+// see: https://github.com/karpathy/llm.c/blob/f1e2ace651495b74ae22d45d1723443fd00ecd3a/dev/cuda/softmax_forward.cu#L506
+con softmax_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM,
+                    group_id: Idx gridSize, item_id: Idx blockSize, (), (),
+                    (out: %gpu.GlobalPtr «size; %math.F32», inp: %gpu.GlobalPtr «size; %math.F32», N: I32, C: I32),
+                    return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
+    let warpSize = %nvptx.warp_size;
+
+    let (m1, warpsPerBlock) = %core.div.sdiv (m1, (%core.bitcast I32 blockSize, warpSize));
+    let tid = %core.bitcast I32 item_id;
+    let bid = %core.bitcast I32 group_id;
+
+    let is_idle_thread = %core.icmp.sge (tid, C);
+    (continue, return)#is_idle_thread (m1, m3, m4, m5)
+    where
+        con continue (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM) =
+            let (m1, warpId) = %core.div.sdiv (m1, (tid, warpSize));
+            let (m1, laneId) = %core.div.srem (m1, (tid, warpSize));
+            let row = %core.wrap.add 0 (%core.wrap.mul 0 (bid, warpsPerBlock), warpId);
+
+            let is_idle_row = %core.icmp.sge (row, N);
+            (calc_softmax, return)#is_idle_row (m1, m3, m4, m5);
+        con calc_softmax (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM) =
+            // x is only used for reading - wrap pointer arithmetic in lambda for reading
+            lam x (m1: %gpu.GlobalM, i: Idx C) : (%gpu.GlobalM, %math.F32) =
+                let xIdx = %core.bitcast (Idx size) (%core.wrap.mul (row, C));
+                let idx = %core.wrap.add (xIdx, %core.bitcast (Idx size) i);
+                let addr = %mem.lea (inp, idx);
+                %mem.load (m1, addr);
+            // y is only used for writing - wrap pointer arithmetic in lambda for writing
+            lam y (m1: %gpu.GlobalM, i: Idx C, val: %math.F32) : %gpu.GlobalM =
+                let yIdx = %core.bitcast (Idx size) (%core.wrap.mul (row, C));
+                let idx = %core.wrap.add (yIdx, %core.bitcast (Idx size) i);
+                let addr = %mem.lea (out, idx);
+                %mem.store (m1, addr, val);
+
+            let maxval = 0; // TODO: how to do -INFINITY
+
+            return (m1, m3, m4, m5);
+    end;
+
+
+fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0))
+              : %mem.M 0 =
+    let (m0, h_in) = %mem.alloc («size; %math.F32», 0) m0;
+    let (m0, h_out) = %mem.alloc («size; %math.F32», 0) m0;
+
+    let (m0, m1, m4, _, _) = %gpu.init (0, 0, m0, (), ());
+
+    let (m0, m1, d_in) = %gpu.alloc_copy.block (m0, m1, h_in);
+    let (m0, m1, d_out) = %gpu.alloc_copy.block (m0, m1, h_out);
+
+    // TODO: set proper values
+    let n = 20I32;
+    let c = 40I32;
+
+    let implicit_args = (4, (%gpu.GlobalPtr «size; %math.F32», %gpu.GlobalPtr «size; %math.F32», I32, I32));
+    ret m0 = %gpu.launch@implicit_args (m0, gridSize, blockSize, %gpu.default_stream, ff, 0, (), (), ())
+             softmax_kernel $ (d_in, d_out, n, c);
+
+    let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_out, h_out);
+    let m1 = %gpu.free.block (m1, d_in);
+    let m1 = %gpu.free.block (m1, d_out);
+
+    let m0 = %gpu.deinit (m0, m1, m4);
+
+    // TODO: implement check to see if softmax was successful (and properly implement)
+    let val = 42I32;
+
+    return m0;
