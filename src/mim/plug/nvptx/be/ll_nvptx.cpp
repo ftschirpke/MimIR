@@ -755,11 +755,6 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
         bb.assign(valid_name, "call i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
         return valid_name;
     }
-    // if (def->flags() == Annex::base<nvptx::warp_size>()) {
-    //     declare("i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
-    //     print(bb.body().emplace_back(), "call i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
-    // }
-    ELOG("Is not a device intrinsic {}", def);
     return std::nullopt;
 }
 
