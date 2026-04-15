@@ -13,9 +13,10 @@ using namespace std::string_literals;
 
 namespace mim::ll::nvptx {
 
-namespace mem  = mim::plug::mem;
-namespace gpu  = mim::plug::gpu;
-namespace core = mim::plug::core;
+namespace core  = mim::plug::core;
+namespace mem   = mim::plug::mem;
+namespace gpu   = mim::plug::gpu;
+namespace nvptx = mim::plug::nvptx;
 
 class HostEmitter : public mim::ll::Emitter {
 public:
@@ -171,7 +172,7 @@ std::string HostEmitter::convert(const Def* type) {
 void HostEmitter::emit_epilogue(Lam* lam) {
     auto& bb = lam2bb_[lam];
 
-    // HACK: we partially re-implement the checks in Super::emit_epilogue to catch targetspecific applications
+    // HACK: we partially re-implement the checks in Super::emit_epilogue to catch target-specific applications
     auto app = lam->body()->as<App>();
     if (auto ret = isa_targetspecific_intrinsic(bb, app)) {
         assert(ret.has_value());
@@ -617,6 +618,8 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
                         CU_LAUNCH_KERNEL, func_inner, n_groups, n_items, shared_mem_bytes, stream, args_inner);
         emit_cu_error_handling(bb, launch_res);
         return ret_lam;
+    } else if (auto warp_size = Axm::isa<nvptx::warp_size>(def)) {
+        error("%nvptx.warp_size is device-only and cannot be used in host code");
     }
     return std::nullopt;
 }
@@ -745,7 +748,18 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
         emit_unsafe(sync_work_items->arg(1));
         print(bb.body().emplace_back(), "call void @llvm.nvvm.barrier0()");
         return name;
+    } else if (auto warp_size = Axm::isa<nvptx::warp_size>(def)) {
+        declare("i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
+        assert(name[0] == '%');
+        auto valid_name = name.substr(1);
+        bb.assign(valid_name, "call i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
+        return valid_name;
     }
+    // if (def->flags() == Annex::base<nvptx::warp_size>()) {
+    //     declare("i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
+    //     print(bb.body().emplace_back(), "call i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
+    // }
+    ELOG("Is not a device intrinsic {}", def);
     return std::nullopt;
 }
 

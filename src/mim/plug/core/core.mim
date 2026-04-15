@@ -133,7 +133,7 @@ lam %core.minus {s: Nat} (m: Nat) (a: Idx s): Idx s = %core.wrap.sub m (0:(Idx s
 /// For this reason, these axioms expect a `%%mem.M`.
 ///
 axm %core.div(sdiv, udiv, srem, urem):
-    {s: Nat} → [%mem.M 0, «2; Idx s»] → [%mem.M 0, Idx s], normalize_div;
+    {s a: Nat} → [%mem.M a, «2; Idx s»] → [%mem.M a, Idx s], normalize_div;
 ///
 /// ### %%core.icmp
 ///

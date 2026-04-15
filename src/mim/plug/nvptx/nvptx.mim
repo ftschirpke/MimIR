@@ -9,7 +9,10 @@
 /// ## Dependencies
 ///
 import compile;
+import core;
+plugin gpu;
 import mem;
+import refly;
 ///
 /// ## Types
 ///
@@ -17,6 +20,30 @@ import mem;
 ///
 let %nvptx.Stream = %mem.Ptr0 I8;
 ///
+/// ## Operations
+///
+/// ### Special Registers
+///
+/// Retrieves the warp size on the device.
+axm %nvptx.warp_size: I32;
+// TODO: only allow in device code
+///
+/// ### Warp Synchronization
+///
+/// #### %%nvptx.sync_warp_threads
+///
+axm %nvptx.sync_warp_threads: I32 → [];
+/// ### Data Movement
+///
+/// #### %%nvptx.shfl_sync
+///
+/// Shuffles registers of threads inside a warp.
+/// (See https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-shfl-sync)
+// axm %nvptx.shfl_sync(up, down, bfly, idx):
+//       [T: *, ret_pred: Bool]
+//     → let Ty = %refly.check (%core.ncmp.e (%core.trait.size T, 4), T, "shfl_sync only works for 32-bit types");
+//       [I32, Ty, I32, I32]
+//     → (Ty, [Ty, Bool])#ret_pred;
 /// ## Stages
 ///
 /// ### Repls
