@@ -34,29 +34,41 @@ con softmax_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gp
             let row = %core.wrap.add 0 (%core.wrap.mul 0 (bid, warpsPerBlock), warpId);
 
             let is_idle_row = %core.icmp.sge (row, N);
-            (calc_softmax, return)#is_idle_row (m1, m3, m4, m5);
-        con calc_softmax (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM) =
-            // x is only used for reading - wrap pointer arithmetic in lambda for reading
-            lam x (m1: %gpu.GlobalM, i: Idx C) : (%gpu.GlobalM, %math.F32) =
-                let xIdx = %core.bitcast (Idx size) (%core.wrap.mul (row, C));
-                let idx = %core.wrap.add (xIdx, %core.bitcast (Idx size) i);
-                let addr = %mem.lea (inp, idx);
-                %mem.load (m1, addr);
-            // y is only used for writing - wrap pointer arithmetic in lambda for writing
-            lam y (m1: %gpu.GlobalM, i: Idx C, val: %math.F32) : %gpu.GlobalM =
-                let yIdx = %core.bitcast (Idx size) (%core.wrap.mul (row, C));
-                let idx = %core.wrap.add (yIdx, %core.bitcast (Idx size) i);
-                let addr = %mem.lea (out, idx);
-                %mem.store (m1, addr, val);
+            (calc_softmax, return)#is_idle_row (m1, m3, m4, m5)
+            where
+                con calc_softmax (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM) =
+                    let natC = %core.bitcast Nat C;
+                    // x is only used for reading - wrap pointer arithmetic in lambda for reading
+                    lam x (m1: %gpu.GlobalM, i: Idx natC) : [%gpu.GlobalM, %math.F32] =
+                        let xIdx = %core.bitcast (Idx size) (%core.wrap.mul 0 (row, C));
+                        let idx = %core.wrap.add 0 (xIdx, %core.bitcast (Idx size) i);
+                        let addr = %mem.lea (inp, idx);
+                        %mem.load (m1, addr);
+                    // y is only used for writing - wrap pointer arithmetic in lambda for writing
+                    lam y (m1: %gpu.GlobalM, i: Idx natC, val: %math.F32) : %gpu.GlobalM =
+                        let yIdx = %core.bitcast (Idx size) (%core.wrap.mul 0 (row, C));
+                        let idx = %core.wrap.add 0 (yIdx, %core.bitcast (Idx size) i);
+                        let addr = %mem.lea (out, idx);
+                        %mem.store (m1, addr, val);
+                    let maxval = 0xff800000:%math.F32; // = -INFINITY
 
-            let maxval = 0; // TODO: how to do -INFINITY
+                    let m1 = y (m1, %core.idx natC 0 0, maxval);
 
-            return (m1, m3, m4, m5);
+                    fun loop1 (m1: %gpu.GlobalM, i: I32, maxval: %math.F32) : %gpu.GlobalM =
+                        let cond = %core.icmp.sl (i, C);
+                        fun body (m1: %gpu.GlobalM) : %gpu.GlobalM =
+                            let (m1, xi) = x (m1, i);
+                            let bigger = %math.extrema.fmax 0 (maxval, xi);
+                            return m1;
+
+                        let next_i = %core.wrap.add 0 (i, warpSize);
+
+                    return (m1, m3, m4, m5);
+            end;
     end;
 
 
-fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0))
-              : %mem.M 0 =
+fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0)) =
     let (m0, h_in) = %mem.alloc («size; %math.F32», 0) m0;
     let (m0, h_out) = %mem.alloc («size; %math.F32», 0) m0;
 
