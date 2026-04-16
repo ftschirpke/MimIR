@@ -1,0 +1,36 @@
+/// # The print Plugin {#print}
+///
+/// @see mim::plug::print
+///
+/// A minimal print plugin
+import core;
+import math;
+import mem;
+///
+/// [TOC]
+///
+/// ## Operations
+///
+axm %print.single_f32: [%mem.M 0, %math.F32] → [%mem.M 0, I32];
+axm %print.single_i32: [%mem.M 0, I32] → [%mem.M 0, I32];
+
+fun %print.arr_f32 (m0: %mem.M 0, n: Nat, x: %mem.Ptr0 («n; %math.F32»), count: I32) : %mem.M 0 =
+    let last = %core.extrema.smin (%core.bitcast I32 n, count);
+    loop (m0, 0I32, return)
+    where
+        con loop (m0: %mem.M 0, i: I32, exit: Cn [%mem.M 0]) =
+            let cond = %core.icmp.sl (i, last);
+            let next_i = %core.wrap.add 0 (i, 1I32);
+            (exit, body)#cond m0
+            where
+                con body (m0: %mem.M 0) =
+                    let (m0, a) = %print.single_i32 (m0, i);
+                    let addr = %mem.lea (x, %core.bitcast (Idx n) i);
+                    let (m0, val) = %mem.load (m0, addr);
+                    let (m0, b) = %print.single_f32 (m0, val);
+                    loop (m0, next_i, exit);
+            end;
+    end;
+
+
+

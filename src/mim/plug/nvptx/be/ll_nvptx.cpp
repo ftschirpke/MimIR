@@ -14,6 +14,7 @@ using namespace std::string_literals;
 namespace mim::ll::nvptx {
 
 namespace core  = mim::plug::core;
+namespace math  = mim::plug::math;
 namespace mem   = mim::plug::mem;
 namespace gpu   = mim::plug::gpu;
 namespace nvptx = mim::plug::nvptx;
@@ -66,9 +67,15 @@ public:
 
     std::optional<std::string> isa_targetspecific_intrinsic(BB&, const Def*) final;
 
+    bool is_using_libdevice() const { return uses_libdevice; }
+    const std::string& get_extra_flags() const { return extra_flags; }
+
 private:
     absl::btree_map<std::string, int> symbols_;
     LamSet kernels_;
+
+    bool uses_libdevice;
+    std::string extra_flags;
 };
 
 void HostEmitter::start() {
@@ -246,7 +253,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         } else {
             print(vars_decls_, "; Add the bytes of your compiled nvptx fatbin binary here:\n");
             print(vars_decls_,
-                  "{} = private constant [YOUR_FATBIN_DATA_SIZE_GOES_HERE x i8] [ YOUR_FATBIN_DATA_GOES_HERE ]\n",
+                  "{} = private constant [YOUR_FATBIN_DATA_SIZE_GOES_HERE x i8] YOUR_FATBIN_DATA_GOES_HERE\n",
                   fatbin_name_);
         }
         auto mod_res = bb.assign(name + "_mod_res", "call i32 @{}(ptr {}, ptr {})", CU_MODULE_LOAD_FATBIN, mod_name_,
@@ -726,7 +733,6 @@ std::string DeviceEmitter::prepare() {
 
 std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, const Def* def) {
     auto name = id(def);
-    std::string op;
 
     auto shared_as = Lit::as(world().annex<gpu::addr_space_shared>());
 
@@ -754,6 +760,60 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
         auto valid_name = name.substr(1);
         bb.assign(valid_name, "call i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
         return valid_name;
+    } else if (auto sync_warp_threads = Axm::isa<nvptx::sync_warp_threads>(def)) {
+        declare("void @llvm.nvvm.bar.warp.sync(i32)");
+
+        emit_unsafe(sync_warp_threads->arg(0));
+        emit_unsafe(sync_warp_threads->arg(1));
+        auto membermask = emit(sync_warp_threads->arg(2));
+        print(bb.body().emplace_back(), "call void @llvm.nvvm.bar.warp.sync(i32 {})", membermask);
+        return name;
+    } else if (auto shfl_sync = Axm::isa<nvptx::shfl_sync>(def)) {
+        std::string mode;
+        switch (shfl_sync.id()) {
+            case nvptx::shfl_sync::up: mode = "up"; break;
+            case nvptx::shfl_sync::down: mode = "down"; break;
+            case nvptx::shfl_sync::bfly: mode = "bfly"; break;
+            case nvptx::shfl_sync::idx: mode = "idx"; break;
+            default: fe::unreachable();
+        }
+        auto [T, args] = shfl_sync->uncurry_args<2>();
+
+        auto type_size = Lit::isa<nat_t>(op(core::trait::size, T));
+        if (!type_size.has_value() || type_size.value() != 4)
+            error("shfl_sync requires a 32-bit type"); // TODO: consider removing and implementing this in mim
+
+        auto type_name = convert(T);
+        auto mask      = emit(args->op(0));
+        auto val       = emit(args->op(1));
+        auto offset    = emit(args->op(2));
+        auto clamp     = emit(args->op(3));
+
+        std::string type_suffix;
+        if (auto w = math::isa_f(T)) {
+            switch (*w) {
+                case 32: type_suffix = "f32"; break;
+                default: error("shfl_sync requires 32-bit floating point type");
+            }
+        } else {
+            type_suffix = type_name;
+        }
+
+        declare("{} @llvm.nvvm.shfl.sync.{}.{} (i32, {}, i32, i32)", type_name, mode, type_suffix, type_name);
+
+        return bb.assign(name, "call {} @llvm.nvvm.shfl.sync.{}.{} (i32 {}, {} {}, i32 {}, i32 {})", type_name, mode,
+                         type_suffix, mask, type_name, val, offset, clamp);
+    } else if (auto math_exp = Axm::isa<math::exp>(def)) {
+        auto a        = emit(math_exp->arg());
+        auto t        = convert(math_exp->type());
+        std::string f = "__nv_";
+        f += (math_exp.sub() & sub_t(math::exp::log)) ? "log" : "exp";
+        f += (math_exp.sub() & sub_t(math::exp::bin)) ? "2" : (math_exp.sub() & sub_t(math::exp::dec)) ? "10" : "";
+        f += math_suffix(math_exp->type());
+
+        uses_libdevice |= true;
+        declare("{} @{}({})", t, f, t);
+        return bb.assign(name, "tail call {} @{}({} {})", t, f, t, a);
     }
     return std::nullopt;
 }
@@ -808,6 +868,8 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     auto [stage, setup_phase] = get_setup_stage(world);
     setup_phase->run();
 
+    bool libdevice_stage = false;
+
     {
         std::ofstream dev_ll_ofs;
         dev_ll_ofs.open(dev_ll_name);
@@ -815,6 +877,7 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
             error("Error occured while trying to open temporary file '{}'", dev_ll_name);
         DeviceEmitter device_emitter(setup_phase->new_world(), dev_ll_ofs);
         device_emitter.run();
+        libdevice_stage = device_emitter.is_using_libdevice();
     }
 
     auto compute_cap = get_compute_capability();
@@ -829,11 +892,28 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
         println(std::cout, "Could not determine compute capability, continuing with default: '{}'.", default_comp_cap);
         comp_cap = default_comp_cap;
     }
+
+    static constexpr auto libdevice_bc_name = "tmp_mimir_nvptx_dev.bc";
+    if (libdevice_stage) {
+        auto llvm_link = sys::find_cmd("llvm-link");
+        if (!std::filesystem::exists(llvm_link)) error("Could not find command: llvm-link {}", llvm_link);
+        // TODO: search for libdevice or pass via argument
+        auto libdevice_path = "/opt/cuda/nvvm/libdevice/libdevice.10.bc";
+        if (!std::filesystem::exists(libdevice_path))
+            error("Could not find libdevice path: libdevice.10.bc {}", libdevice_path);
+        auto cmd = fmt("{} {} {} -o {}", llvm_link, dev_ll_name, libdevice_path, libdevice_bc_name);
+        auto rc  = sys::system(cmd);
+        if (rc != 0) {
+            println(std::cout, "Command existed with error code {}", rc);
+            return;
+        }
+    }
+    auto llc_input = libdevice_stage ? libdevice_bc_name : dev_ll_name;
     {
         auto llc = sys::find_cmd("llc");
         if (!std::filesystem::exists(llc)) error("Could not find command: llc {}", llc);
         // TODO: support 32-bit version?
-        auto cmd = fmt("{} -march=nvptx64 -mcpu=sm_{} {} -o {}", llc, comp_cap, dev_ll_name, dev_ptx_name);
+        auto cmd = fmt("{} -march=nvptx64 -mcpu=sm_{} {} -o {}", llc, comp_cap, llc_input, dev_ptx_name);
         auto rc  = sys::system(cmd);
         if (rc != 0) {
             println(std::cout, "Command exited with error code {}", rc);

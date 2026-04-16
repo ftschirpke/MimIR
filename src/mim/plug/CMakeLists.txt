@@ -13,6 +13,7 @@ set(MIM_PLUGINS
     nvptx
     opt
     ord
+    print
     refly
     regex
     tensor

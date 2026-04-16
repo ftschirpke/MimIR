@@ -32,18 +32,20 @@ axm %nvptx.warp_size: I32;
 ///
 /// #### %%nvptx.sync_warp_threads
 ///
-axm %nvptx.sync_warp_threads: I32 → [];
+axm %nvptx.sync_warp_threads: [%gpu.GlobalM, %gpu.SharedM, I32] → [%gpu.GlobalM, %gpu.SharedM];
+///
 /// ### Data Movement
 ///
 /// #### %%nvptx.shfl_sync
 ///
 /// Shuffles registers of threads inside a warp.
 /// (See https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-shfl-sync)
-// axm %nvptx.shfl_sync(up, down, bfly, idx):
-//       [T: *, ret_pred: Bool]
-//     → let Ty = %refly.check (%core.ncmp.e (%core.trait.size T, 4), T, "shfl_sync only works for 32-bit types");
-//       [I32, Ty, I32, I32]
-//     → (Ty, [Ty, Bool])#ret_pred;
+axm %nvptx.shfl_sync(up, down, bfly, idx):
+      [T: *]
+    → [I32, T, I32, I32]
+    → T;
+// TODO: ensure T is 32-bit type and add return predicate boolean
+// NOTE: may want to consider to make clamp (4th argument) implicit, like in CUDA
 /// ## Stages
 ///
 /// ### Repls
