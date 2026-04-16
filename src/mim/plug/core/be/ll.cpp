@@ -10,6 +10,7 @@
 #include <mim/plug/clos/clos.h>
 #include <mim/plug/math/math.h>
 #include <mim/plug/mem/mem.h>
+#include <mim/plug/print/print.h>
 
 #include "mim/util/print.h"
 #include "mim/util/sys.h"
@@ -37,6 +38,26 @@ namespace math = mim::plug::math;
 namespace mem  = mim::plug::mem;
 
 namespace {
+
+// [%mem.M 0, T] => T
+// TODO there may be more instances where we have to deal with this trickery
+const Def* isa_mem_sigma_2(const Def* type) {
+    if (auto sigma = type->isa<Sigma>()) {
+        auto num_ops = sigma->num_ops();
+        if (num_ops == 0) return {};
+        auto last_idx = num_ops - 1;
+        for (size_t i = 0; i < last_idx; ++i)
+            if (!Axm::isa<mem::M>(sigma->op(i))) return {};
+        return sigma->op(last_idx);
+    }
+    return {};
+}
+} // namespace
+
+/*
+ * convert
+ */
+
 bool is_const(const Def* def) {
     if (def->isa<Bot>()) return true;
     if (def->isa<Lit>()) return true;
@@ -70,25 +91,6 @@ const char* llvm_suffix(const Def* type) {
     }
     error("unsupported foating point type '{}'", type);
 }
-
-// [%mem.M 0, T] => T
-// TODO there may be more instances where we have to deal with this trickery
-const Def* isa_mem_sigma_2(const Def* type) {
-    if (auto sigma = type->isa<Sigma>()) {
-        auto num_ops = sigma->num_ops();
-        if (num_ops == 0) return {};
-        auto last_idx = num_ops - 1;
-        for (size_t i = 0; i < last_idx; ++i)
-            if (!Axm::isa<mem::M>(sigma->op(i))) return {};
-        return sigma->op(last_idx);
-    }
-    return {};
-}
-} // namespace
-
-/*
- * convert
- */
 
 std::string Emitter::id(const Def* def, bool force_bb /*= false*/) const {
     if (auto global = def->isa<Global>()) return "@" + global->unique_name();
@@ -262,6 +264,7 @@ void Emitter::emit_epilogue(Lam* lam) {
 
         for (auto arg : app->args()) {
             if (auto mem = Axm::isa<mem::M>(arg->type())) continue;
+            // if (app->args().size() > 1) continue;
             if (auto val = emit_unsafe(arg); !val.empty()) {
                 values.emplace_back(val);
                 types.emplace_back(arg->type());
@@ -908,6 +911,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         declare("{} @{}({})", t, f, t);
         return bb.assign(name, "tail call {} @{}({} {})", t, f, t, a);
     } else if (auto exp = Axm::isa<math::exp>(def)) {
+        if (auto targetspecific = isa_targetspecific_intrinsic(bb, def)) return targetspecific.value();
         auto a        = emit(exp->arg());
         auto t        = convert(exp->type());
         std::string f = "llvm.";
@@ -994,6 +998,23 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         f += llvm_suffix(round->type());
         declare("{} @{}({})", t, f, t);
         return bb.assign(name, "tail call {} @{}({} {})", t, f, t, a);
+    } else if (auto print_simple_f32 = Axm::isa<plug::print::single_f32>(def)) {
+        emit_unsafe(print_simple_f32->arg(0));
+        auto arg = emit(print_simple_f32->arg(1));
+
+        declare("i32 @printf(ptr noundef, ...)");
+        std::string str_name = "@.str.print_simple_f32";
+        print(vars_decls_, "{} = private unnamed_addr constant[4 x i8] c\"%f\\0A\\00\"", str_name);
+        auto ext = bb.assign(name + "fpext", "fpext float {} to double", arg);
+        return bb.assign(name, "call i32 (ptr, ...) @printf (ptr {}, double {})", str_name, ext);
+    } else if (auto print_simple_i32 = Axm::isa<plug::print::single_i32>(def)) {
+        emit_unsafe(print_simple_i32->arg(0));
+        auto arg = emit(print_simple_i32->arg(1));
+
+        declare("i32 @printf(ptr noundef, ...)");
+        std::string str_name = "@.str.print_simple_i32";
+        print(vars_decls_, "{} = private unnamed_addr constant[4 x i8] c\"%d\\0A\\00\"", str_name);
+        return bb.assign(name, "call i32 (ptr, ...) @printf (ptr {}, i32 {})", str_name, arg);
     } else if (auto res = isa_targetspecific_intrinsic(bb, def)) {
         return res.value();
     }

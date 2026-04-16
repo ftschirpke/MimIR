@@ -24,6 +24,10 @@ int compile(World&, std::string name);
 int compile(World&, std::string ll, std::string out);
 int compile_and_run(World&, std::string name, std::string args = {});
 
+bool is_const(const Def*);
+const char* math_suffix(const Def*);
+const char* llvm_suffix(const Def*);
+
 struct BB {
     BB()                    = default;
     BB(const BB&)           = delete;
