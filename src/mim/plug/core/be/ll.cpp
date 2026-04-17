@@ -263,8 +263,6 @@ void Emitter::emit_epilogue(Lam* lam) {
         std::vector<const Def*> types;
 
         for (auto arg : app->args()) {
-            if (auto mem = Axm::isa<mem::M>(arg->type())) continue;
-            // if (app->args().size() > 1) continue;
             if (auto val = emit_unsafe(arg); !val.empty()) {
                 values.emplace_back(val);
                 types.emplace_back(arg->type());
@@ -273,11 +271,14 @@ void Emitter::emit_epilogue(Lam* lam) {
 
         switch (values.size()) {
             case 0: return bb.tail("ret void");
-            case 1: return bb.tail("ret {} {}", convert(types[0]), values[0]);
+            case 1:
+                return Axm::isa<mem::M>(types[0]) ? bb.tail("ret void")
+                                                  : bb.tail("ret {} {}", convert(types[0]), values[0]);
             default: {
                 std::string prev = "undef";
                 auto type        = convert(world().sigma(types));
                 for (size_t i = 0, n = values.size(); i != n; ++i) {
+                    if (auto mem = Axm::isa<mem::M>(types[i])) continue;
                     auto v_elem = values[i];
                     auto t_elem = convert(types[i]);
                     auto namei  = "%ret_val." + std::to_string(i);
