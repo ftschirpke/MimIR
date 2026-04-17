@@ -42,8 +42,8 @@ axm %nvptx.sync_warp_threads: [%gpu.GlobalM, %gpu.SharedM, I32] → [%gpu.Global
 /// (See https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-shfl-sync)
 axm %nvptx.shfl_sync(up, down, bfly, idx):
       [T: *]
-    → [I32, T, I32, I32]
-    → T;
+    → [%gpu.LocalM, I32, T, I32, I32]
+    → [%gpu.LocalM, T];
 // TODO: ensure T is 32-bit type and add return predicate boolean
 // NOTE: may want to consider to make clamp (4th argument) implicit, like in CUDA
 /// ## Stages

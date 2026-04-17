@@ -783,11 +783,12 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
         if (!type_size.has_value() || type_size.value() != 4)
             error("shfl_sync requires a 32-bit type"); // TODO: consider removing and implementing this in mim
 
+        emit_unsafe(args->op(0));
         auto type_name = convert(T);
-        auto mask      = emit(args->op(0));
-        auto val       = emit(args->op(1));
-        auto offset    = emit(args->op(2));
-        auto clamp     = emit(args->op(3));
+        auto mask      = emit(args->op(1));
+        auto val       = emit(args->op(2));
+        auto offset    = emit(args->op(3));
+        auto clamp     = emit(args->op(4));
 
         std::string type_suffix;
         if (auto w = math::isa_f(T)) {
@@ -893,19 +894,37 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
         comp_cap = default_comp_cap;
     }
 
-    static constexpr auto libdevice_bc_name = "tmp_mimir_nvptx_dev.bc";
+    static constexpr auto libdevice_bc_name_unoptimized = "tmp_mimir_nvptx_dev_raw.bc";
+    static constexpr auto libdevice_bc_name             = "tmp_mimir_nvptx_dev.bc";
     if (libdevice_stage) {
-        auto llvm_link = sys::find_cmd("llvm-link");
-        if (!std::filesystem::exists(llvm_link)) error("Could not find command: llvm-link {}", llvm_link);
-        // TODO: search for libdevice or pass via argument
-        auto libdevice_path = "/opt/cuda/nvvm/libdevice/libdevice.10.bc";
-        if (!std::filesystem::exists(libdevice_path))
-            error("Could not find libdevice path: libdevice.10.bc {}", libdevice_path);
-        auto cmd = fmt("{} {} {} -o {}", llvm_link, dev_ll_name, libdevice_path, libdevice_bc_name);
-        auto rc  = sys::system(cmd);
-        if (rc != 0) {
-            println(std::cout, "Command existed with error code {}", rc);
-            return;
+        // for some math operations, we link CUDA's libdevice file and optimize any function calls away
+        // because any call operations (libdevice uses @__nvvm_reflect a lot for portability) are very costly on GPUs
+        {
+            auto llvm_link = sys::find_cmd("llvm-link");
+            if (!std::filesystem::exists(llvm_link)) error("Could not find command: llvm-link {}", llvm_link);
+            // TODO: search for libdevice or pass via argument
+            auto libdevice_path = "/opt/cuda/nvvm/libdevice/libdevice.10.bc";
+            if (!std::filesystem::exists(libdevice_path))
+                error("Could not find libdevice path: libdevice.10.bc {}", libdevice_path);
+            auto cmd = fmt("{} {} {} -o {}", llvm_link, dev_ll_name, libdevice_path, libdevice_bc_name_unoptimized);
+            auto rc  = sys::system(cmd);
+            if (rc != 0) {
+                println(std::cout, "Command existed with error code {}", rc);
+                return;
+            }
+        }
+        {
+            auto opt = sys::find_cmd("opt");
+            if (!std::filesystem::exists(opt)) error("Could not find command: opt {}", opt);
+            // TODO: consider adding more (NVPTX-specific) passes
+            // TODO: consider setting other optimization level
+            auto passes = "default<O2>,nvvm-reflect";
+            auto cmd = fmt("{} -passes=\"{}\" {} -o {}", opt, passes, libdevice_bc_name_unoptimized, libdevice_bc_name);
+            auto rc  = sys::system(cmd);
+            if (rc != 0) {
+                println(std::cout, "Command existed with error code {}", rc);
+                return;
+            }
         }
     }
     auto llc_input = libdevice_stage ? libdevice_bc_name : dev_ll_name;
@@ -913,6 +932,7 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
         auto llc = sys::find_cmd("llc");
         if (!std::filesystem::exists(llc)) error("Could not find command: llc {}", llc);
         // TODO: support 32-bit version?
+        // TODO: consider setting other optimization level - currently llc's default: -O2
         auto cmd = fmt("{} -march=nvptx64 -mcpu=sm_{} {} -o {}", llc, comp_cap, llc_input, dev_ptx_name);
         auto rc  = sys::system(cmd);
         if (rc != 0) {
@@ -923,6 +943,7 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     {
         auto ptxas = sys::find_cmd("ptxas");
         if (!std::filesystem::exists(ptxas)) error("Could not find command: ptxas {}", ptxas);
+        // TODO: consider setting other optimization level - currently ptxas' default: -O3
         auto cmd = fmt("{} -arch=sm_{} {} -o {}", ptxas, comp_cap, dev_ptx_name, dev_cubin_name);
         auto rc  = sys::system(cmd);
         if (rc != 0) {

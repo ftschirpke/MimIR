@@ -10,9 +10,9 @@ import math;
 import mem;
 import print;
 
-let size = 1024; // TODO: this is definitely wrong
-let gridSize = 32;
-let blockSize = 32;
+let blockSize = 512;
+let gridSize = 8192;
+let size = %core.nat.mul (gridSize, blockSize);
 
 let fp_1 = 0x3f800000:%math.F32;
 let fp_0_25 = 0x3e800000:%math.F32;
@@ -85,23 +85,25 @@ con softmax_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gp
                     ret (m1, maxval, sumval) = loopA $ (m1, laneId, maxval, sumval);
 
                     let (m1, offset) = %core.div.sdiv (m1, (warpSize, 2I32));
-                    fun loopB (m1: %gpu.GlobalM, offset: I32, maxval: %math.F32, sumval: %math.F32) =
-                        wrapped_loop (m1, offset, maxval, sumval, return)
+
+                    fun loopB (m1: %gpu.GlobalM, m5: %gpu.LocalM, offset: I32, maxval: %math.F32, sumval: %math.F32) =
+                        wrapped_loop (m1, m5, offset, maxval, sumval, return)
                         where
-                            con wrapped_loop (m1: %gpu.GlobalM, offset: I32, maxval: %math.F32, sumval: %math.F32,
-                                              exit: Cn [%gpu.GlobalM, %math.F32, %math.F32]) =
+                            con wrapped_loop (m1: %gpu.GlobalM, m5: %gpu.LocalM,
+                                              offset: I32, maxval: %math.F32, sumval: %math.F32,
+                                              exit: Cn [%gpu.GlobalM, %gpu.LocalM, %math.F32, %math.F32]) =
                                 let cond = %core.icmp.sg (offset, 0I32);
                                 let next_offset = %core.shr.a (offset, 1I32);
-                                (exit, body)#cond (m1, maxval, sumval)
+                                (exit, body)#cond (m1, m5, maxval, sumval)
                                 where
-                                    con body (m1: %gpu.GlobalM, maxval: %math.F32, sumval: %math.F32) =
+                                    con body (m1: %gpu.GlobalM, m5: %gpu.LocalM, maxval: %math.F32, sumval: %math.F32) =
                                         let (m1, m3) = %nvptx.sync_warp_threads (m1, m3, 0xffffffffI32);
-                                        let offsetMaxval = %nvptx.shfl_sync.down %math.F32
-                                                           (0xffffffffI32, maxval, offset, 0x1fI32);
-                                        let offsetSumval = %nvptx.shfl_sync.down %math.F32
-                                                           (0xffffffffI32, sumval, offset, 0x1fI32);
+                                        let (m5, offsetMaxval) = %nvptx.shfl_sync.down %math.F32
+                                                                 (m5, 0xffffffffI32, maxval, offset, 0x1fI32);
+                                        let (m5, offsetSumval) = %nvptx.shfl_sync.down %math.F32
+                                                                 (m5, 0xffffffffI32, sumval, offset, 0x1fI32);
                                         let if_cond = %math.cmp.g 0 (offsetMaxval, maxval);
-                                        (then, else)#if_cond ()
+                                        (else, then)#if_cond ()
                                         where
                                             con then () =
                                                 let expf = %math.exp.exp 0 (%math.arith.sub 0 (maxval, offsetMaxval));
@@ -115,18 +117,15 @@ con softmax_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gp
                                             con add_and_continue (maxval: %math.F32, sumval: %math.F32,
                                                                   offsetSumval: %math.F32) =
                                                 let sumval = %math.arith.add 0 (sumval, offsetSumval);
-                                                wrapped_loop (m1, next_offset, sumval, maxval, exit);
+                                                wrapped_loop (m1, m5, next_offset, maxval, sumval, exit);
                                         end;
 
                                 end;
                         end;
-                    ret (m1, maxval, sumval) = loopB $ (m1, offset, maxval, sumval);
+                    ret (m1, m5, maxval, sumval) = loopB $ (m1, m5, offset, maxval, sumval);
 
-                    let maxval = %nvptx.shfl_sync.idx %math.F32 (0xffffffffI32, maxval, 0I32, 0x1fI32);
-                    let sumval = %nvptx.shfl_sync.idx %math.F32 (0xffffffffI32, sumval, 0I32, 0x1fI32);
-
-                    let maxval = fp_25;
-                    let sumval = fp_25;
+                    let (m5, maxval) = %nvptx.shfl_sync.idx %math.F32 (m5, 0xffffffffI32, maxval, 0I32, 0x1fI32);
+                    let (m5, sumval) = %nvptx.shfl_sync.idx %math.F32 (m5, 0xffffffffI32, sumval, 0I32, 0x1fI32);
 
                     fun loopC (m1: %gpu.GlobalM, i: I32) =
                         wrapped_loop (m1, i, return)
@@ -172,12 +171,11 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m0, m1, d_in) = %gpu.alloc_copy.block (m0, m1, h_in);
     let (m0, m1, d_out) = %gpu.alloc_copy.block (m0, m1, h_out);
 
-    // TODO: set proper values
-    let n = 32I32;
-    let c = 32I32;
+    let (m0, n) = %core.div.sdiv (m0, (%core.bitcast I32 gridSize, 32I32));
+    let c = %core.bitcast I32 blockSize;
 
     ret m0 = %gpu.launch (m0, gridSize, blockSize, %gpu.default_stream, ff, 0, (), (), ())
-             softmax_kernel $ (d_in, d_out, n, c);
+             softmax_kernel $ (d_out, d_in, n, c);
 
     let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_out, h_out);
     let m1 = %gpu.free.block (m1, d_in);
