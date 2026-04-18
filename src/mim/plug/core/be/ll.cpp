@@ -8,6 +8,7 @@
 #include <absl/container/btree_set.h>
 
 #include <mim/plug/clos/clos.h>
+#include <mim/plug/libc/libc.h>
 #include <mim/plug/math/math.h>
 #include <mim/plug/mem/mem.h>
 #include <mim/plug/print/print.h>
@@ -1016,6 +1017,18 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         std::string str_name = "@.str.print_simple_i32";
         print(vars_decls_, "{} = private unnamed_addr constant[4 x i8] c\"%d\\0A\\00\"", str_name);
         return bb.assign(name, "call i32 (ptr, ...) @printf (ptr {}, i32 {})", str_name, arg);
+    } else if (auto srand = Axm::isa<plug::libc::srand>(def)) {
+        emit_unsafe(srand->arg(0));
+        auto arg = emit(srand->arg(1));
+
+        declare("void @srand(i32)");
+        print(bb.body().emplace_back(), "call void @srand(i32 {})", arg);
+        return name;
+    } else if (auto rand = Axm::isa<plug::libc::rand>(def)) {
+        emit_unsafe(rand->arg(0));
+
+        declare("i32 @rand()");
+        return bb.assign(name, "call i32 @rand()");
     } else if (auto res = isa_targetspecific_intrinsic(bb, def)) {
         return res.value();
     }
