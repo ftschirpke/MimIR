@@ -1,0 +1,16 @@
+/// # The libc Plugin {#libc}
+///
+/// @see mim::plug::libc
+///
+/// A minimal libc plugin
+import mem;
+///
+/// [TOC]
+///
+/// ## Operations
+///
+/// ### Randomization
+///
+
+axm %libc.srand: [%mem.M 0, I32] → %mem.M 0;
+axm %libc.rand: %mem.M 0 → [%mem.M 0, I32];

@@ -6,6 +6,7 @@
 import gpu;
 import nvptx;
 import core;
+import libc;
 import math;
 import mem;
 import print;
@@ -153,18 +154,35 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m0, h_in) = %mem.alloc («size; %math.F32», 0) m0;
     let (m0, h_out) = %mem.alloc («size; %math.F32», 0) m0;
 
-    let h_in_0 = %mem.lea (h_in, %core.idx size 0 0);
-    let m0 = %mem.store (m0, h_in_0, fp_1);
-    let h_in_1 = %mem.lea (h_in, %core.idx size 0 1);
-    let m0 = %mem.store (m0, h_in_1, fp_1);
-    let h_in_2 = %mem.lea (h_in, %core.idx size 0 2);
-    let m0 = %mem.store (m0, h_in_2, fp_pi);
-    let h_in_3 = %mem.lea (h_in, %core.idx size 0 3);
-    let m0 = %mem.store (m0, h_in_3, fp_pi);
-    let h_in_4 = %mem.lea (h_in, %core.idx size 0 4);
-    let m0 = %mem.store (m0, h_in_4, fp_m2);
-    let h_in_5 = %mem.lea (h_in, %core.idx size 0 5);
-    let m0 = %mem.store (m0, h_in_5, fp_0_33);
+    // generate ints in [0, cutoff), convert them to floats in [a, b), and fill h_in with these values
+    let seed = 42I32;
+    let m0 = %libc.srand (m0, seed);
+    let cutoff = 1000000I32;
+    let a = %math.minus 0 (%math.conv.s2f %math.f32 2I32);
+    let b = %math.conv.s2f %math.f32 2I32;
+    let div = %math.arith.div 0 (%math.conv.s2f %math.f32 cutoff, %math.arith.sub 0 (b, a));
+    fun loop (m0: %mem.M 0) : %mem.M 0 =
+        wrapped_loop (m0, 0I32, return)
+        where
+            con wrapped_loop (m0: %mem.M 0, i: I32, exit: Cn [%mem.M 0]) =
+                let cond = %core.icmp.sl (i, %core.bitcast I32 size);
+                let next_i = %core.wrap.add 0 (i, 1I32);
+                (exit, body)#cond m0
+                where
+                    con body (m0: %mem.M 0) =
+                        let idx = %core.bitcast (Idx size) i;
+                        let addr = %mem.lea (h_in, idx);
+                        let (m0, value_i32) = %libc.rand m0;
+                        let (m0, value_i32) = %core.div.srem (m0, (value_i32, cutoff));
+                        let value = %math.conv.s2f %math.f32 value_i32;
+                        let value = %math.arith.div 0 (value, div);
+                        let value = %math.arith.add 0 (value, a);
+                        let m0 = %mem.store (m0, addr, value);
+                        wrapped_loop (m0, next_i, exit);
+                end;
+        end;
+    ret m0 = loop $ m0;
+
 
     let (m0, m1, m4, _, _) = %gpu.init (0, 0, m0, (), ());
 
@@ -183,12 +201,6 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
 
     let m0 = %gpu.deinit (m0, m1, m4);
 
-//     ret m0 = %print.arr_f32 $ (m0, size, h_in, 10I32);
     ret m0 = %print.arr_f32 $ (m0, size, h_out, 10I32);
 
-    // TODO: implement check to see if softmax was successful (and properly implement)
-    let addr = %mem.lea (h_in, %core.idx size 0 4);
-    let (m0, val) = %mem.load (m0, addr);
-    let out = %math.cmp.ge 0 (val, 0:%math.F32);
-
-    return (m0, out);
+    return m0;

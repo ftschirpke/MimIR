@@ -7,6 +7,7 @@ set(MIM_PLUGINS
     demo
     direct
     gpu
+    libc
     math
     matrix
     mem
