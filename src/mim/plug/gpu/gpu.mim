@@ -50,6 +50,52 @@ lam %gpu.ConstSymPtr(id: Nat, T: *): *  = %gpu.SymPtr (id, T, %gpu.addr_space_co
 axm %gpu.Stream: *;
 axm %gpu.default_stream: %gpu.Stream;
 ///
+/// ### Grid
+///
+/// Ideas to capture functionalities into groups and some use cases
+let %gpu.WorkItem = [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]; // TODO: why not [..., Idx n]
+let %gpu.WorkGroup (n: Nat) = [Idx n, %gpu.WorkItem]; // TODO: why not [Idx m, «n; %gpu.WorkItem n»]
+let %gpu.Grid (m n: Nat) = [Idx m, %gpu.WorkGroup n]; // TODO: why not [«m; %gpu.WorkGroup (m, n)»]
+
+// let %nvptx.Warp = %matrix.Mat (32, 1) %gpu.WorkItem; // a warp is a group of 32 consecutive threads
+// TODO: can we enfore the "alignment" of 32 as well in the type?
+
+axm %gpu.exec_all: {n m: Nat, T: *}
+                 → [%gpu.Grid (n, m), Fn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n, Idx m] → T]
+                 → [%gpu.Grid (n, m), T];
+axm %gpu.exec_groups: {n m: Nat, T: *}
+                    → [%gpu.Grid (n, m), Fn [Idx n, %gpu.WorkGroup m] → T]
+                    → [%gpu.Grid (n, m), T];
+axm %gpu.exec_items: {n: Nat, T: *}
+                   → [%gpu.WorkGroup n, Fn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n] → T]
+                   → [%gpu.WorkGroup n, T];
+// axm %gpu.launch: {n: Nat, Ts: «n; *»}
+//                → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream, m: Bool, s: Nat,
+//                   STs: «s; [Nat, *, Nat]», «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
+//                → Cn [%gpu.Grid (n_group, n_items),
+//                      «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
+//                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
+//                → Fn «i: n; Ts#i» → %mem.M 0;
+
+// axm %gpu.sync_work_items: {n: Nat} → %gpu.Block n → %gpu.Block n;
+
+//let %matrix.MatrixCreateOptions = [n: Nat, DataT: *, OutT: *, extract: [DataT, Idx n] → OutT];
+//lam %matrix.MemMat (T: *, a n: Nat) : %matrix.MatrixCreateOptions =
+//    (n, %mem.Ptr(«n; T», a), %mem.Ptr(T, a), lm (data: %mem.Ptr(«n; T», a), idx: Idx n) = %mem.lea (data, idx));
+
+// lam %gpu.GridMat (n m: Nat) : %matrix.MatrixCreateOptions = (n, %gpu.Grid (n, m), %gpu.WorkGroup m, ...);
+// lam %gpu.GroupMat (n: Nat) : %matrix.MatrixCreateOptions = ...
+// lam %gpu.ItemMat (n: Nat) : %matrix.MatrixCreateOptions = ...
+// lam %nvptx.WarpMat (k: Nat) : %matrix.MatrixCreateOptions = ...
+
+// probably not necessary if CreateOptions are chosen correctly
+// axm %gpu.grid_as_group_mat: {n m: Nat} → %gpu.Grid (n, m) → %matrix.Mat (n, 1) (%gpu.WorkGroup m);
+// axm %gpu.grid_as_item_mat: {n m: Nat} → %gpu.Grid (n, m) → %matrix.Mat ((n, m), (m, 1)) %gpu.WorkItem;
+// axm %gpu.block_as_item_mat: {n: Nat} → %gpu.WorkGroup n → %matrix.Mat (n, 1) %gpu.WorkItem;
+// axm %nvptx.block_as_warp_mat: {k: Nat} → let n = %core.nat.mul (32, k);
+//                               %gpu.WorkGroup n → %matrix.Mat (k, 1) %nvptx.Warp;
+
+///
 /// ## Operations
 ///
 /// ### Context
