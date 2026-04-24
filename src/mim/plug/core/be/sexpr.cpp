@@ -129,7 +129,7 @@ private:
     std::ostringstream func_impls_;
 };
 
-// TODO: slotted use of internal, closed lam
+// TODO: slotted use of internal, closed lam (see rebuild_pow.mim)
 std::string Emitter::id(const Def* def, bool is_var_use, bool omit_prefix) const {
     std::string prefix = slotted() && !omit_prefix ? "$" : "";
     std::string id;
@@ -722,6 +722,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
             tab.lnprint(os, "{}", pass_val);
             tab.lnprint(os, "{}", tag_val);
             --tab;
+            // TODO: variadic ops as cons for slotted
             for (auto op_val : op_vals)
                 print(os, "{}", op_val);
             print(os, ")");
@@ -735,6 +736,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
                 tab.lnprint(os, "{}", pass_val);
                 tab.lnprint(os, "{}", tag_val);
                 --tab;
+                // TODO: variadic ops as cons for slotted
                 for (auto op_val : op_vals)
                     print(os, "{}", indent(tab.indent(), op_val));
                 --tab;

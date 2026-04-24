@@ -393,8 +393,6 @@ const Def* EggRewrite::convert_arr(uint32_t id, MimNode node) {
     return new_arr;
 }
 
-// (sigma (var <name1> <type1>) (var <name2> <type2>) ...)
-//  or
 // (sigma <type1> <type2> ...)
 const Def* EggRewrite::convert_sigma(uint32_t id, MimNode node) {
     DefVec types;

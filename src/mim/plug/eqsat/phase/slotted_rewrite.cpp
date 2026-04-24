@@ -92,10 +92,10 @@ void SlottedRewrite::init(rust::Vec<RewriteResult> rewrites, InitStage stage) {
 }
 
 // TODO: implement
-// (lam <extern> <name> <domain> <codomain> [<filter> <body>])
+// (lam <extern> <name> <domain-type> <codomain-type> $var-name (scope <filter> <body>))
 const Def* SlottedRewrite::init_lam(uint32_t id, MimNode node) { return nullptr; }
 
-// (con <extern> <name> <domain> [<filter> <body>])
+// TODO: (con <extern> <name> <domain-type> $var-name (scope <filter> <body>))
 const Def* SlottedRewrite::init_con(uint32_t id, MimNode node) {
     if (DEBUG) std::cout << "init - current node(" << id << "): " << mim_node_str(node).c_str() << " - ";
     auto domain_id      = node.children[2];
@@ -120,7 +120,7 @@ const Def* SlottedRewrite::init_con(uint32_t id, MimNode node) {
     return new_con;
 }
 
-// (let <name> <definition> <expression>)
+// TODO: (let $name (scope <definition> <expression>))
 const Def* SlottedRewrite::init_let(uint32_t id, MimNode node) {
     if (DEBUG) std::cout << "init - current node(" << id << "): " << mim_node_str(node).c_str() << " - ";
     // If the let-binding is for a lambda, this lambda will already have been
@@ -208,17 +208,17 @@ const Def* SlottedRewrite::convert(uint32_t id, bool recurse) {
     return added_[id] = res;
 }
 
-// (let <name> <definition> <expression>)
+// TODO: (let $name (scope <definition> <expression>))
 const Def* SlottedRewrite::convert_let(uint32_t id, MimNode node) {
     auto expr = get_def(node.children[2]);
     return expr;
 }
 
 // TODO: implement
-// (lam <extern> <name> <domain> <codomain> [<filter> <body>])
+// (lam <extern> <name> <domain-type> <codomain-type> $var-name (scope <filter> <body>))
 const Def* SlottedRewrite::convert_lam(uint32_t id, MimNode node) { return nullptr; }
 
-// (con <extern> <name> <domain> [<filter> <body>])
+// TODO: (con <extern> <name> <domain-type> $var-name (scope <filter> <body>))
 const Def* SlottedRewrite::convert_con(uint32_t id, MimNode node) {
     auto con = get_def(node.children[1])->as_mut<Lam>();
 
@@ -244,7 +244,7 @@ const Def* SlottedRewrite::convert_app(uint32_t id, MimNode node) {
     return new_app;
 }
 
-// (var <name> [<proj1> <proj2> ...] <type>)
+// TODO: (var $name)
 const Def* SlottedRewrite::convert_var(uint32_t id, MimNode node) {
     auto var = get_def(node.children[0]);
     return var;
@@ -269,7 +269,7 @@ const Def* SlottedRewrite::convert_pack(uint32_t id, MimNode node) {
     return new_pack;
 }
 
-// (tuple <node1> <node2> ...)
+// TODO: (tuple <elem-cons>)
 const Def* SlottedRewrite::convert_tuple(uint32_t id, MimNode node) {
     DefVec ops;
     for (auto child : node.children) {
@@ -305,7 +305,7 @@ const Def* SlottedRewrite::convert_inj(uint32_t id, MimNode node) {
     return new_inj;
 }
 
-// (merge <type> <value1> <value2> ...)
+// TODO: (merge <type> <value-cons>)
 const Def* SlottedRewrite::convert_merge(uint32_t id, MimNode node) {
     auto type = get_def(node.children[0]);
     DefVec values;
@@ -317,7 +317,7 @@ const Def* SlottedRewrite::convert_merge(uint32_t id, MimNode node) {
     return new_merge;
 }
 
-// (match <scrutinee> <arm1> <arm2> ...)
+// TODO: (match <op-cons>)
 const Def* SlottedRewrite::convert_match(uint32_t id, MimNode node) {
     auto scrutinee = get_def(node.children[0]);
     DefVec ops     = {scrutinee};
@@ -329,7 +329,7 @@ const Def* SlottedRewrite::convert_match(uint32_t id, MimNode node) {
     return new_match;
 }
 
-// (proxy <type> <pass> <tag> <op1> <op2> ...)
+// TODO: (proxy <type> <pass> <tag> <op-cons>)
 const Def* SlottedRewrite::convert_proxy(uint32_t id, MimNode node) {
     auto type = get_def(node.children[0]);
     auto pass = get_num(node.children[1]);
@@ -343,7 +343,7 @@ const Def* SlottedRewrite::convert_proxy(uint32_t id, MimNode node) {
     return new_proxy;
 }
 
-// (join <type1> <type2> ...)
+// TODO: (join <type-cons>)
 const Def* SlottedRewrite::convert_join(uint32_t id, MimNode node) {
     DefVec types;
     for (auto child : node.children) {
@@ -357,7 +357,7 @@ const Def* SlottedRewrite::convert_join(uint32_t id, MimNode node) {
     return nullptr;
 }
 
-// (meet <type1> <type2> ...)
+// TODO: (meet <type-cons>)
 const Def* SlottedRewrite::convert_meet(uint32_t id, MimNode node) {
     DefVec types;
     for (auto child : node.children) {
@@ -393,9 +393,7 @@ const Def* SlottedRewrite::convert_arr(uint32_t id, MimNode node) {
     return new_arr;
 }
 
-// (sigma (var <name1> <type1>) (var <name2> <type2>) ...)
-//  or
-// (sigma <type1> <type2> ...)
+// TODO: (sigma <type-cons>)
 const Def* SlottedRewrite::convert_sigma(uint32_t id, MimNode node) {
     DefVec types;
     for (auto child : node.children) {
