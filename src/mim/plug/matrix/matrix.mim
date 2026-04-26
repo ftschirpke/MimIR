@@ -16,6 +16,7 @@ plugin refly;
 /// Matrix dimensions are potentially nested arrays of natural numbers
 /// The dimension array (4, (3, 2), 5) identifies 4x6x5 dimensions with the 2 blocks of 3 in the second dimension.
 let %matrix.Dims = [n: Nat, ms: «n; Nat», d: «i: n; «j: ms#i; Nat»»];
+
 ///
 /// ### %%matrix.Idx
 ///
@@ -145,8 +146,7 @@ lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (dims: %matrix.Dims) 
 /// Tiles a %%matrix.Mat given the dimensions and strides of the tiles.
 lam %matrix.tile {dims strides: %matrix.Dims, T: *}
                  (mat: %matrix.Mat dims strides T) (tdims: %matrix.Dims) (tstrides: %matrix.Dims) =
-    let tn = %refly.check(%core.ncmp.e (tdims#n, tstrides#n), tdims#n, "Tile dimensions and strides must match");
-    let n = %refly.check(%core.ncmp.e (dims#n, tn), dims#n, "Tile dimensions must match matrix dimensions");
+    // let tn = %refly.check(%core.ncmp.e (tdims#n, tstrides#n), tdims#n, "Tile dimensions and strides must match");
+    // let n = %refly.check(%core.ncmp.e (dims#n, tn), dims#n, "Tile dimensions must match matrix dimensions");
     n;
-// TODO: ensure dims and strides have equal n and ms
-// TODO: implement tiling
+// TODO: ensure dims and strides have equal n and ms - and size must match matrix

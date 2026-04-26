@@ -1,6 +1,17 @@
-rec RecNatTup : * = [n: Nat, tup: «n; Nat ∪ RecNatTup»];
 
-lam matrix_size (dims: RecNatTup) : Nat =
+rec %matrix.RecDims: * = [n: Nat, tup: «n; Nat ∪ %matrix.RecDims»];
+axm %matrix.rec_size: %matrix.RecDims → Nat; //, normalize_rec_size;
+axm %matrix.rec_shape: [dims: %matrix.RecDims] → «dims#n; Nat»; //, normalize_rec_shape;
+rec %matrix.RecIdx = lm (dims: %matrix.RecDims) : * =
+    «i: dims#n; IdxT dims#tup#i»
+    where
+        lam IdxT (val: Nat ∪ %matrix.RecDims) : * =
+            match val with
+                | num: Nat => Idx num
+                | rec_tup: %matrix.RecDims => %matrix.RecIdx rec_tup;
+    end;
+
+lam matrix_size (dims: %matrix.RecDims) : Nat =
     let (n, tup) = dims;
     lam return_acc (idx acc: Nat) : Nat = acc;
     lam loop (i acc: Nat) : Nat =
@@ -10,37 +21,39 @@ lam matrix_size (dims: RecNatTup) : Nat =
         let dim = tup#idx;
         let inner_val = match dim with
             | num: Nat => num
-            | rec_tup: RecNatTup => matrix_size rec_tup;
+            | rec_tup: %matrix.RecDims => matrix_size rec_tup;
         let new_acc = %core.nat.mul (acc, inner_val);
         (loop, return_acc)#at_end (next_i, new_acc);
     loop (0, 1);
 
-lam dumb_dims1 {n: Nat} (tup: «n; Nat») : RecNatTup = (n, <i: n; tup#i inj Nat ∪ RecNatTup>);
-lam dumb_dims2 {n: Nat} (tup: «n; Nat ∪ RecNatTup») : RecNatTup = (n, tup);
+lam dumb_dims1 {n: Nat} (tup: «n; Nat») : %matrix.RecDims = (n, <i: n; tup#i inj Nat ∪ %matrix.RecDims>);
+lam dumb_dims2 {n: Nat} (tup: «n; Nat ∪ %matrix.RecDims») : %matrix.RecDims = (n, tup);
 
-lam f (x: Nat) : Nat ∪ RecNatTup =
-    x inj Nat ∪ RecNatTup;
+lam f (x: Nat) : Nat ∪ %matrix.RecDims =
+    x inj Nat ∪ %matrix.RecDims;
 
-lam r (x: RecNatTup) : Nat ∪ RecNatTup =
-    x inj Nat ∪ RecNatTup;
+lam r (x: %matrix.RecDims) : Nat ∪ %matrix.RecDims =
+    x inj Nat ∪ %matrix.RecDims;
 
-fun extern func (g: RecNatTup → Nat) =
-    let inner: RecNatTup = (2, (f 1301, f 1302));
-    let outer: RecNatTup = (4, (f 11, f 12, r inner, f 14));
+fun extern func (g: %matrix.RecDims → Nat) =
+    let inner: %matrix.RecDims = (2, (f 1301, f 1302));
+    let outer: %matrix.RecDims = (4, (f 11, f 12, r inner, f 14));
 
     let inner_result = g inner; // works
     let outer_result = g outer; // ERROR: cannot apply argument to callee
-    // domain type:   'RecNatTup_12537'
-    // argument type: '[Nat, [∪(Nat, RecNatTup_12537), ... ]]'
+    // domain type:   '%matrix.RecDims_12537'
+    // argument type: '[Nat, [∪(Nat, %matrix.RecDims_12537), ... ]]'
 
     return (inner_result, outer_result);
 
 fun extern main () =
-    let inner: RecNatTup = (2, (f 1301, f 1302));
-    let outer: RecNatTup = (4, (f 11, f 12, r inner, f 14));
+    let inner: %matrix.RecDims = (2, (f 1301, f 1302));
+    let outer: %matrix.RecDims = (4, (f 11, f 12, r inner, f 14));
 
-    let inner_size = matrix_size inner;
-    let size = matrix_size outer;
+    let inner_size = %matrix.rec_size inner;
+    let size = %matrix.rec_size outer;
+
+    let out = %core.nat.add (size, 4);
     return (inner_size, size);
 //     return a;
 //     let size = matrix_size a;
