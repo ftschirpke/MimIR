@@ -187,6 +187,7 @@ axm %tensor.broadcast:  {T: *, r: Nat}
 /// Transposes and expandes the dimensions of `input` to fit `s_out`.
 /// Each dimensions is mapped to the corresponding `index` output dimension.
 /// The holes are filled by broadcasting.
+/// Todo: We could probably just implement this in terms of %tensor.broadcast and %tensor.transpose directly?
 ///
 axm %tensor.broadcast_in_dim: {T: *, r_in r_out: Nat}
                             → [s_in: «r_in; Nat», s_out: «r_out; Nat», input: «s_in; T», index: «r_in; Idx r_out»]

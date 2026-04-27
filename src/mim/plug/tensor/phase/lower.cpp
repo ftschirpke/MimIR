@@ -10,16 +10,13 @@
 namespace mim::plug::tensor::phase {
 
 const Def* Lower::lower_get(const App* app) {
-    auto& w  = app->world();
-    auto c   = app->callee();
-    auto arg = app->arg();
+    auto& w  = new_world();
+    auto c   = rewrite(app->callee());
+    auto arg = rewrite(app->arg());
 
     auto [arr, index] = arg->projs<2>();
     auto callee       = c->as<App>();
     auto [T, r, s]    = callee->args<3>();
-
-    arr   = rewrite(arr);
-    index = rewrite(index);
 
     w.DLOG("lower_get");
     w.DLOG("    arr = {} : {}", arr, arr->type());
@@ -52,15 +49,11 @@ const Def* Lower::lower_get(const App* app) {
 }
 
 const Def* Lower::lower_set(const App* app) {
-    auto& w  = app->world();
-    auto c   = app->callee();
-    auto arg = app->arg();
+    auto& w  = new_world();
+    auto c   = rewrite(app->callee());
+    auto arg = rewrite(app->arg());
 
     auto [arr, index, x] = arg->projs<3>();
-
-    arr   = rewrite(arr);
-    index = rewrite(index);
-    x     = rewrite(x);
 
     w.DLOG("lower_set");
     w.DLOG("    arr = {} : {}", arr, arr->type());
@@ -106,16 +99,8 @@ const Def* Lower::lower_set(const App* app) {
     return new_arr;
 }
 
-std::pair<Lam*, const Def*> counting_for(const Def* bound, const Def* acc, const Def* exit, Sym name) {
-    auto& w       = bound->world();
-    auto acc_ty   = acc->type();
-    auto body     = w.mut_con({/* iter */ w.type_i32(), /* acc */ acc_ty, /* return */ w.cn(acc_ty)})->set(name);
-    auto for_loop = w.call<affine::For>(body, exit, Defs{w.lit_i32(0), bound, w.lit_i32(1), acc});
-    return {body, for_loop};
-}
-
-const Def* rec_broadcast(const Def* s_in, const Def* s_out, const Def* input, u64 r, u64 i, const Def* T) {
-    auto& w      = s_in->world();
+const Def* Lower::rec_broadcast(const Def* s_in, const Def* s_out, const Def* input, u64 r, u64 i) {
+    auto& w      = new_world();
     auto s_in_ri = s_in->proj(r, i), s_out_ri = s_out->proj(r, i);
     w.DLOG("rec_broadcast");
     w.DLOG("    r = {}", r);
@@ -124,12 +109,14 @@ const Def* rec_broadcast(const Def* s_in, const Def* s_out, const Def* input, u6
     w.DLOG("    s_out_ri = {} : {}", s_out_ri, s_out_ri->type());
     w.DLOG("    input = {} : {}", input, input->type());
 
+    input = rewrite(input);
+
     if (i + 1 == r) return input;
 
     if (s_in_ri == s_out_ri) {
         if (auto s_in_lit = s_in_ri->isa<Lit>()) {
             DefVec inputs(s_in_lit->get<u64>(),
-                          [&](size_t j) { return rec_broadcast(s_in, s_out, input->proj(j), r, i + 1, T); });
+                          [&](size_t j) { return rec_broadcast(s_in, s_out, input->proj(j), r, i + 1); });
             return w.tuple(inputs);
         } else {
             // TODO: we could probably support non-literal sizes as well, but we would need to generate loops to copy
@@ -142,7 +129,7 @@ const Def* rec_broadcast(const Def* s_in, const Def* s_out, const Def* input, u6
 
     if (auto s_in_lit = s_in_ri->isa<Lit>(); s_in_lit && s_in_lit->get<u64>() == 1) {
         w.DLOG("dimension {} of the input is 1, can be broadcasted to dimension {} of the output", i, s_out_ri);
-        return w.pack(s_out_ri, rec_broadcast(s_in, s_out, input, r, i + 1, T));
+        return w.pack(s_out_ri, rec_broadcast(s_in, s_out, input, r, i + 1));
     }
 
     w.WLOG("cannot broadcast dimension {} of size {} to size {}", i, s_in_ri, s_out_ri);
@@ -150,9 +137,9 @@ const Def* rec_broadcast(const Def* s_in, const Def* s_out, const Def* input, u6
 }
 
 const Def* Lower::lower_broadcast(const App* app) {
-    auto& w  = app->world();
-    auto c   = app->callee();
-    auto arg = app->arg();
+    auto& w  = new_world();
+    auto c   = rewrite(app->callee());
+    auto arg = rewrite(app->arg());
 
     auto [s_in, s_out, input] = arg->projs<3>();
     auto callee               = c->as<App>();
@@ -184,9 +171,364 @@ const Def* Lower::lower_broadcast(const App* app) {
     auto s_in_vec  = DefVec(r_nat, [&](size_t i) { return s_in->proj(r_nat, i); });
     auto s_out_vec = DefVec(r_nat, [&](size_t i) { return s_out->proj(r_nat, i); });
 
-    auto result = rec_broadcast(s_in, s_out, input, r_nat, 0, T);
+    auto result = rec_broadcast(s_in, s_out, input, r_nat, 0);
     w.DLOG("result of rec_broadcast = {} : {}", result, result->type());
     return result;
+}
+
+std::pair<Lam*, const Def*> counting_for(const Def* bound, const Def* acc, const Def* exit, Sym name) {
+    auto& w       = bound->world();
+    auto acc_ty   = acc->type();
+    auto body     = w.mut_con({/* iter */ w.type_i32(), /* acc */ acc_ty, /* return */ w.cn(acc_ty)})->set(name);
+    auto for_loop = w.call<affine::For>(body, exit, Defs{w.lit_i32(0), bound, w.lit_i32(1), acc});
+    return {body, for_loop};
+}
+
+std::tuple<Vector<u64>, Vector<u64>, absl::flat_hash_map<u64, const Def*>, Vector<u64>>
+extract_indices(const u64 n_nat,
+                const u64 nis_nat,
+                const Def* S,
+                const Def* Ris,
+                const Def* Sis,
+                const Def* subs) {
+    auto& w = S->world();
+
+    absl::flat_hash_map<u64, const Def*> dims; // idx ↦ nat (size bound = dimension)
+    Vector<u64> out_indices;                   // output indices 0..n-1
+    Vector<u64> in_indices;                    // input indices ≥ n
+
+    Vector<const Def*> output_dims; // i<n ↦ nat (dimension S#i)
+    Vector<DefVec> input_dims;      // i<nis ↦ j<Ris#i ↦ nat (dimension Sis#i#j)
+    Vector<u64> n_input;            // i<nis ↦ nat (number of dimensions of Sis#i)
+
+    // collect output dimensions
+    w.DLOG("out dims (n) = {}", n_nat);
+    for (u64 i = 0; i < n_nat; ++i) {
+        auto dim = S->proj(n_nat, i);
+        w.DLOG("dim {} = {}", i, dim);
+        dims[i] = dim;
+        output_dims.push_back(dim);
+    }
+
+    // collect other (input) dimensions
+    w.DLOG("matrix count (nis) = {}", nis_nat);
+
+    for (u64 i = 0; i < nis_nat; ++i) {
+        auto ni     = Ris->proj(nis_nat, i);
+        auto ni_lit = Lit::isa(ni);
+        if (!ni_lit) {
+            w.DLOG("matrix {} has non-constant dimension count", i);
+            throw std::runtime_error("matrix has non-constant dimension count");
+        }
+        u64 ni_nat = *ni_lit;
+        w.DLOG("  dims({i}) = {}", i, ni_nat);
+        auto Sis_i = Sis->proj(nis_nat, i);
+        DefVec input_dims_i;
+        for (u64 j = 0; j < ni_nat; ++j) {
+            auto dim = Sis_i->proj(ni_nat, j);
+            w.DLOG("    dim {} {} = {}", i, j, dim);
+            input_dims_i.push_back(dim);
+        }
+        input_dims.push_back(input_dims_i);
+        n_input.push_back(ni_nat);
+    }
+
+    // extracts bounds for each index (in, out)
+    for (u64 i = 0; i < nis_nat; ++i) {
+        w.DLOG("investigate {} / {}", i, nis_nat);
+        auto indices = subs->proj(nis_nat, i);
+        w.DLOG("  indices {} = {}", i, indices);
+
+        for (u64 j = 0; j < n_input[i]; ++j) {
+            auto idx     = indices->proj(n_input[i], j);
+            auto idx_lit = Lit::isa(idx);
+            if (!idx_lit) {
+                w.DLOG("    index {} {} is not a literal", i, j);
+                throw std::runtime_error("index is not a literal");
+            }
+            u64 idx_nat = *idx_lit;
+            auto dim    = input_dims[i][j];
+            w.DLOG("      index {} = {}", j, idx);
+            w.DLOG("        dim {} = {}", idx, dim);
+            if (!dims.contains(idx_nat)) {
+                dims[idx_nat] = dim;
+                w.DLOG("        {} ↦ {}", idx_nat, dim);
+            } else {
+                auto prev_dim = dims[idx_nat];
+                w.DLOG("        prev dim {} = {}", idx_nat, prev_dim);
+                // override with more precise information
+                if (auto dim_lit = dim->isa<Lit>()) {
+                    if (auto prev_dim_lit = prev_dim->isa<Lit>()) {
+                        if (dim != prev_dim) {
+                            if (!dim_lit) throw std::runtime_error("dimension is not a literal");
+                            if (!prev_dim_lit) throw std::runtime_error("previous dimension is not a literal");
+                            assert(dim_lit->get<u64>() == prev_dim_lit->get<u64>() && "dimensions must be equal");
+                        }
+                    } else
+                        dims[idx_nat] = dim;
+                } else if (dim != prev_dim) {
+                    w.DLOG("dimensions {} and {} must be equal", dim, prev_dim);
+                    throw std::runtime_error("dimensions must be equal");
+                }
+            }
+        }
+    }
+
+    for (auto [idx, dim] : dims) {
+        w.ILOG("dim {} = {}", idx, dim);
+        if (idx < n_nat)
+            out_indices.push_back(idx);
+        else
+            in_indices.push_back(idx);
+    }
+    // sort indices to make checks easier later.
+    std::sort(out_indices.begin(), out_indices.end());
+    std::sort(in_indices.begin(), in_indices.end());
+
+    return {in_indices, out_indices, dims, n_input};
+}
+
+const Def* Lower::lower_map_reduce(const App* app) {
+    // meta arguments:
+    // * n = out-count, (nat)
+    // * S = out-dim, (n*nat)
+    // * T = out-type (*)
+    // * nis = in-count (nat)
+    // * Ris = in-dim-count (nis*nat)
+    // * Tis = types (nis**)
+    // * Sis = dimensions (nis*Ris#i)
+    // arguments:
+    // * mem
+    // * zero = accumulator init (T)
+    // * combination function (mem, acc, inputs) -> (mem, acc)
+    // * input matrixes
+
+    auto &w = new_world();
+    auto c      = rewrite(app->callee());
+    auto inputs = rewrite(app->arg());
+    auto type   = rewrite(app->type());
+    auto callee = c->as<App>();
+
+    auto subs = callee->arg();
+
+    auto [comb, zero] = callee->decurry()->args<2>();
+    auto [Tis, Ris, Sis] = callee->decurry()->decurry()->args<3>();
+    auto S            = callee->decurry()->decurry()->decurry()->arg();
+    auto [T, n]       = callee->decurry()->decurry()->decurry()->decurry()->args<2>();
+    auto nis          = callee->decurry()->decurry()->decurry()->decurry()->decurry()->arg();
+
+    w.DLOG("type : {}", type);
+    w.DLOG("meta variables:");
+    w.DLOG("  n = {}", n);
+    w.DLOG("  S = {}", S);
+    w.DLOG("  T = {}", T);
+    w.DLOG("  nis = {}", nis);
+    w.DLOG("  Ris = {} : {}", Ris, Ris->type());
+    w.DLOG("  Tis = {} : {}", Tis, Tis->type());
+    w.DLOG("  Sis = {} : {}", Sis, Sis->type());
+    w.DLOG("arguments:");
+    w.DLOG("  zero = {}", zero);
+    w.DLOG("  comb = {} : {}", comb, comb->type());
+    w.DLOG("  subs = {} : {}", subs, subs->type());
+    w.DLOG("  inputs = {} : {}", inputs, inputs->type());
+
+    // Our goal is to generate a call to a function that performs:
+    // ```
+    // matrix = new matrix (n, S, T)
+    // for out_idx { // n for loops
+    //     acc = zero
+    //     for in_idx { // remaining loops
+    //         inps = read from matrices // nis-tuple
+    //         acc = comb(mem, acc, inps)
+    //     }
+    //     write acc to output matrix
+    // }
+    // return matrix
+    // ```
+
+    auto n_lit   = n->isa<Lit>();
+    auto nis_lit = nis->isa<Lit>();
+    if (!n_lit || !nis_lit) {
+        w.DLOG("n or nis is not a literal");
+        return nullptr;
+    }
+
+    auto n_nat   = n_lit->get<u64>();   // number of output dimensions (in S)
+    auto nis_nat = nis_lit->get<u64>(); // number of input matrices
+
+    try {
+        // out-indices are loops (potentially parallel) over the output tensor, in-indices are reductions
+        auto [in_indices, out_indices, dims, n_input] = extract_indices(n_nat, nis_nat, S, Ris, Sis, subs);
+
+        for(auto idx : out_indices) {
+            w.ILOG("output index {} with dim {}", idx, dims[idx]);
+        }
+        for(auto idx : in_indices) {
+            w.ILOG("input index {} with dim {}", idx, dims[idx]);
+        }
+
+        auto fun = w.mut_fun(inputs->type(), type)->set("mapRed");
+        w.DLOG("fun {} : {}", fun, fun->type());
+
+        auto ds_fun = direct::op_cps2ds_dep(fun)->set("dsFun");
+        w.DLOG("ds_fun {} : {}", ds_fun, ds_fun->type());
+        auto call = w.app(ds_fun, inputs)->set("call");
+        w.DLOG("call {} : {}", call, call->type());
+
+        auto new_inputs = fun->var(0)->set("is");
+
+        w.DLOG("inputs = {} : {}", inputs, inputs->type());
+        w.DLOG("new_inputs = {} : {}", new_inputs, new_inputs->type());
+
+        // flowchart:
+        // ```
+        // -> init
+        // -> forOut1 with yieldOut1
+        //    => exitOut1 = return_cont
+        // -> forOut2 with yieldOut2
+        //    => exitOut2 = yieldOut1
+        // -> ...
+        // -> accumulator init
+        // -> forIn1 with yieldIn1
+        //    => exitIn1 = writeCont
+        // -> forIn2 with yieldIn2
+        //    => exitIn2 = yieldIn1
+        // -> ...
+        // -> read matrices
+        // -> fun
+        //    => exitFun = yieldInM
+        //
+        // (return path)
+        // -> ...
+        // -> write
+        // -> yieldOutN
+        // -> ...
+        // ```
+
+        // First create the output matrix.
+        auto init_mat = w.bot(type);
+        w.DLOG("init_mat {} : {}", init_mat, init_mat->type());
+
+        // The function on where to continue -- return after all output loops.
+        auto cont        = fun->var(1);
+        auto current_mut = fun;
+
+        // Each of the outer loops contains the memory and matrix as accumulator (in an inner monad).
+        auto acc = init_mat;
+
+        absl::flat_hash_map<u64, const Def*> raw_iterator; // idx ↦ I32
+        absl::flat_hash_map<u64, const Def*> iterator;     // idx ↦ %Idx (S/NI#i)
+
+        for (auto idx : out_indices) {
+            auto for_name    = w.sym("forIn_" + std::to_string(idx));
+            auto dim_nat_def = dims[idx];
+            auto dim         = w.call<core::bitcast>(w.type_i32(), dim_nat_def);
+            w.DLOG("out_cont {} : {}", cont, cont->type());
+
+            auto [body, for_call]       = counting_for(dim, acc, cont, for_name);
+            auto [iter, new_acc, yield] = body->template vars<3>();
+            cont                        = yield;
+            raw_iterator[idx]           = iter;
+            iterator[idx]               = w.call<core::bitcast>(w.type_idx(dim_nat_def), iter);
+            acc                         = new_acc;
+            current_mut->set(true, for_call);
+            current_mut = body;
+        }
+
+        // Now the inner loops for the inputs:
+        // Each of the inner loops contains the element accumulator and memory as accumulator (in an inner monad).
+        w.DLOG("acc at inner: {;}", acc);
+
+        // First create the accumulator.
+        auto element_acc = zero;
+        element_acc->set("acc");
+        auto wb_matrix = acc;
+        assert(wb_matrix);
+        w.DLOG("wb_matrix {} : {}", wb_matrix, wb_matrix->type());
+
+        // Write back element to matrix. Set this as return after all inner loops.
+        auto write_back = w.mut_con(T)->set("matrixWriteBack");
+        w.DLOG("write_back {} : {}", write_back, write_back->type());
+        auto element_final = write_back->var(0);
+
+        auto output_iterators = DefVec((size_t)n_nat, [&](u64 i) {
+            auto idx = out_indices[i];
+            if (idx != i) w.ELOG("output indices must be consecutive 0..n-1 but {} != {}", idx, i);
+            assert(idx == i && "output indices must be consecutive 0..n-1");
+            auto iter_idx_def = iterator[idx];
+            return iter_idx_def;
+        });
+        auto output_it_tuple  = w.tuple(output_iterators);
+        w.DLOG("output tuple: {} : {}", output_it_tuple, output_it_tuple->type());
+
+        auto written_matrix = op_set(T, n, S, wb_matrix, output_it_tuple, element_final);
+        w.DLOG("written_matrix {} : {}", written_matrix, written_matrix->type());
+        write_back->app(true, cont, written_matrix);
+
+        // From here on the continuations take the element and memory.
+        acc  = element_acc;
+        cont = write_back;
+
+        for (auto idx : in_indices) {
+            auto for_name    = w.sym("forIn_" + std::to_string(idx));
+            auto dim_nat_def = dims[idx];
+            auto dim         = w.call<core::bitcast>(w.type_i32(), dim_nat_def);
+            w.DLOG("in_cont {} : {}", cont, cont->type());
+
+            auto [body, for_call]       = counting_for(dim, acc, cont, for_name);
+            auto [iter, new_acc, yield] = body->vars<3>();
+            cont                        = yield;
+            raw_iterator[idx]           = iter;
+            iterator[idx]               = w.call<core::bitcast>(w.type_idx(dim_nat_def), iter);
+            acc                         = new_acc;
+            current_mut->set(true, for_call);
+            current_mut = body;
+        }
+        element_acc = acc;
+
+        // Read element from input matrix.
+        DefVec input_elements((size_t)nis_nat);
+        for (u64 i = 0; i < nis_nat; i++) {
+            auto input_idx_tup = subs->proj(nis_nat, i);
+            auto input_matrix  = new_inputs->proj(nis_nat, i);
+
+            auto input_T = Tis->proj(nis_nat, i);
+            auto input_N = Ris->proj(nis_nat, i);
+            auto input_S = Sis->proj(nis_nat, i);
+
+            if (nis_nat == 1) input_S = Sis;
+
+            w.DLOG("input matrix {} is {} : {}", i, input_matrix, input_matrix->type());
+
+            auto indices         = input_idx_tup->projs(n_input[i]);
+            auto input_iterators = DefVec(n_input[i], [&](u64 j) {
+                auto idx     = indices[j];
+                auto idx_lit = idx->as<Lit>()->get<u64>();
+                w.DLOG("  idx {} {} = {}", i, j, idx_lit);
+                return iterator[idx_lit];
+            });
+            auto input_it_tuple  = w.tuple(input_iterators);
+
+            auto read_entry = op_get(input_T, input_N, input_S, input_matrix, input_it_tuple);
+            w.DLOG("read_entry {} : {}", read_entry, read_entry->type());
+            auto element_i    = read_entry->proj(0);
+            input_elements[i] = element_i;
+        }
+
+        w.DLOG("  read elements {,}", input_elements);
+        w.DLOG("  fun {} : {}", fun, fun->type());
+        w.DLOG("  current_mut {} : {}", current_mut, current_mut->type());
+
+        comb->set("comb");
+
+        // TODO: make non-scalar or completely scalar?
+        current_mut->app(true, comb, {w.tuple({element_acc, w.tuple(input_elements)}), cont});
+        w.DLOG("final call {} : {}", call, call->type());
+        return call;
+    } catch (const std::exception& e) {
+        w.ELOG("error during lowering map_reduce: {}", e.what());
+        return nullptr;
+    }
 }
 
 const Def* Lower::rewrite_imm_App(const App* app) {
@@ -196,7 +538,12 @@ const Def* Lower::rewrite_imm_App(const App* app) {
         if (auto res = lower_set(set)) return res;
     } else if (auto bc = Axm::isa<tensor::broadcast>(app)) {
         if (auto res = lower_broadcast(bc)) return res;
+    } else if (auto mr = Axm::isa<tensor::map_reduce>(app)) {
+        if (auto res = lower_map_reduce(mr)) return res;
     }
+    app->world().DLOG("no match for app {} ({}) : {}", app->callee(), app->arg(), app->type());
+    std::cout.flush();
+    std::cerr.flush();
     return Rewriter::rewrite_imm_App(app);
 }
 
