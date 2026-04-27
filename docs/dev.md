@@ -13,13 +13,13 @@ Let's jump straight into an example.
 [Driver](@ref mim::Driver) is usually the first class you create.
 It owns a few global facilities such as [Flags](@ref mim::Flags), the [Log](@ref mim::Log), and the current [World](@ref mim::World).
 In this example, the log is configured to write debug output to `std::cerr`; see also @ref clidebug.
-We then build an [AST](@ref mim::ast::AST) and a [mim::ast::Parser](@ref mim::ast::Parser) on top of that world.
 
-Next, the parser loads the [compile](@ref compile) and [core](@ref core) plugins, which in turn load the [mem](@ref mem) plugin.
+Next, the parser loads the [compile](@ref compile), [opt](@ref opt), and [core](@ref core) plugins.
+The last one in turn loads the [mem](@ref mem) plugin.
 A plugin consists of two parts:
 
-- a shared object (`.so`/`.dll`), and
-- a `.mim` file.
+1. a shared object (`.so`/`.dll`), and
+2. a `.mim` file.
 
 The shared object contains [passes](@ref mim::Pass), [normalizers](@ref mim::Axm::normalizer), and similar runtime components.
 The `.mim` file contains [axiom](@ref mim::Axm) declarations and links normalizers to their corresponding [axioms](@ref mim::Axm).
@@ -116,6 +116,63 @@ main->externalize();
 
 Use [mim::Def::externalize](@ref mim::Def::externalize) for roots that must survive cleanup and whole-world rewrites.
 Top-level entry points, generated wrapper functions, and replacement nodes for former externals all follow this pattern.
+
+### Binders and Variables
+
+As a more intricate example, we build a polymorphic identity function using MimIR's C++ API.
+
+```mim
+λ (T: *) (x: T): T = x
+```
+
+This example illustrates how mutables and immutables interact.
+All binders must be created as mutables in order to access the [variable](@ref mim::Var) they introduce.
+All other nodes can remain immutable.
+
+```cpp
+auto pi = w.mut_pi(w.type<1>(), /*implicit*/ true)->set_dom(w.type());
+auto pT = pi->var()->set("T");
+pi->set_codom(w.pi(pT, pT)); // pi = {T: *} -> T -> T
+
+auto lamT = w.mut_lam(pi);         // outer lambda
+auto lT   = lamT->var()->set("T"); // note: this is lamT's T, NOT pi's T
+
+auto lamx = w.mut_lam(w.pi(lT, lT)); // inner lambda
+auto x    = lamx->var()->set("x");
+
+lamx->set(true /*tt filter*/, x);
+lamT->set(true /*tt filter*/, lamx); // λ (T: *) (x: T): T = x
+```
+
+We first build the function type `{T: *} → T → T` (stored in `pi`).
+Since this type introduces the implicit variable `T` (stored in `pT`), the outer [`Pi`](@ref mim::Pi) must be created as a mutable.
+Before we can retrieve this variable, we must set the domain `*` (`w.type()`).
+This is also the reason why the [`Pi`](@ref mim::Pi) itself lives one universe level above, in `w.type<1>()`.
+The name `"T"` is purely for debugging and has no semantic meaning.
+
+The codomain `T → T` is built as an immutable [`Pi`](@ref mim::Pi) that refers to `pT`, and is then assigned as the codomain of `pi`.
+
+Next, we build the actual [function](@ref mim::Lam).
+The outer lambda `lamT` has type `pi` and must be mutable, since it introduces the variable `T` (stored in `lT`) of type `*` (the domain of `pi`).
+Even though `pi` also introduces a `T`, `lamT`'s variable is distinct: `lT` is **not** the same variable as `pT`.
+
+We then build the inner lambda `lamx`, which must also be mutable because it introduces the variable `x` of type `T`.
+
+@warning The type of `lamx` is `T → T`, and must refer to `lT` (not `pT`), because `lamx` is nested inside `lamT` and thus depends on `lamT`’s variable.
+
+Finally, we set the body of `lamx` to `x` (using a `tt` filter), and set the body of `lamT` to `lamx`, again using a `tt` filter.
+
+#### Partial Evaluation
+
+A `tt` filter tells MimIR to immediately β-reduce the corresponding application, giving the effect of [partial evaluation](https://en.wikipedia.org/wiki/Partial_evaluation).
+
+```cpp
+auto res = w.call(lamT, w.lit_nat(42));
+```
+
+Here we use [`World::call`](@ref mim::World::call) to automatically infer the implicit argument (`Nat`) and apply the function to `42`.
+Because both lambdas were constructed with a `tt` filter, MimIR reduces the application immediately.
+As a result, `res` does **not** point to a function or a residual call node, but directly to the reduced result, i.e. the literal `42`.
 
 ## Matching IR
 
