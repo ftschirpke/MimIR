@@ -48,8 +48,10 @@ axm %tensor.set: {T: *, r: Nat, s: «r; Nat»} → [arr: «s; T», index: «i: r
 /// * `init` : accumulator to start `f` with
 /// * `subs` : for each input, for each dimension, an index to compute the output in Einstein notation
 /// * `is` : the inputs
-///
+/// 
 /// Returns a tensor obtained by folding `f` following the indexes in `subs`
+///
+/// `nis`, `Ro`, `Ris` and `subs` must be literals, before entering the `tensor::Lower` phase, for the lowering to succeed.
 ///
 axm %tensor.map_reduce: {nis: Nat}
                       → {To: *, Ro: Nat}

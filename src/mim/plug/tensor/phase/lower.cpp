@@ -1,11 +1,16 @@
 #include "mim/plug/tensor/phase/lower.h"
 
 #include "mim/def.h"
+#include "mim/lam.h"
+
+#include "mim/util/types.h"
 
 #include "mim/plug/affine/affine.h"
 #include "mim/plug/core/core.h"
 #include "mim/plug/direct/direct.h"
 #include "mim/plug/tensor/tensor.h"
+
+#include "absl/container/flat_hash_map.h"
 
 namespace mim::plug::tensor::phase {
 
@@ -185,12 +190,7 @@ std::pair<Lam*, const Def*> counting_for(const Def* bound, const Def* acc, const
 }
 
 std::tuple<Vector<u64>, Vector<u64>, absl::flat_hash_map<u64, const Def*>, Vector<u64>>
-extract_indices(const u64 n_nat,
-                const u64 nis_nat,
-                const Def* S,
-                const Def* Ris,
-                const Def* Sis,
-                const Def* subs) {
+extract_indices(const u64 n_nat, const u64 nis_nat, const Def* S, const Def* Ris, const Def* Sis, const Def* subs) {
     auto& w = S->world();
 
     absl::flat_hash_map<u64, const Def*> dims; // idx ↦ nat (size bound = dimension)
@@ -288,6 +288,40 @@ extract_indices(const u64 n_nat,
     return {in_indices, out_indices, dims, n_input};
 }
 
+std::tuple<const Def*, const Def*, absl::flat_hash_map<u64, const Def*>, Lam*>
+create_outer_loop(Lam* fun, const Vector<u64>& out_indices, const absl::flat_hash_map<u64, const Def*>& dims) {
+    auto& w = fun->world();
+
+    // The function on where to continue -- return after all output loops.
+    auto cont        = fun->var(1);
+    auto current_mut = fun;
+
+    // First create the output matrix.
+    auto init_mat = w.bot(cont->type()->as<Pi>()->dom());
+    w.DLOG("init_mat {} : {}", init_mat, init_mat->type());
+
+    // Each of the outer loops contains the memory and matrix as accumulator (in an inner monad).
+    auto acc = init_mat;
+
+    absl::flat_hash_map<u64, const Def*> iterator; // idx ↦ %Idx (S/NI#i)
+
+    for (auto idx : out_indices) {
+        auto for_name    = w.sym("forIn_" + std::to_string(idx));
+        auto dim_nat_def = dims.at(idx);
+        auto dim         = w.call<core::bitcast>(w.type_i32(), dim_nat_def);
+        w.DLOG("out_cont {} : {}", cont, cont->type());
+
+        auto [body, for_call]       = counting_for(dim, acc, cont, for_name);
+        auto [iter, new_acc, yield] = body->template vars<3>();
+        cont                        = yield;
+        iterator[idx]               = w.call(core::conv::u, dim_nat_def, iter);
+        acc                         = new_acc;
+        current_mut->set(true, for_call);
+        current_mut = body;
+    }
+    return {acc, cont, iterator, current_mut};
+}
+
 const Def* Lower::lower_map_reduce(const App* app) {
     // meta arguments:
     // * n = out-count, (nat)
@@ -303,7 +337,7 @@ const Def* Lower::lower_map_reduce(const App* app) {
     // * combination function (mem, acc, inputs) -> (mem, acc)
     // * input matrixes
 
-    auto &w = new_world();
+    auto& w     = new_world();
     auto c      = rewrite(app->callee());
     auto inputs = rewrite(app->arg());
     auto type   = rewrite(app->type());
@@ -311,11 +345,11 @@ const Def* Lower::lower_map_reduce(const App* app) {
 
     auto subs = callee->arg();
 
-    auto [comb, zero] = callee->decurry()->args<2>();
+    auto [comb, zero]    = callee->decurry()->args<2>();
     auto [Tis, Ris, Sis] = callee->decurry()->decurry()->args<3>();
-    auto S            = callee->decurry()->decurry()->decurry()->arg();
-    auto [T, n]       = callee->decurry()->decurry()->decurry()->decurry()->args<2>();
-    auto nis          = callee->decurry()->decurry()->decurry()->decurry()->decurry()->arg();
+    auto S               = callee->decurry()->decurry()->decurry()->arg();
+    auto [T, n]          = callee->decurry()->decurry()->decurry()->decurry()->args<2>();
+    auto nis             = callee->decurry()->decurry()->decurry()->decurry()->decurry()->arg();
 
     w.DLOG("type : {}", type);
     w.DLOG("meta variables:");
@@ -360,12 +394,10 @@ const Def* Lower::lower_map_reduce(const App* app) {
         // out-indices are loops (potentially parallel) over the output tensor, in-indices are reductions
         auto [in_indices, out_indices, dims, n_input] = extract_indices(n_nat, nis_nat, S, Ris, Sis, subs);
 
-        for(auto idx : out_indices) {
+        for (auto idx : out_indices)
             w.ILOG("output index {} with dim {}", idx, dims[idx]);
-        }
-        for(auto idx : in_indices) {
+        for (auto idx : in_indices)
             w.ILOG("input index {} with dim {}", idx, dims[idx]);
-        }
 
         auto fun = w.mut_fun(inputs->type(), type)->set("mapRed");
         w.DLOG("fun {} : {}", fun, fun->type());
@@ -405,44 +437,14 @@ const Def* Lower::lower_map_reduce(const App* app) {
         // -> ...
         // ```
 
-        // First create the output matrix.
-        auto init_mat = w.bot(type);
-        w.DLOG("init_mat {} : {}", init_mat, init_mat->type());
-
-        // The function on where to continue -- return after all output loops.
-        auto cont        = fun->var(1);
-        auto current_mut = fun;
-
-        // Each of the outer loops contains the memory and matrix as accumulator (in an inner monad).
-        auto acc = init_mat;
-
-        absl::flat_hash_map<u64, const Def*> raw_iterator; // idx ↦ I32
-        absl::flat_hash_map<u64, const Def*> iterator;     // idx ↦ %Idx (S/NI#i)
-
-        for (auto idx : out_indices) {
-            auto for_name    = w.sym("forIn_" + std::to_string(idx));
-            auto dim_nat_def = dims[idx];
-            auto dim         = w.call<core::bitcast>(w.type_i32(), dim_nat_def);
-            w.DLOG("out_cont {} : {}", cont, cont->type());
-
-            auto [body, for_call]       = counting_for(dim, acc, cont, for_name);
-            auto [iter, new_acc, yield] = body->template vars<3>();
-            cont                        = yield;
-            raw_iterator[idx]           = iter;
-            iterator[idx]               = w.call<core::bitcast>(w.type_idx(dim_nat_def), iter);
-            acc                         = new_acc;
-            current_mut->set(true, for_call);
-            current_mut = body;
-        }
+        auto [wb_matrix, cont, iterator, current_mut] = create_outer_loop(fun, out_indices, dims);
 
         // Now the inner loops for the inputs:
         // Each of the inner loops contains the element accumulator and memory as accumulator (in an inner monad).
-        w.DLOG("acc at inner: {;}", acc);
 
         // First create the accumulator.
         auto element_acc = zero;
         element_acc->set("acc");
-        auto wb_matrix = acc;
         assert(wb_matrix);
         w.DLOG("wb_matrix {} : {}", wb_matrix, wb_matrix->type());
 
@@ -451,23 +453,35 @@ const Def* Lower::lower_map_reduce(const App* app) {
         w.DLOG("write_back {} : {}", write_back, write_back->type());
         auto element_final = write_back->var(0);
 
-        auto output_iterators = DefVec((size_t)n_nat, [&](u64 i) {
+        DefVec output_iterators;
+        for (u64 i = 0; i < n_nat; ++i) {
             auto idx = out_indices[i];
             if (idx != i) w.ELOG("output indices must be consecutive 0..n-1 but {} != {}", idx, i);
             assert(idx == i && "output indices must be consecutive 0..n-1");
-            auto iter_idx_def = iterator[idx];
-            return iter_idx_def;
-        });
-        auto output_it_tuple  = w.tuple(output_iterators);
-        w.DLOG("output tuple: {} : {}", output_it_tuple, output_it_tuple->type());
+            if (dims[idx]->isa<Lit>() && dims[idx]->as<Lit>()->get<u64>() == 1) {
+                w.DLOG("dimension {} is 1, no iterator needed", idx);
+                continue;
+            }
+            output_iterators.push_back(iterator[idx]);
+        }
 
-        auto written_matrix = op_set(T, n, S, wb_matrix, output_it_tuple, element_final);
+        u64 n_oi = output_iterators.size();
+        DefVec output_submatrices;
+        output_submatrices.reserve(n_oi);
+        output_submatrices.push_back(wb_matrix);
+        for (u64 i = 0; i < n_oi - 1; ++i)
+            output_submatrices.push_back(w.extract(output_submatrices[i], output_iterators[i]));
+
+        auto written_matrix = element_final;
+        for (u64 i = 1; i <= n_oi; ++i)
+            written_matrix = w.insert(output_submatrices[n_oi - i], output_iterators[n_oi - i], written_matrix);
+
         w.DLOG("written_matrix {} : {}", written_matrix, written_matrix->type());
         write_back->app(true, cont, written_matrix);
 
         // From here on the continuations take the element and memory.
-        acc  = element_acc;
-        cont = write_back;
+        auto acc = element_acc;
+        cont     = write_back;
 
         for (auto idx : in_indices) {
             auto for_name    = w.sym("forIn_" + std::to_string(idx));
@@ -478,8 +492,7 @@ const Def* Lower::lower_map_reduce(const App* app) {
             auto [body, for_call]       = counting_for(dim, acc, cont, for_name);
             auto [iter, new_acc, yield] = body->vars<3>();
             cont                        = yield;
-            raw_iterator[idx]           = iter;
-            iterator[idx]               = w.call<core::bitcast>(w.type_idx(dim_nat_def), iter);
+            iterator[idx]               = w.call(core::conv::u, dim_nat_def, iter);
             acc                         = new_acc;
             current_mut->set(true, for_call);
             current_mut = body;
@@ -492,12 +505,6 @@ const Def* Lower::lower_map_reduce(const App* app) {
             auto input_idx_tup = subs->proj(nis_nat, i);
             auto input_matrix  = new_inputs->proj(nis_nat, i);
 
-            auto input_T = Tis->proj(nis_nat, i);
-            auto input_N = Ris->proj(nis_nat, i);
-            auto input_S = Sis->proj(nis_nat, i);
-
-            if (nis_nat == 1) input_S = Sis;
-
             w.DLOG("input matrix {} is {} : {}", i, input_matrix, input_matrix->type());
 
             auto indices         = input_idx_tup->projs(n_input[i]);
@@ -507,11 +514,13 @@ const Def* Lower::lower_map_reduce(const App* app) {
                 w.DLOG("  idx {} {} = {}", i, j, idx_lit);
                 return iterator[idx_lit];
             });
-            auto input_it_tuple  = w.tuple(input_iterators);
 
-            auto read_entry = op_get(input_T, input_N, input_S, input_matrix, input_it_tuple);
-            w.DLOG("read_entry {} : {}", read_entry, read_entry->type());
-            auto element_i    = read_entry->proj(0);
+            auto curr_mat = input_matrix;
+            for (auto idx : input_iterators)
+                curr_mat = w.extract(curr_mat, idx);
+
+            w.DLOG("read_entry {} : {}", curr_mat, curr_mat->type());
+            auto element_i    = curr_mat;
             input_elements[i] = element_i;
         }
 
