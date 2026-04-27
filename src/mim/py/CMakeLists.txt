@@ -1,5 +1,4 @@
 pybind11_add_module(pymim
-    world_wrapper.cpp
     driver.cpp
     world.cpp
     sym.cpp
@@ -10,8 +9,6 @@ pybind11_add_module(pymim
     flags.cpp
     lam.cpp
     parser.cpp
-    world_wrapper.cpp
-    parser_wrapper.cpp
 #    def_wrapper.cpp
     def.cpp
     error.cpp

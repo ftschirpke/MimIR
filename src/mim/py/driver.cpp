@@ -26,7 +26,7 @@ void init_driver(py::module_& m) {
             d.backend(backend)(world, ofs);
             ofs.close();
         })
-        .def("load_pluins", [](mim::Driver& d, std::vector<std::string> plugins){
+        .def("load_plugins", [](mim::Driver& d, std::vector<std::string> plugins){
             ast::load_plugins(d.world(), plugins);
         });
 }

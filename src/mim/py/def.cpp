@@ -4,6 +4,7 @@
 #include <pybind11/functional.h>
 #include <mim/def.h>
 #include <mim/world.h>
+#include "mim/driver.h"
 
 namespace py = pybind11;
 
@@ -30,7 +31,12 @@ void init_def(py::module_& m) {
             }
 
             return ret_vec;
-        });
+        })
+        .def("world", &mim::Def::world, py::return_value_policy::reference_internal)
+        .def("driver", [](mim::Def& d) -> mim::Driver& {
+            return d.world().driver(); 
+        })
+        ;
 
     // clang-format on
 }

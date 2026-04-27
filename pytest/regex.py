@@ -109,9 +109,9 @@ def call(self):
 def call(self, *args) -> mim.Def:
     
     callee = args[0]
+    print(type(args[0]))
 
-
-    if isinstance(args[0], regex):
+    if isinstance(args[0], regex) or isinstance(args[0], regex.quant) or isinstance(args[0], regex.cls):
         callee = self.annex_by_id(args[0].value)
     if isinstance(callee, str):
         callee = self.sym(callee)
@@ -160,12 +160,19 @@ class MimRegex:
     def __char_lit(self, lit) -> mim.Def:
         return self.wrld.lit_i8(ord(lit))
 
+    def __add__(self, other):
+        pass
+    def __or__(self, other):
+        self.regex.append(self.wrld.call(regex.disj, other))
+        pass
+
     def star(self) -> Self:
         # self.__conj(self.regex)
         # self.regex.append(self.wrld.call_by_id(int(0x4c62066400000901), [self.regex[0]]))
-        self.regex.append(self.wrld.call(self._star_sym, [self.regex[len(self.regex)-1]]))
+        self.regex.append(self.wrld.call(regex.quant.star, [self.regex[len(self.regex)-1]]))
         return self
-
+    
+    
     # def dot(self) -> Self:
     #     self.regex.append(self.wrld.call(self.any_sym))
     #     return Self
@@ -257,6 +264,7 @@ reg = MimRegex(driver)
 # seg fault
 # reg.any().close()
 reg.literal("a").literal("b").literal("c").literal("d").close().star().close()
+
 print(reg.regex)
 reg.build(driver)
 reg.wrld.dot("out_no_literals", True, False)

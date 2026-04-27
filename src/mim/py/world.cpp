@@ -83,11 +83,11 @@ void init_world(py::module_& m) {
             pybind11::arg("args") = std::vector<mim::Def*>() 
         )
         .def("optimize", [](mim::World& w) { 
-            std::cout << "printing world externals: " << std::endl;
-            for(auto[sym, _] :  w.externals().sym2mut()){
-                std::cout << sym.str() << std::endl;
-            }
-            std::cout << "----" << std::endl;
+            // std::cout << "printing world externals: " << std::endl;
+            // for(auto[sym, _] :  w.externals().sym2mut()){
+            //     std::cout << sym.str() << std::endl;
+            // }
+            // std::cout << "----" << std::endl;
             mim::optimize(w); })
         .def("dot", static_cast<void (World::*)(const char*, bool, bool) const>(&mim::World::dot))
         .def("mut_con", [](mim::World& w, std::vector<Def*> domains){
