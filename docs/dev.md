@@ -91,6 +91,7 @@ That is useful when you want to partially apply a curried annex, store it, inspe
 If you want the full curried call in one go, prefer [mim::World::call](@ref mim::World::call):
 
 ```cpp
+auto app    = w.call<mem::alloc>(mem);
 auto mem_t  = w.call<mem::M>(0);
 auto argv_t = w.call<mem::Ptr0>(w.call<mem::Ptr0>(w.type_i32()));
 ```
@@ -98,14 +99,16 @@ auto argv_t = w.call<mem::Ptr0>(w.call<mem::Ptr0>(w.type_i32()));
 `w.call<Id>(...)` starts from `w.annex<Id>()` and completes the curried application for you, including implicit arguments.
 So the rule of thumb is:
 
-- use `w.annex<Id>()` when you need the annex itself or want manual staged application;
+- use `w.annex<Id>()` when you need the annex itself or want manual partial application;
 - use `w.call<Id>(...)` when you want the fully applied operation directly.
 
 ### Mutables
 
-Mutable binders are typically built in two phases.
-First, create the mutable node with a `mut_*` factory or a [stub](@ref mim::Def::stub).
-Then, obtain its variables and fill in the body via [mim::Def::set](@ref mim::Def::set):
+Mutables are built in three phases:
+
+1. Create the mutable node with a `mut_*` factory or a [stub](@ref mim::Def::stub).
+2. Optionally, obtain its variable.
+3. Fill in the body via [mim::Def::set](@ref mim::Def::set):
 
 ```cpp
 auto main = w.mut_fun({mem_t, w.type_i32(), argv_t}, {mem_t, w.type_i32()})->set("main");
