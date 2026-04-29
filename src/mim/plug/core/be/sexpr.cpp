@@ -758,7 +758,12 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
 }
 
 void emit(World& world, std::ostream& ostream) {
-    Emitter emitter(world, ostream, world.flags().slotted);
+    Emitter emitter(world, ostream);
+    emitter.run();
+}
+
+void emit_slotted(World& world, std::ostream& ostream) {
+    Emitter emitter(world, ostream, true);
     emitter.run();
 }
 

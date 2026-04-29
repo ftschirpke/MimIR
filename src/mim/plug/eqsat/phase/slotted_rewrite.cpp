@@ -16,7 +16,7 @@ void SlottedRewrite::start() {
     // We are assuming that the core plugin and its backends have been loaded at this point
     // because the 'eqsat' plugin declared it as a dependency via 'plugin core;'
     std::ostringstream sexpr;
-    driver().backend("sexpr")(old_world(), sexpr);
+    driver().backend("sexpr-slotted")(old_world(), sexpr);
 
     auto rewrites = equality_saturate_slotted(sexpr.str(), rulesets, cost_fn);
 
@@ -31,18 +31,19 @@ void SlottedRewrite::start() {
 }
 
 std::pair<rust::Vec<RuleSet>, CostFn> SlottedRewrite::import_config() {
-    // Internalize eqsat config lambdas (lam with signature [] -> %eqsat.Ruleset / %eqsat.CostFun)
+    // Internalize config lambdas (with signature [] -> %eqsat.Ruleset | %eqsat.CostFun | %eqsat.Impl)
     DefVec lams;
     for (auto def : old_world().externals().mutate()) {
         if (auto lam = def->isa<Lam>()) {
-            if (Axm::isa<eqsat::Ruleset>(lam->ret_dom()) || Axm::isa<eqsat::CostFun>(lam->ret_dom())) {
+            if (Axm::isa<eqsat::Ruleset>(lam->ret_dom()) || Axm::isa<eqsat::CostFun>(lam->ret_dom())
+                || Axm::isa<eqsat::Impl>(lam->ret_dom())) {
                 lams.push_back(lam);
                 def->internalize();
             }
         }
     }
 
-    // Import predefined rulesets and cost function from config lambdas
+    // Import rulesets and cost function from config lambdas
     rust::Vec<RuleSet> rulesets;
     CostFn cost_fn = CostFn::AstSize;
     for (auto lam : lams) {
