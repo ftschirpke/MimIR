@@ -15,9 +15,15 @@
 /// 2) Passes these expressions to the 'egg' or 'slotted-egraphs' equality saturation engine for rewriting.
 /// 3) Reconstructs the program based on the results of step 2).
 ///
-/// MimIR-defined rewrite rules, sets of rewrite rules defined in 'egg' or 'slotted-egraphs'
+///
+/// MimIR-defined rewrite rules, sets of rewrite rules defined in 'egg' or 'slotted-egraphs',
 /// and a cost function may be specified via configuration functions in MimIR.
-/// Refer to the examples in the lit test suite for specific implementations.
+/// If no config functions are provided, the default values will be used:
+///
+/// Implementation:   %eqsat.egg
+/// Cost function:    %eqsat.AstSize
+/// Rulesets:         {}
+/// Rules:            {}
 ///
 ///
 /// ## Dependencies
@@ -28,29 +34,47 @@ plugin core;
 ///
 /// ## Types
 ///
+/// ### %%eqsat.Impl
+///
+/// Represents the equality saturation implementation that should be used in the backend
+///
+axm %eqsat.Impl: *;
+///
 /// ### %%eqsat.Rules
 ///
-/// Represents a set of rules defined in MimIR.
+/// Represents a set of rules defined in MimIR
 ///
 axm %eqsat.Rules: *;
 ///
 /// ### %%eqsat.Ruleset
 ///
-/// Represents a set of rules to be used during equality saturation.
+/// Represents a set of rules defined in 'egg' or 'slotted-egraphs'
 ///
 axm %eqsat.Ruleset: *;
 ///
 /// ### %%eqsat.CostFun
 ///
-/// Represents a cost function for extracting the most optimal term from an egraph.
+/// Represents a cost function for extracting the most optimal term from an egraph
 ///
 axm %eqsat.CostFun: *;
 ///
 ///
+/// ## Implementations
+///
+axm %eqsat.egg: %eqsat.Impl;
+axm %eqsat.slotted: %eqsat.Impl;
+///
+///
 /// ## Rulesets
+///
+/// ### Egg
 ///
 axm %eqsat.core: %eqsat.Ruleset;
 axm %eqsat.math: %eqsat.Ruleset;
+///
+/// ### Slotted
+///
+axm %eqsat.standard: %eqsat.Ruleset;
 ///
 ///
 /// ## Cost functions
@@ -63,15 +87,15 @@ axm %eqsat.AstDepth: %eqsat.CostFun;
 ///
 /// ### %%eqsat.rulesets
 ///
-/// Tells the equality saturation engine which of the predefined
-/// rulesets inside of eqsat/egg/src/rules/ it should use.
+/// Configures the equality saturation engine to use the specified rulesets
+/// that are implemented in github.com/ashiven/mimir-eqsat/src/[mim_egg|mim_slotted]/rulesets
 ///
 axm %eqsat.rulesets: {n: Nat} → «n; %eqsat.Ruleset» → %eqsat.Ruleset;
 ///
 /// ### %%eqsat.rules
 ///
-/// Tells the equality saturation engine to use a set of rules during equality saturation.
-//
+/// Configures the equality saturation engine to use a provided set of MimIR-defined rules
+///
 /// TODO: We should be able to apply this to any and all rewrite rules but that doesn't
 ///       quite work yet depending on the types of the meta variables of the rewrite rule.
 ///
