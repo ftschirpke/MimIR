@@ -55,7 +55,10 @@ private:
 
     std::pair<rust::Vec<RuleSet>, CostFn> import_config();
 
-    enum InitStage {
+    // Performs a top-down traverse of each RecExprFFI
+    // and creates and stores all bindings with their definitions.
+    // Lambdas are created without their bodies in this phase.
+    enum class InitStage {
         Declarations,
         Bindings,
     };
@@ -65,6 +68,10 @@ private:
     const Def* init_let(uint32_t id, NodeFFI node);
     const Def* init_con(uint32_t id, NodeFFI node);
 
+    // Performs a bottom-up traverse of each RecExprFFI and
+    // creates a Def in the new_world() for every node.
+    // At this point, the bodies of the lambdas created
+    // in the init phase will be set.
     void convert(rust::Vec<RecExprFFI> rewrites);
     const Def* convert(uint32_t id, bool recurse = false);
     const Def* convert_root(uint32_t id, NodeFFI node);
