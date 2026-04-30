@@ -16,11 +16,13 @@ public:
     SlottedRewrite(World& world, std::string name)
         : Phase(world, std::move(name))
         , Rewriter(world.inherit()) {
+        curr_scope_ = 0;
         register_symbols();
     }
     SlottedRewrite(World& world, flags_t annex)
         : Phase(world, annex)
         , Rewriter(world.inherit()) {
+        curr_scope_ = 0;
         register_symbols();
     }
 
@@ -63,6 +65,7 @@ private:
         Bindings,
     };
     void init(rust::Vec<RecExprFFI> rewrites, InitStage stage);
+    const Def* init(uint32_t id, InitStage stage, bool recurse = false);
     const Def* init_axm(uint32_t id, NodeFFI node);
     const Def* init_root(uint32_t id, NodeFFI node);
     const Def* init_let(uint32_t id, NodeFFI node);
@@ -107,7 +110,6 @@ private:
     // 2) A symbol node representing an annex
     // 3) A symbol node representing a type or term alias
     // 4) A symbol node representing a variable
-    // 5) A symbol node representing a lambda
     const Def* get_def(uint32_t id) {
         auto def = added_[id];
         if (def == nullptr) {
@@ -120,8 +122,6 @@ private:
                 def = get_axm(sym);
             else if (vars_.contains(sym))
                 def = get_var(sym);
-            else if (lams_.contains(sym))
-                def = get_lam(sym);
         }
         return def;
     }
@@ -132,6 +132,7 @@ private:
                       << "existing def: " << vars_[name] << "\n";
             assert(false);
         }
+        std::cout << "registering " << name << " in scope: " << curr_scope_ << "\n";
         vars_[name] = converted;
     }
     void register_axm(std::string name, const Axm* converted) {
@@ -142,18 +143,9 @@ private:
         }
         axms_[name] = converted;
     }
-    void register_lam(std::string name, const Lam* converted) {
-        if (lams_.contains(name)) {
-            std::cerr << "register_lam: can't define the same lambda: " << name << " twice\n"
-                      << "existing def: " << lams_[name] << "\n";
-            assert(false);
-        }
-        lams_[name] = converted;
-    }
 
     const Def* get_var(std::string name) { return vars_[name]; }
     const Def* get_axm(std::string name) { return axms_[name]; }
-    const Lam* get_lam(std::string name) { return lams_[name]; }
 
     NodeFFI get_node(MimKind expected, uint32_t id) {
         assert(res_[id].kind == expected && "get_node: mismatch between expected and actual node kind");
@@ -173,19 +165,13 @@ private:
         return flattened;
     }
 
-    std::string remove_uid(std::string name) {
-        if (auto pos = name.rfind("_"); pos != std::string::npos) {
-            auto maybe_uid = name.substr(pos + 1);
-            if (!maybe_uid.empty() && std::all_of(maybe_uid.begin(), maybe_uid.end(), ::isdigit))
-                return name.substr(0, pos);
-        }
-        return name;
-    }
+    size_t curr_scope_;
+    std::vector<std::pair<std::string, const Def*>> scopes_;
+    std::set<std::pair<std::string, const Def*>> root_scope_;
 
     rust::Vec<NodeFFI> res_;
     std::unordered_map<uint32_t, const Def*> added_;
     std::unordered_map<std::string, const Def*> vars_;
-    std::unordered_map<std::string, const Lam*> lams_;
     std::unordered_map<std::string, const Def*> axms_;
     std::unordered_map<std::string, const Def*> aliases_;
 };

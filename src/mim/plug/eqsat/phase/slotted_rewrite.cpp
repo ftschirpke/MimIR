@@ -74,28 +74,43 @@ std::pair<rust::Vec<RuleSet>, CostFn> SlottedRewrite::import_config() {
     return {rulesets, cost_fn};
 }
 
+// Converts remaining nodes to Def's in the new world and sets the bodies of the previously created lambdas.
+void SlottedRewrite::init(rust::Vec<RecExprFFI> rewrites, InitStage stage) {
+    for (auto rewrite : rewrites) {
+        added_       = {};
+        res_         = rewrite.nodes;
+        auto root_id = res_.size() - 1;
+        init(root_id, stage, true);
+    }
+}
+
 // Initially creates Defs in the new world according to the specfied 'InitStage'
 // This is done in a particular order to ensure that dependencies are upheld.
 // Defs are initialized in this order: (Declarations->Let-bindings|Root-bindings)
 // The bodies of lambdas can only be created and then set inside of convert(...)
 // after every Def from the init stage has been created, because they
 // can depend on any declaration, lambda, or let-binding.
-void SlottedRewrite::init(rust::Vec<RecExprFFI> rewrites, InitStage stage) {
-    for (auto rewrite : rewrites) {
-        added_ = {};
-        res_   = rewrite.nodes;
-        for (uint32_t id = res_.size() - 1; id > 0; id--) {
-            auto node      = get_node_unsafe(id);
-            const Def* res = nullptr;
-            switch (node.kind) {
-                case MimKind::Axm: res = stage == InitStage::Declarations ? init_axm(id, node) : nullptr; break;
-                case MimKind::Root: res = stage == InitStage::Bindings ? init_root(id, node) : nullptr; break;
-                case MimKind::Let: res = stage == InitStage::Bindings ? init_let(id, node) : nullptr; break;
-                default: break;
-            }
-            added_[id] = res;
-        }
+const Def* SlottedRewrite::init(uint32_t id, InitStage stage, bool recurse) {
+    auto node = get_node_unsafe(id);
+
+    if (node.kind == MimKind::Scope) curr_scope_++;
+
+    const Def* res = nullptr;
+    switch (node.kind) {
+        case MimKind::Axm: res = stage == InitStage::Declarations ? init_axm(id, node) : nullptr; break;
+        case MimKind::Root: res = stage == InitStage::Bindings ? init_root(id, node) : nullptr; break;
+        case MimKind::Let: res = stage == InitStage::Bindings ? init_let(id, node) : nullptr; break;
+        default: break;
     }
+    added_[id] = res;
+
+    if (recurse)
+        for (uint32_t child : node.children)
+            init(child, stage, recurse);
+
+    if (node.kind == MimKind::Scope) curr_scope_--;
+
+    return res;
 }
 
 // (axm <name> <type>)
@@ -124,7 +139,7 @@ const Def* SlottedRewrite::init_root(uint32_t id, NodeFFI node) {
     if (def_node.kind == MimKind::Con) {
         def = init_con(node.children[2], def_node);
         def->set(name);
-        register_lam(name, def->as<Lam>());
+        register_var(name, def);
     }
 
     if (DEBUG) std::cout << def << "\n";
@@ -144,7 +159,7 @@ const Def* SlottedRewrite::init_let(uint32_t id, NodeFFI node) {
     if (def_node.kind == MimKind::Con) {
         def = init_con(name_scope.children[0], def_node);
         def->set(name);
-        register_lam(name, def->as<Lam>());
+        register_var(name, def);
     } else {
         def = convert(name_scope.children[0], true);
         def->set(name);
@@ -172,15 +187,17 @@ const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node) {
 // Converts remaining nodes to Def's in the new world and sets the bodies of the previously created lambdas.
 void SlottedRewrite::convert(rust::Vec<RecExprFFI> rewrites) {
     for (auto rewrite : rewrites) {
-        added_ = {};
-        res_   = rewrite.nodes;
-        for (uint32_t id = 0; id < res_.size(); id++)
-            convert(id);
+        added_       = {};
+        res_         = rewrite.nodes;
+        auto root_id = res_.size() - 1;
+        convert(root_id, true);
     }
 }
 
 const Def* SlottedRewrite::convert(uint32_t id, bool recurse) {
     auto node = get_node_unsafe(id);
+
+    if (node.kind == MimKind::Scope) curr_scope_++;
 
     if (recurse)
         for (uint32_t child : node.children)
@@ -221,6 +238,8 @@ const Def* SlottedRewrite::convert(uint32_t id, bool recurse) {
         default: break;
     }
 
+    if (node.kind == MimKind::Scope) curr_scope_--;
+
     if (DEBUG) std::cout << res << "\n";
     return added_[id] = res;
 }
@@ -230,7 +249,6 @@ const Def* SlottedRewrite::convert_root(uint32_t id, NodeFFI node) {
     auto is_extern = get_symbol(node.children[0]);
     auto def       = get_def(node.children[1]);
 
-    // Where convert_con really happens
     if (def->isa<Lam>()) {
         auto con       = def->as_mut<Lam>();
         auto con_node  = get_node(MimKind::Con, node.children[2]);
@@ -238,11 +256,9 @@ const Def* SlottedRewrite::convert_root(uint32_t id, NodeFFI node) {
         auto filter    = get_def(var_scope.children[0]);
         auto body      = get_def(var_scope.children[1]);
         if (filter && body) {
-            // Definition
             con->set_filter(filter);
             con->set_body(body);
         } else {
-            // Declaration
             con->set_filter(false);
         }
         if (is_extern == "extern") con->externalize();
@@ -257,7 +273,6 @@ const Def* SlottedRewrite::convert_let(uint32_t id, NodeFFI node) {
     auto def        = get_def(id);
     auto expr       = get_def(name_scope.children[1]);
 
-    // Where convert_con really happens
     if (def->isa<Lam>()) {
         auto con       = def->as_mut<Lam>();
         auto con_node  = get_node(MimKind::Con, name_scope.children[0]);
@@ -265,11 +280,9 @@ const Def* SlottedRewrite::convert_let(uint32_t id, NodeFFI node) {
         auto filter    = get_def(var_scope.children[0]);
         auto body      = get_def(var_scope.children[1]);
         if (filter && body) {
-            // Definition
             con->set_filter(filter);
             con->set_body(body);
         } else {
-            // Declaration
             con->set_filter(false);
         }
     }
