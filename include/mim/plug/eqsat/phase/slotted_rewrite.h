@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include <unordered_map>
+
 #include <mim/phase.h>
 
 #include "mim/def.h"
@@ -16,13 +18,11 @@ public:
     SlottedRewrite(World& world, std::string name)
         : Phase(world, std::move(name))
         , Rewriter(world.inherit()) {
-        curr_scope_ = 0;
         register_symbols();
     }
     SlottedRewrite(World& world, flags_t annex)
         : Phase(world, annex)
         , Rewriter(world.inherit()) {
-        curr_scope_ = 0;
         register_symbols();
     }
 
@@ -132,7 +132,7 @@ private:
                       << "existing def: " << vars_[name] << "\n";
             assert(false);
         }
-        std::cout << "registering " << name << " in scope: " << curr_scope_ << "\n";
+        std::cout << "registering " << name << " in scope: (" << curr_loc_.first << curr_loc_.second << ")\n";
         vars_[name] = converted;
     }
     void register_axm(std::string name, const Axm* converted) {
@@ -165,8 +165,36 @@ private:
         return flattened;
     }
 
-    size_t curr_scope_;
-    std::vector<std::pair<std::string, const Def*>> scopes_;
+    // Tracks the current location in the scope tree.
+    // This is done by maintaining a depth and an offset while
+    // traversing the RecExprFFI that indicate the exact scope we
+    // are currently in. To visualize this:
+    //                s1
+    //              /    \
+    //             s2    s3
+    //            /     /  \
+    //           s4    s5  s6
+    // The location of scope s5 would be at (2, 1) because it is at
+    // at a tree depth of 2 and at an offset of 1 at that depth.
+    typedef std::pair<size_t, size_t> Loc;
+    Loc curr_loc_;
+
+    struct Scope {
+        Scope* parent;
+        std::string var_name;
+        const Def* def;
+    };
+
+    // The current scope which we mostly use to construct the scope map during init
+    Scope* curr_scope_;
+
+    // For every scope-location we store a Scope struct that stores a pointer to its
+    // parent scope, the name of the var it introduces, and the Def associated with this var.
+    std::unordered_map<Loc, Scope> scopes_;
+
+    // There is a special root scope that we access with curr_scope_ = 0
+    // which is a registry of all top-level/closed Defs that exist beyond
+    // the current RecExprFFI.
     std::set<std::pair<std::string, const Def*>> root_scope_;
 
     rust::Vec<NodeFFI> res_;
