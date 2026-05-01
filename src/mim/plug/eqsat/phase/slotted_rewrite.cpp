@@ -77,11 +77,12 @@ std::pair<rust::Vec<RuleSet>, CostFn> SlottedRewrite::import_config() {
 // Converts remaining nodes to Def's in the new world and sets the bodies of the previously created lambdas.
 void SlottedRewrite::init(rust::Vec<RecExprFFI> rewrites, InitStage stage) {
     for (auto rewrite : rewrites) {
-        added_       = {};
-        scopes_      = {};
-        curr_loc_    = {0, 0};
-        res_         = rewrite.nodes;
-        auto root_id = res_.size() - 1;
+        added_        = {};
+        scopes_       = {};
+        depth_visits_ = {};
+        curr_loc_     = {0, 0};
+        res_          = rewrite.nodes;
+        auto root_id  = res_.size() - 1;
         init(root_id, stage, true);
     }
 }
@@ -95,7 +96,7 @@ void SlottedRewrite::init(rust::Vec<RecExprFFI> rewrites, InitStage stage) {
 const Def* SlottedRewrite::init(uint32_t id, InitStage stage, bool recurse) {
     auto node = get_node_unsafe(id);
 
-    if (node.kind == MimKind::Scope) curr_loc_.depth++;
+    enter_scope(node, DEBUG);
 
     const Def* res = nullptr;
     switch (node.kind) {
@@ -110,7 +111,7 @@ const Def* SlottedRewrite::init(uint32_t id, InitStage stage, bool recurse) {
         for (uint32_t child : node.children)
             init(child, stage, recurse);
 
-    if (node.kind == MimKind::Scope) curr_loc_.depth--;
+    exit_scope(node, DEBUG);
 
     return res;
 }
@@ -120,7 +121,7 @@ const Def* SlottedRewrite::init_axm(uint32_t id, NodeFFI node) {
     if (DEBUG) std::cout << "init - current node(" << id << "): " << node_ffi_str(node).c_str() << " - ";
     auto name = get_symbol(node.children[0]);
     if (DEBUG) std::cout << "\n";
-    auto type = convert(node.children[1], true);
+    auto type = convert(node.children[1], true, false);
 
     auto new_axm = new_world().axm(type);
     new_axm->set(name);
@@ -139,7 +140,7 @@ const Def* SlottedRewrite::init_root(uint32_t id, NodeFFI node) {
     const Def* def = nullptr;
     auto def_node  = get_node_unsafe(node.children[2]);
     if (def_node.kind == MimKind::Con) {
-        def = init_con(node.children[2], def_node);
+        def = init_con(node.children[2], def_node, true);
         def->set(name);
         register_var(name, def);
     }
@@ -155,7 +156,6 @@ const Def* SlottedRewrite::init_let(uint32_t id, NodeFFI node) {
     auto name       = get_slot(id);
     auto name_scope = get_node(MimKind::Scope, node.children[0]);
 
-    curr_loc_.depth++;
     if (DEBUG) std::cout << "\n";
     const Def* def = nullptr;
     auto def_node  = get_node_unsafe(name_scope.children[0]);
@@ -164,28 +164,41 @@ const Def* SlottedRewrite::init_let(uint32_t id, NodeFFI node) {
         def->set(name);
         register_var(name, def);
     } else {
-        def = convert(name_scope.children[0], true);
+        def = convert(name_scope.children[0], true, false);
         def->set(name);
         register_var(name, def);
     }
-    curr_loc_.depth--;
 
     if (DEBUG) std::cout << def << "\n";
     return nullptr;
 }
 
 // (con <domain-type> $var-name (scope <filter> <body>))
-const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node) {
+const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node, bool root) {
     if (DEBUG) std::cout << "init - current node(" << id << "): " << node_ffi_str(node).c_str() << " - \n";
-    auto domain_type = convert(node.children[0], true);
+    auto domain_type = convert(node.children[0], true, false);
     auto new_con     = new_world().mut_con(domain_type);
 
     auto var_name = get_slot(id);
     auto var      = new_con->var();
     var->set(var_name);
-    curr_loc_.depth++;
-    register_var(var_name, var);
-    curr_loc_.depth--;
+
+    // When we are calling on init_con() via init_let(), we have to manually adjust our location for
+    // the additional scope introduced by the continuations' variable.
+    // This is because location changes are made via enter_/exit_scope() in init() where init() calls
+    // on init_let() which calls on init_con() so the location changes from init() are not being applied.
+    //
+    // We also don't want a location adjustment if init_con() is called from init_root() (root == true)
+    // because we treat the root/global scope separately from these scope locations.
+    if (root) {
+        register_var(var_name, var);
+    } else {
+        curr_loc_.depth++;
+        curr_loc_.offset = depth_visits_[curr_loc_.depth];
+        register_var(var_name, var);
+        curr_loc_.depth--;
+        curr_loc_.offset = depth_visits_[curr_loc_.depth];
+    }
 
     return new_con;
 }
@@ -193,19 +206,25 @@ const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node) {
 // Converts remaining nodes to Def's in the new world and sets the bodies of the previously created lambdas.
 void SlottedRewrite::convert(rust::Vec<RecExprFFI> rewrites) {
     for (auto rewrite : rewrites) {
-        added_       = {};
-        scopes_      = {};
-        curr_loc_    = {0, 0};
-        res_         = rewrite.nodes;
-        auto root_id = res_.size() - 1;
+        added_        = {};
+        scopes_       = {};
+        depth_visits_ = {};
+        curr_loc_     = {0, 0};
+        res_          = rewrite.nodes;
+        auto root_id  = res_.size() - 1;
         convert(root_id, true);
     }
 }
 
-const Def* SlottedRewrite::convert(uint32_t id, bool recurse) {
+const Def* SlottedRewrite::convert(uint32_t id, bool recurse, bool update_loc) {
     auto node = get_node_unsafe(id);
 
-    if (node.kind == MimKind::Scope) curr_loc_.depth++;
+    // Since convert() is intermittently called during init() to convert
+    // subexpressions, like the domain type of a lambda, we need to be able
+    // to suppress location modifications via enter_/exit_scope() for these calls.
+    // So any calls to convert() from init() set update_loc=false to ensure
+    // that curr_loc_ is not modified by these calls.
+    if (update_loc) enter_scope(node, DEBUG);
 
     if (recurse)
         for (uint32_t child : node.children)
@@ -246,7 +265,7 @@ const Def* SlottedRewrite::convert(uint32_t id, bool recurse) {
         default: break;
     }
 
-    if (node.kind == MimKind::Scope) curr_loc_.depth--;
+    if (update_loc) exit_scope(node, DEBUG);
 
     if (DEBUG) std::cout << res << "\n";
     return added_[id] = res;

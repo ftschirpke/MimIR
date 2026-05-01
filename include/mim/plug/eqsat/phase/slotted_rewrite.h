@@ -69,14 +69,14 @@ private:
     const Def* init_axm(uint32_t id, NodeFFI node);
     const Def* init_root(uint32_t id, NodeFFI node);
     const Def* init_let(uint32_t id, NodeFFI node);
-    const Def* init_con(uint32_t id, NodeFFI node);
+    const Def* init_con(uint32_t id, NodeFFI node, bool root = false);
 
     // Performs a bottom-up traverse of each RecExprFFI and
     // creates a Def in the new_world() for every node.
     // At this point, the bodies of the lambdas created
     // in the init phase will be set.
     void convert(rust::Vec<RecExprFFI> rewrites);
-    const Def* convert(uint32_t id, bool recurse = false);
+    const Def* convert(uint32_t id, bool recurse = false, bool update_loc = true);
     const Def* convert_root(uint32_t id, NodeFFI node);
     const Def* convert_let(uint32_t id, NodeFFI node);
     const Def* convert_con(uint32_t id, NodeFFI node);
@@ -203,7 +203,7 @@ private:
     // Tells us exactly how often we have visited each depth
     // so we can keep track of the current offset at each depth.
     // maps: Depth -> #Visits
-    std::unordered_map<size_t, size_t> depth_visits;
+    std::unordered_map<size_t, size_t> depth_visits_;
 
     struct Scope {
         Scope* parent;
@@ -213,6 +213,22 @@ private:
 
     // The current scope which we mostly use to construct the scope map during init
     Scope* curr_scope_;
+
+    void enter_scope(NodeFFI node, bool dbg) {
+        if (node.kind == MimKind::Scope) {
+            curr_loc_.depth++;
+            curr_loc_.offset = depth_visits_[curr_loc_.depth];
+            if (dbg) std::cout << "Entering scope - Loc(" << curr_loc_.depth << ", " << curr_loc_.offset << ")\n";
+        }
+    }
+
+    void exit_scope(NodeFFI node, bool dbg) {
+        if (node.kind == MimKind::Scope) {
+            curr_loc_.depth--;
+            curr_loc_.offset = ++depth_visits_[curr_loc_.depth];
+            if (dbg) std::cout << "Exiting scope - Loc(" << curr_loc_.depth << ", " << curr_loc_.offset << ")\n";
+        }
+    }
 
     struct LocHash {
         std::size_t operator()(const Loc& loc) const noexcept {
