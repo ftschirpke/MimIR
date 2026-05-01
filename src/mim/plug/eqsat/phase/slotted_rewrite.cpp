@@ -8,8 +8,6 @@
 
 #include "mim/plug/eqsat/autogen.h"
 
-const bool DEBUG = true;
-
 namespace mim::plug::eqsat {
 
 void SlottedRewrite::start() {
@@ -99,8 +97,7 @@ void SlottedRewrite::init(rust::Vec<RecExprFFI> rec_exprs, InitStage stage) {
 // can depend on any declaration, lambda, or let-binding.
 const Def* SlottedRewrite::init(uint32_t id, InitStage stage) {
     auto node = get_node_unsafe(id);
-
-    enter_scope(node, DEBUG);
+    enter_scope(node);
 
     const Def* res = nullptr;
     switch (node.kind) {
@@ -114,8 +111,7 @@ const Def* SlottedRewrite::init(uint32_t id, InitStage stage) {
     for (uint32_t child : node.children)
         init(child, stage);
 
-    exit_scope(node, DEBUG);
-
+    exit_scope(node);
     return res;
 }
 
@@ -162,7 +158,7 @@ const Def* SlottedRewrite::init_let(uint32_t id, NodeFFI node) {
     const Def* def = nullptr;
     auto def_node  = get_node_unsafe(name_scope.children[0]);
 
-    enter_scope(name_scope, DEBUG);
+    enter_scope(name_scope);
     if (def_node.kind == MimKind::Con) {
         def = init_con(name_scope.children[0], def_node);
         def->set(name);
@@ -172,7 +168,7 @@ const Def* SlottedRewrite::init_let(uint32_t id, NodeFFI node) {
         def->set(name);
         register_var(name, def);
     }
-    exit_scope(name_scope, DEBUG, true);
+    exit_scope(name_scope, true);
 
     if (DEBUG) std::cout << def << "\n";
     return nullptr;
@@ -193,11 +189,11 @@ const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node) {
     // This is because location changes are made via enter_/exit_scope() in init() where init() calls
     // on init_let() which calls on init_con() so the location changes from init() are not being applied.
     auto var_scope = get_node(MimKind::Scope, node.children[1]);
-    enter_scope(var_scope, DEBUG);
+    enter_scope(var_scope);
     register_var(var_name, var);
     // We set ignore_visit=true to ensure that this visit won't be
     // counted twice in depth_visits_ (init() will already count it once)
-    exit_scope(var_scope, DEBUG, true);
+    exit_scope(var_scope, true);
 
     return new_con;
 }
@@ -227,7 +223,7 @@ const Def* SlottedRewrite::convert(uint32_t id, bool recurse, bool update_loc) {
     // to suppress location modifications via enter_/exit_scope() for these calls.
     // So any calls to convert() from init() set update_loc=false to ensure
     // that curr_loc_ is not modified by these calls.
-    if (update_loc) enter_scope(node, DEBUG);
+    if (update_loc) enter_scope(node);
 
     if (recurse)
         for (uint32_t child : node.children)
@@ -268,7 +264,7 @@ const Def* SlottedRewrite::convert(uint32_t id, bool recurse, bool update_loc) {
         default: break;
     }
 
-    if (update_loc) exit_scope(node, DEBUG);
+    if (update_loc) exit_scope(node);
 
     if (DEBUG) std::cout << res << "\n";
     return cache_set(id, res);

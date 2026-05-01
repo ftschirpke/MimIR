@@ -13,6 +13,9 @@
 
 namespace mim::plug::eqsat {
 
+const bool DEBUG        = true;
+const bool DEBUG_SCOPES = true;
+
 class SlottedRewrite : public Phase, public Rewriter {
 public:
     SlottedRewrite(World& world, std::string name)
@@ -143,11 +146,11 @@ private:
         }
         if (root) {
             root_scope_.insert({name, def});
-            std::cout << "Registering: " << name << "-" << def << " in root scope\n";
+            if (DEBUG_SCOPES) std::cout << "Registering: " << name << "-" << def << " in root scope\n";
         } else {
             curr_scope_->var_name = name;
             curr_scope_->def      = def;
-            std::cout << "Registering: " << curr_scope_->to_str() << "\n";
+            if (DEBUG_SCOPES) std::cout << "Registering: " << curr_scope_->to_str() << "\n";
         }
         vars_[name] = def;
     }
@@ -161,6 +164,10 @@ private:
         axms_[name] = converted;
     }
 
+    // TODO: Look up var-name in current scope, going up the parent
+    // scopes all the way up to the root scope and return the first hit.
+    // If we don't find it, just return nullptr and in get_def do
+    // something like if(var = get_var(sym); var != nullptr) {...}
     const Def* get_var(std::string name) { return vars_[name]; }
     const Def* get_axm(std::string name) { return axms_[name]; }
 
@@ -269,7 +276,7 @@ private:
         curr_scope_               = &(*scopes_)[curr_loc_];
     }
 
-    void enter_scope(NodeFFI node, bool dbg) {
+    void enter_scope(NodeFFI node) {
         if (node.kind == MimKind::Scope) {
             auto parent_loc = curr_loc_;
 
@@ -277,22 +284,17 @@ private:
             curr_loc_.offset = depth_visits_[curr_loc_.depth];
 
             set_scope();
-
             curr_scope_->parent_loc = parent_loc;
-
-            if (dbg) std::cout << "Entering: " << curr_scope_->to_str() << "\n";
+            if (DEBUG_SCOPES) std::cout << "Entering: " << curr_scope_->to_str() << "\n";
         }
     }
 
-    void exit_scope(NodeFFI node, bool dbg = false, bool ignore_visit = false) {
+    void exit_scope(NodeFFI node, bool ignore_visit = false) {
         if (node.kind == MimKind::Scope) {
-            if (dbg) std::cout << "Exiting: " << curr_scope_->to_str() << "\n";
+            if (DEBUG_SCOPES) std::cout << "Exiting: " << curr_scope_->to_str() << "\n";
 
             if (!ignore_visit) depth_visits_[curr_loc_.depth]++;
-
-            curr_loc_.depth--;
-            curr_loc_.offset = depth_visits_[curr_loc_.depth];
-
+            curr_loc_.offset = depth_visits_[--curr_loc_.depth];
             set_scope();
         }
     }
