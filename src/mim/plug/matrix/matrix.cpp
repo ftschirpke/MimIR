@@ -6,4 +6,6 @@
 using namespace mim;
 using namespace mim::plug;
 
-extern "C" MIM_EXPORT Plugin mim_get_plugin() { return {"matrix", nullptr, nullptr, nullptr}; }
+extern "C" MIM_EXPORT Plugin mim_get_plugin() {
+    return {"matrix", plug::matrix::register_normalizers, nullptr, nullptr};
+}

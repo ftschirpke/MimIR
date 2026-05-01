@@ -54,8 +54,8 @@ axm %gpu.default_stream: %gpu.Stream;
 ///
 /// Ideas to capture functionalities into groups and some use cases
 let %gpu.WorkItem = [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]; // TODO: why not [..., Idx n]
-let %gpu.WorkGroup (n: Nat) = [Idx n, %gpu.WorkItem]; // TODO: why not [Idx m, «n; %gpu.WorkItem n»]
-let %gpu.Grid (m n: Nat) = [Idx m, %gpu.WorkGroup n]; // TODO: why not [«m; %gpu.WorkGroup (m, n)»]
+lam %gpu.WorkGroup (n: Nat) = [Idx n, %gpu.WorkItem]; // TODO: why not [Idx m, «n; %gpu.WorkItem n»]
+lam %gpu.Grid (m n: Nat) = [Idx m, %gpu.WorkGroup n]; // TODO: why not [«m; %gpu.WorkGroup (m, n)»]
 
 // let %nvptx.Warp = %matrix.Mat (32, 1) %gpu.WorkItem; // a warp is a group of 32 consecutive threads
 // TODO: can we enfore the "alignment" of 32 as well in the type?
