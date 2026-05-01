@@ -132,18 +132,13 @@ private:
                 def = aliases_[sym];
             else if (axms_.contains(sym))
                 def = get_axm(sym);
-            else if (vars_.contains(sym))
-                def = get_var(sym);
+            else if (auto var = get_var(sym); var)
+                def = var;
         }
         return def;
     }
 
     void register_var(std::string name, const Def* def, bool root = false) {
-        if (vars_.contains(name)) {
-            std::cerr << "register_var: can't define the same var: " << name << " twice\n"
-                      << "existing def: " << vars_[name] << "\n";
-            assert(false);
-        }
         if (root) {
             root_scope_.insert({name, def});
             if (DEBUG_SCOPES) std::cout << "Registering: " << name << "-" << def << " in root scope\n";
@@ -152,7 +147,27 @@ private:
             curr_scope_->def      = def;
             if (DEBUG_SCOPES) std::cout << "Registering: " << curr_scope_->to_str() << "\n";
         }
-        vars_[name] = def;
+    }
+
+    // TODO: doesn't quite work yet
+    // - this might be because convert doesn't track location correctly
+    // - consider putting scopes lookup behind an abstraction to get rid of (*scopes_)[...]
+    //   and have something like get_scope(curr_loc_)
+    const Def* get_var(std::string name) {
+        auto curr_scope = (*scopes_)[curr_loc_];
+
+        while (name != curr_scope.var_name) {
+            if (curr_scope.parent_loc.depth == ROOT_SCOPE_DEPTH) {
+                for (auto [var_name, def] : root_scope_)
+                    if (var_name == name) return def;
+                break;
+            }
+            curr_scope = (*scopes_)[curr_scope.parent_loc];
+        }
+
+        if (name == curr_scope.var_name) return curr_scope.def;
+
+        return nullptr;
     }
 
     void register_axm(std::string name, const Axm* converted) {
@@ -163,12 +178,6 @@ private:
         }
         axms_[name] = converted;
     }
-
-    // TODO: Look up var-name in current scope, going up the parent
-    // scopes all the way up to the root scope and return the first hit.
-    // If we don't find it, just return nullptr and in get_def do
-    // something like if(var = get_var(sym); var != nullptr) {...}
-    const Def* get_var(std::string name) { return vars_[name]; }
     const Def* get_axm(std::string name) { return axms_[name]; }
 
     NodeFFI get_node(MimKind expected, uint32_t id) {
@@ -235,12 +244,14 @@ private:
         }
     };
 
+    const int32_t ROOT_SCOPE_DEPTH = -1;
+
     void reset_loc() {
         depth_visits_ = {};
         // We start at Loc {depth: -1, offset: 0} because
-        // enter_scope increments the depth and we want
+        // enter_scope() increments the depth and we want
         // the first scope to begin at (0,0) rather than (1,0)
-        curr_loc_ = {-1, 0};
+        curr_loc_ = {ROOT_SCOPE_DEPTH, 0};
     }
 
     // Keeps track of how often we have visited each scope-depth
@@ -258,15 +269,12 @@ private:
         std::string to_str() const {
             std::ostringstream os;
             os << "Scope{ loc=" << loc.to_str() << ", parent_loc=" << parent_loc.to_str() << ", var=\"" << var_name
-               << "\"";
-
-            os << ", def=";
+               << "\", def=";
             if (def)
                 os << def;
             else
                 os << "null";
             os << " }";
-
             return os.str();
         }
     };

@@ -293,6 +293,8 @@ const Def* SlottedRewrite::convert_root(uint32_t id, NodeFFI node) {
     return def;
 }
 
+// TODO: Probably need some enter_ exit_scope calls without visit counting here and
+// in convert_root and convert_con as well to update position.
 // (let $name (scope <definition> <expression>))
 const Def* SlottedRewrite::convert_let(uint32_t id, NodeFFI node) {
     auto name_scope = get_node(MimKind::Scope, node.children[0]);
