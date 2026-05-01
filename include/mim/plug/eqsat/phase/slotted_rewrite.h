@@ -149,23 +149,21 @@ private:
         }
     }
 
-    // TODO: doesn't quite work yet
-    // - this might be because convert doesn't track location correctly
-    // - consider putting scopes lookup behind an abstraction to get rid of (*scopes_)[...]
-    //   and have something like get_scope(curr_loc_)
+    // TODO: Doesn't quite work yet because exit_scope in convert increments
+    // the visited offset before we then revisit the same scope via convert_let (now with the wrong offset)
     const Def* get_var(std::string name) {
-        auto curr_scope = (*scopes_)[curr_loc_];
+        auto curr_scope = get_scope(curr_loc_);
 
-        while (name != curr_scope.var_name) {
-            if (curr_scope.parent_loc.depth == ROOT_SCOPE_DEPTH) {
+        while (name != curr_scope->var_name) {
+            if (curr_scope->parent_loc.depth == ROOT_SCOPE_DEPTH) {
                 for (auto [var_name, def] : root_scope_)
                     if (var_name == name) return def;
                 break;
             }
-            curr_scope = (*scopes_)[curr_scope.parent_loc];
+            curr_scope = get_scope(curr_scope->parent_loc);
         }
 
-        if (name == curr_scope.var_name) return curr_scope.def;
+        if (name == curr_scope->var_name) return curr_scope->def;
 
         return nullptr;
     }
@@ -280,8 +278,8 @@ private:
     };
 
     void set_scope() {
-        (*scopes_)[curr_loc_].loc = curr_loc_;
-        curr_scope_               = &(*scopes_)[curr_loc_];
+        get_scope(curr_loc_)->loc = curr_loc_;
+        curr_scope_               = get_scope(curr_loc_);
     }
 
     void enter_scope(NodeFFI node) {
@@ -315,9 +313,11 @@ private:
     typedef std::unordered_map<Loc, Scope, LocHash> Scopes;
     Scopes* scopes_;
 
+    Scope* get_scope(Loc loc) { return &(*scopes_)[loc]; }
+
     void set_scopes(size_t rec_expr_idx) {
         scopes_     = &scopes_map_[rec_expr_idx];
-        curr_scope_ = &(*scopes_)[curr_loc_];
+        curr_scope_ = get_scope(curr_loc_);
     }
 
     // For every RecExprFFI keyed by its idx, we store a structure representing its scopes.

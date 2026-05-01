@@ -279,8 +279,9 @@ const Def* SlottedRewrite::convert_root(uint32_t id, NodeFFI node) {
         auto con       = def->as_mut<Lam>();
         auto con_node  = get_node(MimKind::Con, node.children[2]);
         auto var_scope = get_node(MimKind::Scope, con_node.children[1]);
-        auto filter    = get_def(var_scope.children[0]);
-        auto body      = get_def(var_scope.children[1]);
+        enter_scope(var_scope);
+        auto filter = get_def(var_scope.children[0]);
+        auto body   = get_def(var_scope.children[1]);
         if (filter && body) {
             con->set_filter(filter);
             con->set_body(body);
@@ -288,33 +289,36 @@ const Def* SlottedRewrite::convert_root(uint32_t id, NodeFFI node) {
             con->set_filter(false);
         }
         if (is_extern == "extern") con->externalize();
+        exit_scope(var_scope, true);
     }
 
     return def;
 }
 
-// TODO: Probably need some enter_ exit_scope calls without visit counting here and
-// in convert_root and convert_con as well to update position.
 // (let $name (scope <definition> <expression>))
 const Def* SlottedRewrite::convert_let(uint32_t id, NodeFFI node) {
     auto name_scope = get_node(MimKind::Scope, node.children[0]);
-    auto def        = get_def(id);
-    auto expr       = get_def(name_scope.children[1]);
+    enter_scope(name_scope);
+    auto def  = get_def(id);
+    auto expr = get_def(name_scope.children[1]);
 
     if (def->isa<Lam>()) {
         auto con       = def->as_mut<Lam>();
         auto con_node  = get_node(MimKind::Con, name_scope.children[0]);
         auto var_scope = get_node(MimKind::Scope, con_node.children[1]);
-        auto filter    = get_def(var_scope.children[0]);
-        auto body      = get_def(var_scope.children[1]);
+        enter_scope(var_scope);
+        auto filter = get_def(var_scope.children[0]);
+        auto body   = get_def(var_scope.children[1]);
         if (filter && body) {
             con->set_filter(filter);
             con->set_body(body);
         } else {
             con->set_filter(false);
         }
+        exit_scope(var_scope, true);
     }
 
+    exit_scope(name_scope, true);
     return expr;
 }
 
