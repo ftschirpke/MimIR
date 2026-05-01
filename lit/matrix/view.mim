@@ -17,23 +17,26 @@ plugin core;
 plugin matrix;
 plugin mem;
 
-let d = 2;
+let d = 4;
 let n = 1024;
+let s = %core.nat.mul (n, d);
 let a = 0;
 let T = I32;
 
-con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «d; Nat», Nat, Nat]] =
-    let (mem, ptr) = %mem.alloc («n; T», a) mem;
+con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «2; Nat», Nat, Nat]] =
+    let (mem, ptr) = %mem.alloc («s; T», a) mem;
     let dims = %matrix.dims (n, d);
     let strides = %matrix.dims (1, n);
-    let mat = %matrix.create_mat (%matrix.MemMat (T, a, n)) dims strides ptr;
-    let val_ptr = mat (%core.idx n 0 4, ff);
+    let mat = %matrix.create_mat (%matrix.MemMat (T, a, s)) dims strides ptr;
+    let idx = (%core.idx n 0 4, 3_4);
+    // let idx = %matrix.dims (4, 3);
+    let val_ptr = mat idx;
     let (mem, val) = %mem.load (mem, val_ptr);
     let shape = %matrix.shape dims;
     let size = %matrix.size dims;
 
     let strides2 = %matrix.dims (2, (1, 1), (4, 4));
-    let test = %matrix.tile mat dims strides2;
-    // let test = 333;
+    // let test = %matrix.tile mat dims strides2;
+    let test = 333;
     return (mem, val, shape, size, test);
 
