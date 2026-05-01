@@ -69,7 +69,7 @@ private:
     const Def* init_axm(uint32_t id, NodeFFI node);
     const Def* init_root(uint32_t id, NodeFFI node);
     const Def* init_let(uint32_t id, NodeFFI node);
-    const Def* init_con(uint32_t id, NodeFFI node, bool root = false);
+    const Def* init_con(uint32_t id, NodeFFI node);
 
     // Performs a bottom-up traverse of each RecExprFFI and
     // creates a Def in the new_world() for every node.
@@ -210,7 +210,7 @@ private:
     // our current location and the name of the variable whose definition
     // we need and we can simply look it up in the scopes_ map.
     struct Loc {
-        size_t depth;
+        int32_t depth;
         size_t offset;
 
         bool operator==(const Loc& other) const noexcept { return depth == other.depth && offset == other.offset; }
@@ -230,7 +230,10 @@ private:
 
     void reset_loc() {
         depth_visits_ = {};
-        curr_loc_     = {0, 0};
+        // We start at Loc {depth: -1, offset: 0} because
+        // enter_scope increments the depth and we want
+        // the first scope to begin at (0,0) rather than (1,0)
+        curr_loc_ = {-1, 0};
     }
 
     // Keeps track of how often we have visited each scope-depth
@@ -283,12 +286,14 @@ private:
 
     void exit_scope(NodeFFI node, bool dbg = false, bool ignore_visit = false) {
         if (node.kind == MimKind::Scope) {
-            curr_loc_.depth--;
+            if (dbg) std::cout << "Exiting: " << curr_scope_->to_str() << "\n";
+
             if (!ignore_visit) depth_visits_[curr_loc_.depth]++;
+
+            curr_loc_.depth--;
             curr_loc_.offset = depth_visits_[curr_loc_.depth];
 
             set_scope();
-            if (dbg) std::cout << "Exiting: " << curr_scope_->to_str() << "\n";
         }
     }
 

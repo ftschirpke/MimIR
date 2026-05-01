@@ -143,7 +143,7 @@ const Def* SlottedRewrite::init_root(uint32_t id, NodeFFI node) {
     const Def* def = nullptr;
     auto def_node  = get_node_unsafe(node.children[2]);
     if (def_node.kind == MimKind::Con) {
-        def = init_con(node.children[2], def_node, true);
+        def = init_con(node.children[2], def_node);
         def->set(name);
         register_var(name, def, true);
     }
@@ -154,14 +154,15 @@ const Def* SlottedRewrite::init_root(uint32_t id, NodeFFI node) {
 
 // (let $name (scope <definition> <expression>))
 const Def* SlottedRewrite::init_let(uint32_t id, NodeFFI node) {
-    if (DEBUG) std::cout << "init - current node(" << id << "): " << node_ffi_str(node).c_str() << " - ";
+    if (DEBUG) std::cout << "init - current node(" << id << "): " << node_ffi_str(node).c_str() << " - \n";
 
     auto name       = get_slot(id);
     auto name_scope = get_node(MimKind::Scope, node.children[0]);
 
-    if (DEBUG) std::cout << "\n";
     const Def* def = nullptr;
     auto def_node  = get_node_unsafe(name_scope.children[0]);
+
+    enter_scope(name_scope, DEBUG);
     if (def_node.kind == MimKind::Con) {
         def = init_con(name_scope.children[0], def_node);
         def->set(name);
@@ -171,13 +172,14 @@ const Def* SlottedRewrite::init_let(uint32_t id, NodeFFI node) {
         def->set(name);
         register_var(name, def);
     }
+    exit_scope(name_scope, DEBUG, true);
 
     if (DEBUG) std::cout << def << "\n";
     return nullptr;
 }
 
 // (con <domain-type> $var-name (scope <filter> <body>))
-const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node, bool root) {
+const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node) {
     if (DEBUG) std::cout << "init - current node(" << id << "): " << node_ffi_str(node).c_str() << " - \n";
     auto domain_type = convert(node.children[0], true, false);
     auto new_con     = new_world().mut_con(domain_type);
@@ -187,22 +189,15 @@ const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node, bool root) {
     var->set(var_name);
 
     // When we are calling on init_con() via init_let(), we have to manually adjust our location for
-    // the additional scope introduced by the continuations' variable.
+    // the additional scopes introduced by the let binder and the continuations' variable.
     // This is because location changes are made via enter_/exit_scope() in init() where init() calls
     // on init_let() which calls on init_con() so the location changes from init() are not being applied.
-    //
-    // We also don't want a location adjustment if init_con() is called from init_root() (root == true)
-    // because we treat the root/global scope separately from these scope locations.
-    if (root) {
-        register_var(var_name, var);
-    } else {
-        auto var_scope = get_node(MimKind::Scope, node.children[1]);
-        enter_scope(var_scope, DEBUG);
-        register_var(var_name, var);
-        // We set ignore_visit=true to ensure that this visit won't be
-        // counted twice in depth_visits_ (init() will already count it once)
-        exit_scope(var_scope, DEBUG, true);
-    }
+    auto var_scope = get_node(MimKind::Scope, node.children[1]);
+    enter_scope(var_scope, DEBUG);
+    register_var(var_name, var);
+    // We set ignore_visit=true to ensure that this visit won't be
+    // counted twice in depth_visits_ (init() will already count it once)
+    exit_scope(var_scope, DEBUG, true);
 
     return new_con;
 }
