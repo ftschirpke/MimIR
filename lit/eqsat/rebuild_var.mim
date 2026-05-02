@@ -4,13 +4,6 @@
 plugin core;
 plugin eqsat;
 
-// TODO: 'nx' only gets defined in one of the two anonymous
-// continuations so var lookup for 'nx' fails in slotted.
-// - If we stop tracking emitted lambdas via the 'done' set
-//   in emit_lam, it works but then the loop test case breaks
-//   because the definition of loop is self-referential and
-//   we enter an endless loop if we don't track 'done'.
-
 fun extern _impl(): %eqsat.Impl =
     return %eqsat.__IMPL__;
 

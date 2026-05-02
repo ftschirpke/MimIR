@@ -106,7 +106,13 @@ public:
     std::string prepare();
     void emit_epilogue(Lam*);
     void finalize();
-    void emit_lam(Lam* lam, MutSet& done);
+
+    using LamSet = std::set<Lam*>;
+    LamSet next_lams(Lam* lam);
+    bool is_reachable(Lam* to_check, Lam* curr_lam, LamSet& visited);
+    bool is_recursive(Lam* lam);
+
+    void emit_lam(Lam* lam, LamSet& rec_lams);
     std::string emit_var(BB& bb, const Def* var, const Def* type, bool meta_var = false);
     std::string emit_head(BB& bb, Lam* lam, bool as_binding = false);
     std::string emit_cons_type(BB& bb, View<const Def*> ops);
@@ -262,13 +268,45 @@ void Emitter::finalize() {
     else if (Axm::isa<mim::plug::eqsat::Rules>(root()->ret_dom()))
         return;
 
-    MutSet done;
+    LamSet rec_lams;
     auto root_lam = nest().root()->mut()->as_mut<Lam>();
-    emit_lam(root_lam, done);
+    emit_lam(root_lam, rec_lams);
 }
 
-void Emitter::emit_lam(Lam* lam, MutSet& done) {
-    done.emplace(lam);
+std::set<Lam*> Emitter::next_lams(Lam* lam) {
+    std::set<Lam*> next_lams;
+    for (auto op : lam->deps()) {
+        for (auto mut : op->local_muts())
+            if (auto next = nest()[mut]) {
+                if (auto next_lam = next->mut()->isa<Lam>()) next_lams.insert(next_lam);
+            }
+    }
+    return next_lams;
+}
+
+bool Emitter::is_reachable(Lam* target_lam, Lam* curr_lam, std::set<Lam*>& visited) {
+    if (!visited.insert(curr_lam).second) return false;
+    for (auto next_lam : next_lams(curr_lam)) {
+        if (next_lam == target_lam) return true;
+        if (is_reachable(target_lam, next_lam, visited)) return true;
+    }
+
+    return false;
+}
+
+bool Emitter::is_recursive(Lam* lam) {
+    std::set<Lam*> visited;
+    for (auto next_lam : next_lams(lam)) {
+        if (next_lam == lam) return true;
+        if (is_reachable(lam, next_lam, visited)) return true;
+    }
+
+    return false;
+}
+
+void Emitter::emit_lam(Lam* lam, LamSet& rec_lams) {
+    // We do not want to re-emit recursively defined lambdas because it would result in an endless loop
+    if (is_recursive(lam)) rec_lams.emplace(lam);
     assert(lam2bb_.contains(lam));
     auto& bb = lam2bb_[lam];
 
@@ -278,16 +316,12 @@ void Emitter::emit_lam(Lam* lam, MutSet& done) {
     ++tab;
     // Keeps count of parentheses opened by let-bindings that need to be closed later on
     size_t unclosed_parens = 0;
-    for (auto op : lam->deps()) {
-        for (auto mut : op->local_muts())
-            if (auto next = nest()[mut]) {
-                if (next->mut()->isa<Lam>() && !done.contains(next->mut())) {
-                    auto next_lam = next->mut()->as_mut<Lam>();
-                    emit_lam(next_lam, done);
-                    // A lambda-binding in slotted opens two parentheses, one for the let-node and one for its scope
-                    unclosed_parens += slotted() ? 2 : 1;
-                }
-            }
+    for (auto next_lam : next_lams(lam)) {
+        if (!rec_lams.contains(next_lam)) {
+            emit_lam(next_lam, rec_lams);
+            // A lambda-binding in slotted opens two parentheses, one for the let-node and one for its scope
+            unclosed_parens += slotted() ? 2 : 1;
+        }
     }
 
     for (auto& term : bb.body()) {
