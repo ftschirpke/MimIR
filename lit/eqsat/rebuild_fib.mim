@@ -4,11 +4,6 @@
 plugin core;
 plugin eqsat;
 
-// TODO: The filter %core.pe.is_closed n refers to (var $n) before it has
-// been bound or rather it gets bound in the body which doesn't bind the filter.
-// - Option 1: Never use vars in filters but always substitute for definitions
-// - Option 2: Create let-bindings for filters as well (probably tedious)
-
 fun extern _impl(): %eqsat.Impl =
     return %eqsat.__IMPL__;
 

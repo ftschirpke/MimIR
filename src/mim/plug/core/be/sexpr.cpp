@@ -98,6 +98,7 @@ public:
         : Super(world, "sexpr_emitter", ostream) {
         slotted_       = slotted;
         slots_enabled_ = true;
+        vars_enabled_  = true;
     }
 
     bool is_valid(std::string_view s) { return !s.empty(); }
@@ -136,6 +137,14 @@ private:
     // and no var uses are wrapped in var nodes.
     bool toggle_slots() { return slots_enabled_ = !slots_enabled_; }
     bool slots_enabled_;
+
+    // Temporarily disable the use of variables while emitting.
+    // While vars are disabled every var use will be printed via
+    // the vars' definition instead of its name.
+    // This is useful to print a term via emit_bb() with the assumption
+    // that no variables have been bound. (i.e. for printing a lambda filter)
+    bool toggle_vars() { return vars_enabled_ = !vars_enabled_; }
+    bool vars_enabled_;
 
     std::ostringstream decls_;
     std::ostringstream func_decls_;
@@ -453,7 +462,13 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool as_binding) {
     if (slotted()) {
         ++tab;
         tab.lnprint(os, "(scope");
+        // Occasionally a filter will refer to variables that will only
+        // start to get bound in the body of the lambda and we therefore
+        // disable the use of variables for the duration of emitting the filter
+        // in order to print every variable use by its definition instead.
+        toggle_vars();
         print(os, "{}", emit_bb(bb, lam->filter()));
+        toggle_vars();
     } else {
         print(os, "{}", emit_bb(bb, lam->filter()));
     }
@@ -644,18 +659,9 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
     for (auto op : def->ops())
         if (auto op_val = emit_bb(bb, op); !op_val.empty()) op_vals.push_back(op_val);
 
-    if (def->sym().empty()) {
-        tab.lnprint(os, "({}", node_name);
+    if (!def->sym().empty() && vars_enabled_) {
+        // 1) Emits a let-binding to the lambda body() and then emits the name of the binding in the lambda tail()
 
-        if (slotted() && variadic)
-            print(os, "{}", emit_cons(op_vals));
-        else
-            for (auto op_val : op_vals)
-                print(os, "{}", op_val);
-
-        print(os, ")");
-
-    } else {
         bb.assign(tab, slotted(), id(def), [&](Tab tab, auto& os) {
             ++tab;
             tab.lnprint(os, "({}", node_name);
@@ -673,6 +679,19 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
             --tab;
         });
         tab.lnprint(os, "{}", id(def, true));
+
+    } else {
+        // 2) Directly emits the definition of a Def to the lambda tail()
+
+        tab.lnprint(os, "({}", node_name);
+
+        if (slotted() && variadic)
+            print(os, "{}", emit_cons(op_vals));
+        else
+            for (auto op_val : op_vals)
+                print(os, "{}", op_val);
+
+        print(os, ")");
     }
 
     return os.str();
