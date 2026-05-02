@@ -22,10 +22,6 @@ void SlottedRewrite::start() {
 
     if (DEBUG) std::cout << pretty_ffi(rec_exprs, 80).c_str() << "\n";
 
-    // TODO:
-    // - Scoped bindings
-    // - Polymorphic lambdas
-
     init(rec_exprs, InitStage::Declarations);
     init(rec_exprs, InitStage::Bindings);
     convert(rec_exprs);
@@ -177,6 +173,8 @@ const Def* SlottedRewrite::init_let(uint32_t id, NodeFFI node) {
 // (con <domain-type> $var-name (scope <filter> <body>))
 const Def* SlottedRewrite::init_con(uint32_t id, NodeFFI node) {
     if (DEBUG) std::cout << "init - current node(" << id << "): " << node_ffi_str(node).c_str() << " - \n";
+
+    // TODO: Polymorphic lambdas
     auto domain_type = convert(node.children[0], true);
     auto new_con     = new_world().mut_con(domain_type);
 
