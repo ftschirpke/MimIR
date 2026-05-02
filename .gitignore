@@ -12,6 +12,7 @@ __pycache__
 .DS_Store
 .cache
 build*/
+.venv/
 compile_commands.json
 vgcore.*
 assets/*.aux
