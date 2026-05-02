@@ -63,12 +63,8 @@ private:
     // Performs a top-down traverse of each RecExprFFI
     // and creates and stores all bindings with their definitions.
     // Lambdas are created without their bodies in this phase.
-    enum class InitStage {
-        Declarations,
-        Bindings,
-    };
-    void init(rust::Vec<RecExprFFI> rec_exprs, InitStage stage);
-    const Def* init(uint32_t id, InitStage stage);
+    void init(rust::Vec<RecExprFFI> rec_exprs);
+    const Def* init(uint32_t id);
     const Def* init_axm(uint32_t id, NodeFFI node);
     const Def* init_root(uint32_t id, NodeFFI node);
     const Def* init_let(uint32_t id, NodeFFI node);
@@ -138,8 +134,8 @@ private:
         return def;
     }
 
-    void register_var(std::string name, const Def* def, bool root = false) {
-        if (root) {
+    void register_var(std::string name, const Def* def) {
+        if (curr_loc_.depth == ROOT_SCOPE_DEPTH) {
             root_scope_.insert({name, def});
             if (DEBUG_SCOPES) std::cout << "Registering: " << name << "-" << def << " in root scope\n";
         } else {
@@ -149,8 +145,6 @@ private:
         }
     }
 
-    // TODO: Doesn't quite work yet because exit_scope in convert increments
-    // the visited offset before we then revisit the same scope via convert_let (now with the wrong offset)
     const Def* get_var(std::string name) {
         auto curr_scope = get_scope(curr_loc_);
 
