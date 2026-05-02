@@ -1,0 +1,18 @@
+// RUN: %mim %s -o -
+plugin core;
+plugin eqsat;
+
+fun extern _impl(): %eqsat.Impl =
+    return %eqsat.slotted;
+
+rule foo (pat_a: Nat) : (%core.nat.mul ((%core.nat.mul (pat_a, 4)), 4)) => (%core.nat.mul (pat_a, 16));
+rule bar (pat_a: Nat) : (%core.nat.add ((%core.nat.add (pat_a, 2)), 2)) => (%core.nat.add (pat_a, 4));
+
+fun extern _rules(): %eqsat.Rules =
+    return (%eqsat.rules (foo, bar));
+
+con extern mul_lit_nat [a: Nat, return : Cn Nat] =
+    return (%core.nat.mul ((%core.nat.mul (a, 4)), 4));
+
+con extern add_lit_nat [a: Nat, return : Cn Nat] =
+    return (%core.nat.add ((%core.nat.add (a, 2)), 2));

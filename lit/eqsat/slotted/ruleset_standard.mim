@@ -1,0 +1,14 @@
+// RUN: %mim %s -o -
+plugin core;
+plugin eqsat;
+
+fun extern _impl(): %eqsat.Impl =
+    return %eqsat.slotted;
+
+fun extern _rulesets(): %eqsat.Ruleset =
+    return (%eqsat.rulesets (
+        %eqsat.standard,
+    ));
+
+con extern and_lit [return : Cn Bool] =
+    return (%core.bit2.and_ 0 (%core.icmp.uge (tt, ff), %core.icmp.ug (tt, ff)));

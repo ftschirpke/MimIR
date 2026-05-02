@@ -1,6 +1,11 @@
-// RUN: %mim %s -o -
+// RUN: sed 's/__IMPL__/egg/' %s | %mim %s -o -
+// RUN: sed 's/__IMPL__/slotted/' %s | %mim %s -o -
+
 plugin core;
 plugin eqsat;
+
+fun extern _impl(): %eqsat.Impl =
+    return %eqsat.__IMPL__;
 
 fun pow(a b: I32): I32 =
     con pow_cont(v: I32) =

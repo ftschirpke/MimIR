@@ -1,8 +1,13 @@
-// RUN: %mim %s -o -
+// RUN: sed 's/__IMPL__/egg/' %s | %mim %s -o -
+// RUN: sed 's/__IMPL__/slotted/' %s | %mim %s -o -
+
 plugin core;
 plugin math;
 plugin mem;
 // plugin eqsat;
+
+// fun extern _impl(): %eqsat.Impl =
+//     return %eqsat.__IMPL__;
 
 // TODO: 'Num' is a Sigma type variable with projections 'T' and 'add'
 // but these are not emitted when the type of %bug.Arr (referencing 'Num')

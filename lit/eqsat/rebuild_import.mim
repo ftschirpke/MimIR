@@ -1,6 +1,11 @@
-// RUN: %mim %s -o -
+// RUN: sed 's/__IMPL__/egg/' %s | %mim %s -o -
+// RUN: sed 's/__IMPL__/slotted/' %s | %mim %s -o -
+
 plugin core;
 plugin eqsat;
+
+fun extern _impl(): %eqsat.Impl =
+    return %eqsat.__IMPL__;
 
 ccon atoi[%mem.M 0, %mem.Ptr («⊤:Nat; I8», 0), Cn [%mem.M 0, I32]];
 

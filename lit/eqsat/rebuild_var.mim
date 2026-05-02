@@ -1,6 +1,12 @@
-// RUN: %mim %s -o -
+// RUN: sed 's/__IMPL__/egg/' %s | %mim %s -o -
+// RUN: sed 's/__IMPL__/slotted/' %s | %mim %s -o -
+
 plugin core;
 plugin eqsat;
+
+// TODO: slotted doesn't work yet
+fun extern _impl(): %eqsat.Impl =
+    return %eqsat.__IMPL__;
 
 fun extern test(cond: Bool, a: «3; I32», b: «3; I32», i: Idx 3): «3; I32» =
     con nx(phi: «3; I32») = return ins(phi, i, 23I32);

@@ -1,6 +1,12 @@
-// RUN: %mim %s -o -
+// RUN: sed 's/__IMPL__/egg/' %s | %mim %s -o -
+// RUN: sed 's/__IMPL__/slotted/' %s | %mim %s -o -
+
 plugin core;
 plugin eqsat;
+
+// TODO: slotted doesn't work yet
+fun extern _impl(): %eqsat.Impl =
+    return %eqsat.__IMPL__;
 
 con seq {A: *} (n: Nat) (body: [Cn A] → Cn A) (exit: Cn A) (acc: A)@tt =
     head(0, acc)
