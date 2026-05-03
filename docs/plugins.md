@@ -8,6 +8,12 @@ A plugin generally consists of two halves with the same name: a `<plugin>.mim` f
 
 Plugin names may only contain letters, digits, and underscores, and are limited to 8 characters.
 
+## Plugin Registry
+
+The [MimIR Plugin Registry](https://github.com/mimir/plugins) is the central hub for discovering, sharing, and maintaining third-party MimIR plugins.
+The registry lists available plugins and provides guidance on how to find and use them.
+If you've created a plugin you'd like to share with the community, please consider submitting it to the registry.
+
 ## Create a New In-Tree Plugin
 
 Create a new in-tree plugin `foobar` based on the [demo](@ref demo) plugin:

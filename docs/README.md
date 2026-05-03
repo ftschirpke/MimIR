@@ -65,6 +65,8 @@ For the rest of the documentation, start with the [Command-Line Reference](@ref 
 Declare new types, operations, and normalizers in a single `.mim` file.
 C++ provides the heavy lifting: optimization, lowering, and code generation.
 
+Explore the [Plugin Registry](https://github.com/mimir/plugins) to discover and share community-developed plugins.
+
 ### 🌊 Sea of Nodes
 
 MimIR uses a [sea-of-nodes-style](https://github.com/SeaOfNodes) program graph and extends it to the Calculus of Constructions with higher-order functions, polymorphism, and dependent types.
