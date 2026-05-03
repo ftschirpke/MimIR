@@ -19,7 +19,7 @@ If you've created a plugin you'd like to share with the community, please consid
 Create a new in-tree plugin `foobar` based on the [demo](@ref demo) plugin:
 
 ```sh
-./scripts/new_plugin.sh foobar
+./scripts/new_plugin.py foobar
 ```
 
 The script also supports `-h`/`--help` and prints the same usage text when called incorrectly.
@@ -39,7 +39,7 @@ The generated files are:
 To create a self-contained third-party plugin repository in `extra/`, use:
 
 ```sh
-./scripts/new_plugin.sh foobar --extra
+./scripts/new_plugin.py foobar --extra
 ```
 
 This creates `extra/<plugin>/` with:
@@ -50,8 +50,12 @@ This creates `extra/<plugin>/` with:
 - `src/normalizers.cpp`
 - `include/mim/plug/<plugin>/<plugin>.h`
 - `lit/const.mim`
+- `.github/workflows/{linux,macos,windows}.yml` — GitHub Actions CI/CD workflows
 
-In `--extra` mode, the script also initializes a new Git repository for the plugin.
+In `--extra` mode, the script also:
+- Initializes a new Git repository for the plugin
+- Generates GitHub Actions workflows that automatically build and test the plugin against the main MimIR repository
+- Patches workflow configurations to clone the main repository as the parent and the plugin as a submodule in `extra/<plugin>`
 
 ### Third-Party Plugin Discovery
 
