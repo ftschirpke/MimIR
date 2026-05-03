@@ -110,7 +110,7 @@ public:
 
     using LamSet = std::set<Lam*>;
     LamSet next_lams(Lam* lam);
-    bool is_reachable(Lam* to_check, Lam* curr_lam, LamSet& visited);
+    bool is_reachable(Lam* target_lam, Lam* curr_lam, LamSet& visited);
     bool is_recursive(Lam* lam);
 
     void emit_lam(Lam* lam, LamSet& rec_lams);
@@ -128,7 +128,7 @@ private:
     std::string flatten(std::string term);
 
     // Determines whether the symbolic expression should
-    // be emitted in a style that is compatible with slotted-egg.
+    // be emitted in a style that is compatible with slotted-egraphs.
     bool slotted() const { return slotted_; }
     bool slotted_;
 
