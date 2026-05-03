@@ -196,6 +196,8 @@ def main():
         sys.exit(1)
 
     root = Path(__file__).parent.parent.resolve()
+    import os
+    os.chdir(root)
 
     if args.extra:
         create_extra_plugin(root, args.plugin_name)

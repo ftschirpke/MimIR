@@ -151,6 +151,8 @@ def main():
         sys.exit(1)
 
     root = Path(__file__).parent.parent.resolve()
+    import os
+    os.chdir(root)
     extract_plugin(root, args.plugin_name)
 
 
