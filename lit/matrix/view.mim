@@ -14,6 +14,7 @@
 // ... execute block with %matrix.ThreadMat (4, 2) (1, 16) -> %matrix.Idx (4, 2)  i.e. multi-dimensional indices
 
 plugin core;
+plugin gpu;
 plugin matrix;
 plugin mem;
 
@@ -86,4 +87,31 @@ fun extern divide1 () =
     // EXPECTATION => ((2, 2), (2, 3)) : ((4, 1), (2, 8))
     return div;
 
+fun extern idx_map1 (mem: %gpu.SharedM) =
+    let layout = %matrix.layout (4, 8) (8, 1);
+    let idx = 14_32;
+
+    let (mem, mat_idx) = %matrix.idx_1DtoND layout (mem, idx);
+    // EXPECTATION => (1_4, 6_8)
+    return (mem, mat_idx);
+
+fun extern idx_map2 (mem: %gpu.SharedM) =
+    let layout = %matrix.layout ((2, 2), (2, 4)) ((1, 4), (2, 8));
+    let idx = 20_32;
+
+    let (mem, mat_idx) = %matrix.idx_1DtoND layout (mem, idx);
+    // EXPECTATION => ((0_2, 1_2), (0_2, 2_4))
+    //             => ((ff, tt), (ff, 2_4))
+    return (mem, mat_idx);
+
+fun extern tile1 (mem: %mem.M 0) =
+    let layout = %matrix.layout (4, 8) (1, 4);
+    let tiler = %matrix.layout (2, 4) (1, 1);
+
+    let (mem, ptr) = %mem.alloc («32; I32», 0) mem;
+    let mat = %matrix.create_mat (%matrix.MemMat (I32, 0, 32)) layout ptr;
+    let mat = %matrix.tile mat tiler mem;
+
+    let tiled_layout = %matrix.get_layout mat;
+    return tiled_layout;
 

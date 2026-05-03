@@ -61,6 +61,10 @@ lam %matrix.layout_dims (layout: %matrix.Layout) : %matrix.Dims = (layout#n, lay
 /// Extracts only the strides from a %%matrix.Layout
 lam %matrix.layout_strides (layout: %matrix.Layout) : %matrix.Dims = (layout#n, layout#ms, layout#strides);
 ///
+/// ### %%matrix.get_layout
+///
+lam %matrix.get_layout {layout: %matrix.Layout, T: *} (mat: %matrix.Mat layout T) = layout;
+///
 /// ### %%matrix.shape
 ///
 /// Creates a 1-dimensional tuple of the dimensions of the matrix by flattening the given %%matrix.Dims object.
@@ -129,7 +133,9 @@ lam %matrix.get {layout: %matrix.Layout, T: *} (mat: %matrix.Mat layout T)
 /// ### %%matrix.idx_1DtoND
 ///
 /// Converts one-dimensional index to multi-dimensional equivalent for given dimensions and strides.
-axm %matrix.idx_1DtoND: [dims: %matrix.Dims] → [strides: %matrix.Dims] → Idx (%matrix.size dims) → %matrix.MatIdx dims;
+axm %matrix.idx_1DtoND: {a: Nat} → [layout: %matrix.Layout]
+                      → let dims = %matrix.layout_dims layout;
+                        [%mem.M a, Idx (%matrix.size dims)] → [%mem.M a, %matrix.MatIdx dims], normalize_idx_1DtoND;
 // TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_NDto1D
@@ -155,7 +161,6 @@ lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (layout: %matrix.Layo
         let idx1d = %matrix.idx_NDto1D idx (%matrix.layout_strides layout);
         let idx1d = %core.bitcast (Idx Opts#n) idx1d; // TODO: remove - this should be checked via refly
         Opts#extract (data, idx1d);
-// TODO: ensure dims and strides have equal n and ms, and are of size Opts#n
 // TODO: validate strides
 ///
 /// ### Layout Operations
@@ -168,8 +173,31 @@ axm %matrix.layout_zip_divide: %matrix.Layout → %matrix.Layout → «2; %matri
 /// ### %%matrix.tile
 ///
 /// Tiles a %%matrix.Mat given the dimensions and strides of the tiles.
-// axm %matrix.tile: {dims strides: %matrix.Dims, T: *}
-//                 → %matrix.Mat dims strides T → [tdims: %matrix.Dims] → [tstrides: %matrix.Dims]
-//                 → let (outer_dims, outer_strides) = %matrix.layout_zip_divide (dims, strides) (tdims, tstrides);
-//                   %matrix.Mat outer_dims outer_strides (%matrix.Mat tdims tstrides T), normalize_tile;
+// axm %matrix.tile: {layout: %matrix.Layout, T: *}
+//                 → %matrix.Mat layout T → [tiler: %matrix.Layout]
+//                 → let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
+//                   %matrix.Mat outer_layout (%matrix.Mat tile_layout T), normalize_tile;
 // TODO: ensure dims and strides have equal n and ms - and size must match matrix
+lam %matrix.tile {layout: %matrix.Layout, T: *, a: Nat}
+                 (mat: %matrix.Mat layout T) (tiler: %matrix.Layout) (mem: %mem.M a) =
+    let layout_size = %matrix.size (%matrix.layout_dims layout);
+    let tiler_compl = %matrix.layout_complement tiler layout_size;
+    let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
+
+    lm (outer_idx: %matrix.MatIdx (%matrix.layout_dims outer_layout)) : %matrix.Mat tile_layout T =
+        lm (inner_idx: %matrix.MatIdx (%matrix.layout_dims tile_layout)) : T =
+            let outer_idx = %matrix.idx_NDto1D outer_idx (%matrix.layout_strides outer_layout);
+            let (mem, outer_idx) = %matrix.idx_1DtoND tiler_compl (mem, outer_idx);
+            let outer_off = %matrix.idx_NDto1D outer_idx (%matrix.layout_strides tiler_compl);
+
+            let inner_idx = %matrix.idx_NDto1D inner_idx (%matrix.layout_strides tile_layout);
+            let (mem, inner_idx) = %matrix.idx_1DtoND tiler (mem, inner_idx);
+            let inner_idx = %matrix.idx_NDto1D inner_idx (%matrix.layout_strides tiler);
+
+            let IdxT = Idx (%matrix.size (%matrix.layout_dims layout));
+            let outer_idx = %core.bitcast IdxT outer_idx;
+            let inner_idx = %core.bitcast IdxT inner_idx;
+            let idx = %core.wrap.add 0 (outer_idx, inner_idx);
+
+            mat idx;
+
