@@ -14,9 +14,13 @@ plugin refly;
 /// ### %%matrix.Dims
 ///
 /// Matrix dimensions are potentially nested arrays of natural numbers
-/// The dimension array (4, (3, 2), 5) identifies 4x6x5 dimensions with the 2 blocks of 3 in the second dimension.
+/// The dimension tuple (4, (3, 2), 5) identifies 4x6x5 dimensions with the 2 blocks of 3 in the second dimension.
 let %matrix.Dims = [n: Nat, ms: «n; Nat», d: «i: n; «j: ms#i; Nat»»];
-
+///
+/// ### %%matrix.Layout
+///
+/// Matrix layouts consist of dimensions of strides
+let %matrix.Layout = [n: Nat, ms: «n; Nat», dims: «i: n; «j: ms#i; Nat»», strides: «i: n; «j: ms#i; Nat»»];
 ///
 /// ### %%matrix.MatIdx
 ///
@@ -29,7 +33,7 @@ lam %matrix.MatIdx (dims: %matrix.Dims) =
 ///
 /// TODO: description
 /// NOTE: this current implementation is intuitive and useful, but nothing prevents the user to fake the strides
-lam %matrix.Mat (dims: %matrix.Dims) (strides: %matrix.Dims) (T: *) : * = %matrix.MatIdx dims → T;
+lam %matrix.Mat (layout: %matrix.Layout) (T: *) : * = %matrix.MatIdx (layout#n, layout#ms, layout#dims) → T;
 // other idea: axm %matrix.Mat: [dims: %matrix.Dims] → [strides: %matrix.Dims] → [T: *] → *;
 // TODO: ensure dims and strides have equal n and ms
 ///
@@ -37,12 +41,29 @@ lam %matrix.Mat (dims: %matrix.Dims) (strides: %matrix.Dims) (T: *) : * = %matri
 ///
 /// ### %%matrix.dims
 ///
-/// Creates a %%matrix.Dims object from just its third component - the actual (nested) array
+/// Creates a %%matrix.Dims object from just its third component - the actual (nested) tuple
 lam %matrix.dims {n: Nat, ms: «n; Nat»} (dims: «i: n; «j: ms#i; Nat»») : %matrix.Dims = (n, ms, dims);
+///
+/// ### %%matrix.layout
+///
+/// Creates a %%matrix.Layout tuple from just the integer tuples for dimensions and strides
+lam %matrix.layout {n: Nat, ms: «n; Nat»} (dims: «i: n; «j: ms#i; Nat»») (strides: «i: n; «j: ms#i; Nat»»)
+                 : %matrix.Layout =
+    (n, ms, dims, strides);
+///
+/// ### %%matrix.layout_dims
+///
+/// Extracts only the dimensions from a %%matrix.Layout
+lam %matrix.layout_dims (layout: %matrix.Layout) : %matrix.Dims = (layout#n, layout#ms, layout#dims);
+///
+/// ### %%matrix.layout_strides
+///
+/// Extracts only the strides from a %%matrix.Layout
+lam %matrix.layout_strides (layout: %matrix.Layout) : %matrix.Dims = (layout#n, layout#ms, layout#strides);
 ///
 /// ### %%matrix.shape
 ///
-/// Creates a 1-dimensional array of the dimensions of the matrix by flattening the given %%matrix.Dims object.
+/// Creates a 1-dimensional tuple of the dimensions of the matrix by flattening the given %%matrix.Dims object.
 /// In this context, flatten means multiplying the elements of the nested arrays into one number each
 lam %matrix.shape (dims: %matrix.Dims) : «dims#n; Nat» =
     let (n, ms, dims) = dims;
@@ -101,8 +122,8 @@ lam %matrix.size (dims: %matrix.Dims) : Nat =
 /// Retrieve an element from a %%matrix.Mat
 // axm %matrix.get: {dims: %matrix.Dims, strides: %matrix.Dims, T: *} → %matrix.Mat dims strides T
 //                → %matrix.MatIdx dims → T, normalize_get;
-lam %matrix.get {dims: %matrix.Dims, strides: %matrix.Dims, T: *} (mat: %matrix.Mat dims strides T)
-                (idx: %matrix.MatIdx dims) : T = mat idx;
+lam %matrix.get {layout: %matrix.Layout, T: *} (mat: %matrix.Mat layout T)
+                (idx: %matrix.MatIdx (%matrix.layout_dims layout)) : T = mat idx;
 // TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_1DtoND
@@ -117,55 +138,6 @@ axm %matrix.idx_1DtoND: [dims: %matrix.Dims] → [strides: %matrix.Dims] → Idx
 /// Effectively, this is only a (potentially nested) dot-product of the multi-dimensional index with the strides.
 axm %matrix.idx_NDto1D: {dims: %matrix.Dims} → %matrix.MatIdx dims → [strides: %matrix.Dims]
                       → Idx (%matrix.size dims), normalize_idx_NDto1D;
-// lam %matrix.idx_NDto1D {dims: %matrix.Dims} (idx: %matrix.MatIdx dims) (strides: %matrix.Dims) =
-// lam %matrix.idx_NDto1D {dims: %matrix.Dims} (idx: %matrix.Dims) (strides: %matrix.Dims) =
-//     let s = %matrix.size dims;
-//     // let IdxT = Idx s;
-//
-//     let (n, ms, dims) = dims;
-//     let (_, _, strides) = strides; // TODO: check that first two match n and ms
-//     let (_, _, idx) = idx;
-//
-//     let start_value = %core.idx s 0 0;
-//     dot_product_outer_loop (0, start_value)
-//     where
-//         lam dot_product_outer_loop (ni: Nat, outer_acc: Idx s) : Idx s =
-//             let next_ni = %core.nat.add (ni, 1);
-//             let nend = %core.ncmp.e (next_ni, n);
-//             let nidx = %core.idx n 0 ni;
-//             let m = ms#nidx;
-//             let inner_val = dot_product_inner_loop (0, start_value)
-//             where
-//                 lam dot_product_inner_loop (mi: Nat, inner_acc: Idx s) : Idx s =
-//                     let next_mi = %core.nat.add (mi, 1);
-//                     let mend = %core.ncmp.e (next_mi, m);
-//                     let midx = %core.idx m 0 mi;
-//
-//                     // let nidx = %core.idx n 0 0;
-//                     // let m = ms#nidx;
-//                     // let midx = %core.idx m 0 0;
-//
-//                     // let val_idx = idx#nidx#midx;
-//                     // let val_stride = strides#nidx#midx;
-//                     // let val_idx = %core.bitcast (Idx s) val_idx;
-//                     // let val_stride = %core.bitcast (Idx s) val_stride;
-//
-//                     // let val = %core.wrap.mul 0 (val_idx, val_stride);
-//                     let val_idx = idx#nidx#midx;
-//                     let val = %core.bitcast (Idx s) val_idx;
-//
-//                     let new_inner_acc = %core.wrap.add 0 (inner_acc, val);
-//                     (dot_product_inner_loop, return_acc)#mend (next_mi, new_inner_acc)
-//                     where
-//                         lam return_acc (idx: Nat, acc: Idx s) : Idx s = acc;
-//                     end;
-//             end;
-//             let new_outer_acc = %core.wrap.add 0 (outer_acc, inner_val);
-//             (dot_product_outer_loop, return_acc)#nend (next_ni, new_outer_acc)
-//             where
-//                 lam return_acc (idx: Nat, acc: Idx s) : Idx s = acc;
-//             end;
-//     end;
 // TODO: ensure dims and strides have equal n and ms
 
 let %matrix.MatrixCreateOptions = [n: Nat, DataT: *, OutT: *, extract: [DataT, Idx n] → OutT];
@@ -177,26 +149,27 @@ lam %matrix.MemMat (T: *, a n: Nat) : %matrix.MatrixCreateOptions =
 /// ### %%matrix.create_mat
 ///
 /// Create a %%matrix.Mat
-lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (dims: %matrix.Dims) (strides: %matrix.Dims)
-                       (data: Opts#DataT) : %matrix.Mat dims strides (Opts#OutT) =
-    lm (idx: %matrix.MatIdx dims) : Opts#OutT =
-        let idx1d = %matrix.idx_NDto1D idx strides;
+lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (layout: %matrix.Layout)
+                       (data: Opts#DataT) : %matrix.Mat layout (Opts#OutT) =
+    lm (idx: %matrix.MatIdx (%matrix.layout_dims layout)) : Opts#OutT =
+        let idx1d = %matrix.idx_NDto1D idx (%matrix.layout_strides layout);
         let idx1d = %core.bitcast (Idx Opts#n) idx1d; // TODO: remove - this should be checked via refly
         Opts#extract (data, idx1d);
 // TODO: ensure dims and strides have equal n and ms, and are of size Opts#n
 // TODO: validate strides
 ///
-/// ### %%matrix.tiling_dims
+/// ### Layout Operations
 ///
-/// Produces the dimensions of the resulting "matrix of tiles" given the dimensions and strides of the original matrix
-/// and the dimensions and strides of the tiles.
-axm %matrix.tiling_dims: «2; %matrix.Dims» → «2; %matrix.Dims» → «2; %matrix.Dims», normalize_tiling_dims;
+/// Operations on matrix layouts.
+axm %matrix.layout_complement: %matrix.Layout → Nat → %matrix.Layout, normalize_layout_complement;
+axm %matrix.layout_composition: %matrix.Layout → %matrix.Layout → %matrix.Layout, normalize_layout_composition;
+axm %matrix.layout_zip_divide: %matrix.Layout → %matrix.Layout → «2; %matrix.Layout», normalize_layout_zip_divide;
 ///
 /// ### %%matrix.tile
 ///
 /// Tiles a %%matrix.Mat given the dimensions and strides of the tiles.
-axm %matrix.tile: {dims strides: %matrix.Dims, T: *}
-                → %matrix.Mat dims strides T → [tdims: %matrix.Dims] → [tstrides: %matrix.Dims]
-                → let (outer_dims, outer_strides) = %matrix.tiling_dims (dims, strides) (tdims, tstrides);
-                  %matrix.Mat outer_dims outer_strides (%matrix.Mat tdims tstrides T), normalize_tile;
+// axm %matrix.tile: {dims strides: %matrix.Dims, T: *}
+//                 → %matrix.Mat dims strides T → [tdims: %matrix.Dims] → [tstrides: %matrix.Dims]
+//                 → let (outer_dims, outer_strides) = %matrix.layout_zip_divide (dims, strides) (tdims, tstrides);
+//                   %matrix.Mat outer_dims outer_strides (%matrix.Mat tdims tstrides T), normalize_tile;
 // TODO: ensure dims and strides have equal n and ms - and size must match matrix
