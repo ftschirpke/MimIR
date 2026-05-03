@@ -25,18 +25,65 @@ let T = I32;
 
 con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «2; Nat», Nat, Nat]] =
     let (mem, ptr) = %mem.alloc («s; T», a) mem;
-    let dims = %matrix.dims (n, d);
-    let strides = %matrix.dims (1, n);
-    let mat = %matrix.create_mat (%matrix.MemMat (T, a, s)) dims strides ptr;
+    let layout = %matrix.layout (n, d) (1, n);
+    let mat = %matrix.create_mat (%matrix.MemMat (T, a, s)) layout ptr;
     let idx = (%core.idx n 0 4, 3_4);
     // let idx = %matrix.dims (4, 3);
     let val_ptr = mat idx;
     let (mem, val) = %mem.load (mem, val_ptr);
+    let dims = %matrix.layout_dims layout;
     let shape = %matrix.shape dims;
     let size = %matrix.size dims;
 
-    let strides2 = %matrix.dims (2, (1, 1), (4, 4));
-    // let test = %matrix.tile mat dims strides2;
     let test = 333;
     return (mem, val, shape, size, test);
+
+fun extern complement1 () =
+    let layout = %matrix.layout (2, 4) (1, 6);
+    let size = 24;
+
+    let compl = %matrix.layout_complement layout size;
+    // EXPECTATION => (3) : (2)
+    return compl;
+
+fun extern complement2 () =
+    let layout = %matrix.layout (2, 2) (1, 6);
+    let size = 24;
+
+    let compl = %matrix.layout_complement layout size;
+    // EXPECTATION => (3, 2) : (2, 12)
+    return compl;
+
+fun extern composition1 () =
+    let layout1 = %matrix.layout (6, 2) (8, 2);
+    let layout2 = %matrix.layout (4, 3) (3, 1);
+
+    let comp = %matrix.layout_composition layout1 layout2;
+    // EXPECTATION => ((2, 2), 3) : ((24, 2), 8)
+    return comp;
+
+fun extern composition2 () =
+    let layout1 = %matrix.layout 20 2;
+    let layout2 = %matrix.layout (5, 4) (4, 1);
+
+    let comp = %matrix.layout_composition layout1 layout2;
+    // EXPECTATION => (5, 4) : (8, 2)
+    return comp;
+
+fun extern composition3 () =
+    let layout1 = %matrix.layout (10, 2) (16, 4);
+    let layout2 = %matrix.layout (5, 4) (1, 5);
+
+    let comp = %matrix.layout_composition layout1 layout2;
+    // EXPECTATION => (5, (2, 2)) : (16, (80, 4))
+    return comp;
+
+fun extern divide1 () =
+    let layout = %matrix.layout (4, 2, 3) (2, 1, 8);
+    let tiler = %matrix.layout 4 2;
+
+    let div = %matrix.layout_zip_divide layout tiler;
+    // EXPECTATION => ((2, 2), (2, 3)) : ((4, 1), (2, 8))
+    return div;
+
 
