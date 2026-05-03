@@ -3,8 +3,6 @@
 #include <sstream>
 
 #include <mim/plug/core/be/sexpr.h>
-// TODO: update to extra path
-// #include <mim/plug/eqsat/eqsat.h>
 #include <mim/plug/math/math.h>
 
 #include "mim/def.h"
@@ -275,9 +273,10 @@ void Emitter::finalize() {
     // We don't want to emit config lams that define which rules should be emitted.
     // The rules in the body of such a lambda will be emitted into decls_
     // via emit_bb() but we don't want to emit the lambda itself.
-    // TODO: uncomment after include
-    // else if (Axm::isa<mim::plug::eqsat::Rules>(root()->ret_dom()))
-    //     return;
+    // We can't do this with Axm::isa because 'eqsat' is an out-of-tree plugin
+    // that isn't guaranteed to have been cloned so we can't include its header file.
+    else if (root()->ret_dom()->sym().str() == "%eqsat.Rules")
+        return;
 
     LamSet rec_lams;
     auto root_lam = nest().root()->mut()->as_mut<Lam>();
@@ -408,7 +407,7 @@ std::string Emitter::emit_var(BB& bb, const Def* var, const Def* type, bool meta
             tab.lnprint(os, "(var {}", id(var));
             size_t i = 0;
             for (auto proj : projs)
-                print(os, " {}", emit_var(bb, proj, type->proj(i++)));
+                print(os, "{}", emit_var(bb, proj, type->proj(i++)));
             ++tab;
             tab.lnprint(os, "{})", emit_type(bb, type));
             --tab;
