@@ -68,7 +68,7 @@ If the plugin repository also contains `lit/*.mim` tests, they are picked up aut
 To move an existing in-tree plugin into `extra/foobar`, use:
 
 ```sh
-./scripts/extract_plugin.sh foobar
+./scripts/extract_plugin.py foobar
 ```
 
 This moves:
@@ -77,7 +77,13 @@ This moves:
 - `include/mim/plug/<plugin>/` into `extra/<plugin>/include/...`
 - `lit/<plugin>/` into `extra/<plugin>/lit/`
 
-It also rewrites the extracted `CMakeLists.txt` for out-of-tree use and removes the plugin from the in-tree plugin list so it is picked up through `extra/` instead.
+It also:
+
+- Rewrites the extracted `CMakeLists.txt` for out-of-tree use
+- Removes the plugin from the in-tree plugin list so it is picked up through `extra/` instead
+- Generates GitHub Actions workflows that automatically build and test the extracted plugin against the main MimIR repository
+
+The extracted plugin is staged with `git add` but not committed, allowing you to review the changes before committing.
 
 ## Standalone Third-Party Builds
 
