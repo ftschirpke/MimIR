@@ -32,27 +32,31 @@ using Backends = absl::btree_map<std::string, void (*)(World&, std::ostream&)>;
 struct Version {
     int major;
     int minor;
+    const char* suffix;
     const char* hash;
 
-    /// Ignores hash.
+    /// Compares major/minor/suffix, ignores hash.
     constexpr auto operator<=>(const Version& other) const noexcept {
-        return std::tie(major, minor) <=> std::tie(other.major, other.minor);
+        auto cmp = std::tie(major, minor) <=> std::tie(other.major, other.minor);
+        if (cmp != 0) return cmp;
+
+        return std::strcmp(suffix, other.suffix) <=> 0;
     }
 
-    /// Ignores hash.
+    /// Compares major/minor/suffix, ignores hash.
     constexpr bool operator==(const Version& other) const noexcept {
-        return major == other.major && minor == other.minor;
+        return major == other.major && minor == other.minor && std::strcmp(suffix, other.suffix) == 0;
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Version& v) {
-        return os << v.major << '.' << v.minor << " (" << v.hash << ")";
+        return os << v.major << '.' << v.minor << v.suffix << " (" << v.hash << ")";
     }
 };
 
 extern "C" {
 
 #define MIM_VERSION \
-    Version { MIM_VER_MAJOR, MIM_VER_MINOR, MIM_GIT_HASH }
+    Version { MIM_VER_MAJOR, MIM_VER_MINOR, MIM_VER_SUFFIX, MIM_GIT_HASH }
 
 /// Basic info and registration function pointer to be returned from a specific plugin.
 /// Use Driver to load such a plugin.
