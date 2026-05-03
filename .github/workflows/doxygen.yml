@@ -50,11 +50,15 @@ jobs:
       - name: Build
         run: cmake --build ${{github.workspace}}/build -v --target docs
 
-      - name: Deploy
-        uses: peaceiris/actions-gh-pages@v4
-        if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Checkout docs repository
+        if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')) }}
+        uses: actions/checkout@v4
         with:
-          deploy_key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
-          external_repository: mimir/mimir.github.io
-          publish_branch: master
-          publish_dir: ${{github.workspace}}/build/html
+          repository: mimir/mimir.github.io
+          ref: master
+          path: site
+          ssh-key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
+
+      - name: Deploy
+        if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')) }}
+        run: python3 docs/deploy.py

@@ -57,8 +57,14 @@ $extrastylesheet
   <!--END PROJECT_LOGO-->
   <!--BEGIN PROJECT_NAME-->
   <td id="projectalign">
-   <div id="projectname">$projectname<!--BEGIN PROJECT_NUMBER--><span id="projectnumber">&#160;$projectnumber</span><!--END PROJECT_NUMBER-->
-   </div>
+   <div id="projectname">$projectname<!--BEGIN PROJECT_NUMBER-->
+    <div id="projectnumber" class="version-switcher" data-manifest="$relpath^versions.json">
+     <button class="version-switcher__button" type="button" aria-expanded="false" aria-haspopup="true">$projectnumber</button>
+     <div class="version-switcher__menu" hidden></div>
+    </div>
+    <script type="text/javascript" src="$relpath^version-switcher.js"></script>
+   <!--END PROJECT_NUMBER-->
+    </div>
    <!--BEGIN PROJECT_BRIEF--><div id="projectbrief">$projectbrief</div><!--END PROJECT_BRIEF-->
   </td>
   <!--END PROJECT_NAME-->
