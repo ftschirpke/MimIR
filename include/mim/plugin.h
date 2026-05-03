@@ -25,12 +25,30 @@ using Backends = absl::btree_map<std::string, void (*)(World&, std::ostream&)>;
 ///@}
 
 extern "C" {
+
+struct Version {
+    int major;
+    int minor;
+    const char* hash;
+
+    /// Ignores hash.
+    constexpr auto operator<=>(const Version& other) const noexcept {
+        return std::tie(major, minor) <=> std::tie(other.major, other.minor);
+    }
+
+    /// Ignores hash.
+    constexpr bool operator==(const Version& other) const noexcept {
+        return major == other.major && minor == other.minor;
+    }
+};
+
 /// Basic info and registration function pointer to be returned from a specific plugin.
 /// Use Driver to load such a plugin.
 struct Plugin {
     using Handle = std::unique_ptr<void, void (*)(void*)>;
 
-    const char* plugin_name; ///< Name of the Plugin.
+    const char* name; ///< Name of the Plugin.
+    Version version;  ///< Verion of the Plugin.
 
     /// Callback for registering the mapping from axm ids to normalizer functions in the given @p normalizers map.
     void (*register_normalizers)(Normalizers&);
@@ -39,6 +57,9 @@ struct Plugin {
     /// Callback for registering the mapping from backend names to emission functions in the given @p backends map.
     void (*register_backends)(Backends&);
 };
+
+#define MIM_VERSION \
+    Version { MIM_VER_MAJOR, MIM_VER_MINOR, MIM_GIT_HASH }
 
 /// @name Plugin Interface
 /// @see Plugin
