@@ -26,9 +26,9 @@ jobs:
       - name: Install valgrind, lit, llvm, and psutil
         run: |
           sudo apt-get update
-          sudo apt-get install g++-14 valgrind llvm-20-tools clang-20
+          sudo apt-get install gcc-14 g++-14 valgrind llvm-21-tools clang-21
           sudo pip install lit psutil
-          sudo ln -s /usr/bin/FileCheck-20 /usr/local/bin/FileCheck
+          sudo ln -s /usr/bin/FileCheck-21 /usr/local/bin/FileCheck
 
       - name: Setup ccache
         uses: Chocobo1/setup-ccache-action@v1
@@ -40,7 +40,7 @@ jobs:
       - name: Configure Debug
         if: matrix.build-type == 'Debug'
         run: |
-          CC=clang-20 CXX=clang++-20 cmake -B ${{github.workspace}}/build                                                                              \
+          CC=clang-21 CXX=clang++-21 cmake -B ${{github.workspace}}/build                                                                              \
             -DCMAKE_BUILD_TYPE=${{matrix.build-type}}                                                                                                  \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined,leak,bounds -fsanitize-address-use-after-scope -fno-omit-frame-pointer -fno-sanitize=vptr" \
             -DBUILD_TESTING=ON                                                                                                                         \

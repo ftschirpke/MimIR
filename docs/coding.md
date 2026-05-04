@@ -48,7 +48,7 @@ The following CMake switches are available:
 In addition to the provided [submodules](https://github.com/mimir/mimir/tree/master/submodules), you will need:
 
 - a recent version of [CMake](https://cmake.org/),
-- a C++20-compatible C++ compiler, and
+- a C++23-compatible C++ compiler, and
 - optionally [LLVM](https://llvm.org/).
 
 Mim emits LLVM IR, but it does _not_ link against LLVM.

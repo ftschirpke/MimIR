@@ -47,7 +47,7 @@ target_sources(libmim
 )
 
 set_target_properties(libmim PROPERTIES PREFIX "")
-target_compile_features(libmim PUBLIC cxx_std_20)
+target_compile_features(libmim PUBLIC cxx_std_23)
 
 if(MSVC)
     target_compile_options(libmim PUBLIC /utf-8 /wd4146 /wd4245)
