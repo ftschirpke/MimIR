@@ -1,6 +1,29 @@
 find_package(Python3 COMPONENTS Interpreter)
 set(PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
 
+find_program(MIM_FILECHECK_DEFAULT
+    NAMES
+        FileCheck
+        FileCheck-24
+        FileCheck-23
+        FileCheck-22
+        FileCheck-21
+        FileCheck-20
+        FileCheck-19
+        FileCheck-18
+        FileCheck-17
+        FileCheck-16
+        FileCheck-15
+        FileCheck-14
+    DOC "FileCheck executable used by lit tests"
+)
+set(MIM_FILECHECK "${MIM_FILECHECK_DEFAULT}" CACHE STRING "FileCheck command used by lit tests.")
+mark_as_advanced(MIM_FILECHECK_DEFAULT)
+
+if(NOT MIM_FILECHECK)
+    message(FATAL_ERROR "Could not find FileCheck. Set MIM_FILECHECK to the FileCheck executable used by lit tests.")
+endif()
+
 if(MIM_LIT_WITH_VALGRIND)
     set(LIT_VALGRIND_COMMANDLINE "${MEMORYCHECK_COMMAND} ${VALGRIND_COMMAND_OPTIONS} ")
 else()
