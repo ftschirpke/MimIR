@@ -26,7 +26,9 @@ void debug_print(const Def* lvl, const Def* def) {
     auto& world = def->world();
     auto level  = Log::Level::Debug;
     if (auto l = Lit::isa(lvl))
-        level = (nat_t)Log::Level::Error <= *l && *l <= (nat_t)Log::Level::Debug ? (Log::Level)*l : Log::Level::Debug;
+        level = std::to_underlying(Log::Level::Error) <= *l && *l <= std::to_underlying(Log::Level::Debug)
+                  ? static_cast<Log::Level>(*l)
+                  : Log::Level::Debug;
     world.log().log(level, __FILE__, __LINE__, "{}debug_print: {}{}", rang::fg::yellow, def, rang::fg::reset);
     world.log().log(level, def->loc(), "def : {}", def);
     world.log().log(level, def->loc(), "id  : {}", def->unique_name());

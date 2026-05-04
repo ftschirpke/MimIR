@@ -46,7 +46,7 @@ using VMode = std::variant<Mode, nat_t, const Def*>;
 inline const Def* mode(World& w, VMode m) {
     if (auto def = std::get_if<const Def*>(&m)) return *def;
     if (auto nat = std::get_if<nat_t>(&m)) return w.lit_nat(*nat);
-    return w.lit_nat((nat_t)std::get<Mode>(m));
+    return w.lit_nat(std::to_underlying(std::get<Mode>(m)));
 }
 ///@}
 

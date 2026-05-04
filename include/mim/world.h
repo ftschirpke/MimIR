@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include <absl/container/btree_map.h>
 #include <fe/arena.h>
@@ -583,7 +584,7 @@ public:
     const Def* implicit_app(const Def* callee, E arg)
         requires std::is_enum_v<E> && std::is_same_v<std::underlying_type_t<E>, nat_t>
     {
-        return implicit_app<Normalize>(callee, lit_nat((nat_t)arg));
+        return implicit_app<Normalize>(callee, lit_nat(std::to_underlying(arg)));
     }
     ///@}
 

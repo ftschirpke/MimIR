@@ -34,8 +34,7 @@ const Def* Eval::augment_lam(Lam* lam, Lam* f, Lam* f_diff) {
     }
     // TODO: better fix (another pass as analysis?)
     // TODO: handle open functions
-    if (Lam::isa_basicblock(lam) || lam->sym().view().find("ret") != std::string::npos
-        || lam->sym().view().find("_cont") != std::string::npos) {
+    if (Lam::isa_basicblock(lam) || lam->sym().view().contains("ret") || lam->sym().view().contains("_cont")) {
         // A open continuation behaves the same as return:
         // ```
         // cont: Cn[X]
