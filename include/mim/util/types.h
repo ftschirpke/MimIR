@@ -35,9 +35,6 @@ MIM_8_16_32_64(CODE1)
 using u1 = bool;
 #if defined(__STDCPP_FLOAT16_T__)
 using f16                           = std::float16_t;
-inline constexpr bool has_float16   = true;
-#else
-inline constexpr bool has_float16   = false;
 #endif
 using f32                           = float;
 using f64                           = double;
@@ -88,7 +85,7 @@ MIM_8_16_32_64(CODE4)
 constexpr size_t operator""_s(unsigned long long int i) { return size_t(i); }
 constexpr nat_t operator""_n(unsigned long long int i) { return nat_t(i); }
 #if defined(__STDCPP_FLOAT16_T__)
-inline f16 operator""_f16(long double d) { return f16(float(d)); }
+constexpr f16 operator""_f16(long double d) { return f16(d); }
 #endif
 constexpr f32 operator""_f32(long double d) { return f32(d); }
 constexpr f64 operator""_f64(long double d) { return f64(d); }
