@@ -53,7 +53,6 @@ def deploy_root(build_dir: Path, site_dir: Path) -> None:
             remove_path(child)
 
     copy_children(build_dir, site_dir)
-    ensure_version_switcher(site_dir)
 
 
 def deploy_version(build_dir: Path, site_dir: Path, version: str) -> None:
@@ -63,7 +62,6 @@ def deploy_version(build_dir: Path, site_dir: Path, version: str) -> None:
         remove_path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     copy_children(build_dir, target_dir)
-    ensure_version_switcher(target_dir)
 
 
 def natural_key(name: str) -> list[object]:
