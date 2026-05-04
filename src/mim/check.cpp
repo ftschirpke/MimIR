@@ -344,13 +344,13 @@ const Def* Lam::check(size_t i, const Def* def) {
 }
 
 const Def* Reform::check() {
-    auto t = infer(meta_type());
+    auto t = infer(dom());
     if (!Checker::alpha<Checker::Check>(t, type()))
         error(type()->loc(), "declared sort '{}' of rule type does not match inferred one '{}'", type(), t);
     return t;
 }
 
-const Def* Reform::infer(const Def* meta_type) { return meta_type->unfold_type(); }
+const Def* Reform::infer(const Def* dom) { return dom->unfold_type(); }
 
 const Def* Rule::check() {
     auto t1 = lhs()->type();

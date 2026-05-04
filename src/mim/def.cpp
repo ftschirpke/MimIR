@@ -321,7 +321,7 @@ const Def* Def::var_type() {
     if (auto sig  = isa<Sigma>()) return sig;
     if (auto arr  = isa<Arr  >()) return w.type_idx(arr ->arity()); // TODO shapes like (2, 3)
     if (auto pack = isa<Pack >()) return w.type_idx(pack->arity()); // TODO shapes like (2, 3)
-    if (auto rule = isa<Rule >()) return rule->type()->meta_type();
+    if (auto rule = isa<Rule >()) return rule->type()->dom();
     if (isa<Bound >()) return this;
     if (isa<Hole  >()) return nullptr;
     if (isa<Global>()) return nullptr;

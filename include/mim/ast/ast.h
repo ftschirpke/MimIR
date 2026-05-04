@@ -435,11 +435,11 @@ private:
 /// Reform (type of a rule) `Rule type`.
 class RuleExpr : public Expr {
 public:
-    RuleExpr(Loc loc, Ptr<Expr>&& meta_type)
+    RuleExpr(Loc loc, Ptr<Expr>&& dom)
         : Expr(loc)
-        , meta_type_(std::move(meta_type)) {}
+        , dom_(std::move(dom)) {}
 
-    const Expr* meta_type() const { return meta_type_.get(); }
+    const Expr* dom() const { return dom_.get(); }
 
     void bind(Scopes&) const override;
     std::ostream& stream(Tab&, std::ostream&) const override;
@@ -447,7 +447,7 @@ public:
 private:
     const Def* emit_(Emitter&) const override;
 
-    Ptr<Expr> meta_type_;
+    Ptr<Expr> dom_;
 };
 
 // union
@@ -1039,7 +1039,6 @@ private:
 /// rewrite rules
 /// rule (x:T, y:T) : x+y => y+x (when );
 /// all meta variables have to be introduced
-
 class RuleDecl : public ValDecl {
 public:
     RuleDecl(Loc loc, Dbg dbg, Ptr<Ptrn>&& var, Ptr<Expr>&& lhs, Ptr<Expr>&& rhs, Ptr<Expr>&& guard, bool is_normalizer)

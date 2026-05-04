@@ -431,8 +431,7 @@ Ptr<Expr> Parser::parse_type_expr() {
 Ptr<Expr> Parser::parse_rule_expr() {
     auto track = tracker();
     eat(Tag::K_Rule);
-    auto meta_type = parse_expr("meta type of rule", Prec::App);
-    return ptr<RuleExpr>(track, std::move(meta_type));
+    return ptr<RuleExpr>(track, parse_expr("domain of rule", Prec::App));
 }
 
 Ptr<Expr> Parser::parse_pi_expr() {
