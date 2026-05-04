@@ -1078,11 +1078,8 @@ private:
 
 class Import : public Node {
 public:
-    Import(Loc loc, Tok::Tag tag, Dbg dbg, Ptr<Module>&& module)
-        : Node(loc)
-        , dbg_(dbg)
-        , tag_(tag)
-        , module_(std::move(module)) {}
+    Import(Loc loc, Tok::Tag tag, Dbg dbg, Ptr<Module>&& module);
+    ~Import();
 
     Dbg dbg() const { return dbg_; }
     Tok::Tag tag() const { return tag_; }

@@ -11,6 +11,14 @@ AST::~AST() {
            && "please encounter any errors before destroying this class");
 }
 
+Import::Import(Loc loc, Tok::Tag tag, Dbg dbg, Ptr<Module>&& module)
+    : Node(loc)
+    , dbg_(dbg)
+    , tag_(tag)
+    , module_(std::move(module)) {}
+
+Import::~Import() = default;
+
 AnnexInfo* AST::name2annex(Dbg dbg, sub_t* sub_id) {
     if (!dbg || dbg.sym()[0] != '%') return nullptr;
 
