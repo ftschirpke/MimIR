@@ -32,9 +32,8 @@ con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «2; Nat», Nat, Nat]] =
     // let idx = %matrix.dims (4, 3);
     let (mem, val_ptr) = mat (mem, idx);
     let (mem, val) = %mem.load (mem, val_ptr);
-    let dims = %matrix.layout_dims layout;
-    let shape = %matrix.shape dims;
-    let size = %matrix.size dims;
+    let shape = %matrix.shape layout;
+    let size = %matrix.size layout;
 
     let test = 333;
     return (mem, val, shape, size, test);
@@ -110,14 +109,14 @@ lam tile {layout: %matrix.Layout}
     // let tiler_compl = %matrix.layout_complement tiler layout_size;
     let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
 
-    lm {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx (%matrix.layout_dims outer_layout))
+    lm {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx outer_layout)
      : [%mem.M outer_a, %matrix.Mat tile_layout (%mem.Ptr0 I32)] =
         // let outer_idx = %matrix.idx_NDto1D outer_idx (%matrix.layout_strides outer_layout);
         // let (outer_mem, outer_idx) = %matrix.idx_1DtoND tiler_compl (outer_mem, outer_idx);
         // let outer_off = %matrix.idx_NDto1D outer_idx (%matrix.layout_strides tiler_compl);
         (outer_mem, inner_mat)
         where
-            lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx (%matrix.layout_dims tile_layout))
+            lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx tile_layout)
               : [%mem.M a, %mem.Ptr0 I32] =
                 // let inner_idx = %matrix.idx_NDto1D inner_idx (%matrix.layout_strides tile_layout);
                 // let (mem, inner_idx) = %matrix.idx_1DtoND tiler (mem, inner_idx);
@@ -126,7 +125,7 @@ lam tile {layout: %matrix.Layout}
                 let outer_idx = 0_16;
                 let inner_idx = 0_16;
 
-                let IdxT = Idx (%matrix.size (%matrix.layout_dims layout));
+                let IdxT = Idx (%matrix.size layout);
                 // let IdxT = Idx 32;
                 let outer_idx = %core.bitcast IdxT outer_idx;
                 let inner_idx = %core.bitcast IdxT inner_idx;
