@@ -16,6 +16,11 @@ plugin refly;
 /// Matrix layouts consist of dimensions of strides
 let %matrix.Layout = [n: Nat, ms: «n; Nat», dims: «i: n; «j: ms#i; Nat»», strides: «i: n; «j: ms#i; Nat»»];
 ///
+/// ### %%matrix.Tiler
+///
+/// Matrix layouts consist of dimensions of strides
+let %matrix.Tiler = [n: Nat, tilers: «i: n; %matrix.Layout»];
+///
 /// ### %%matrix.MatIdx
 ///
 /// Matrix indices are potentially nested arrays of indices
@@ -39,6 +44,13 @@ lam %matrix.Mat (layout: %matrix.Layout) (T: *) : * =
 lam %matrix.layout {n: Nat, ms: «n; Nat»} (dims: «i: n; «j: ms#i; Nat»») (strides: «i: n; «j: ms#i; Nat»»)
                  : %matrix.Layout =
     (n, ms, dims, strides);
+///
+/// ### %%matrix.tiler
+///
+/// Creates a %%matrix.Tiler tuple from just the integer tuples for dimensions and strides
+lam %matrix.tiler (n: Nat) (tilers: «i: n; %matrix.Layout») : %matrix.Tiler = (n, tilers);
+lam %matrix.tiler1 (layout: %matrix.Layout) : %matrix.Tiler = (1, layout);
+lam %matrix.tiler2 (l1: %matrix.Layout) (l2: %matrix.Layout) : %matrix.Tiler = (2, (l1, l2));
 ///
 /// ### %%matrix.shape
 ///
@@ -113,36 +125,37 @@ lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (layout: %matrix.Layo
 /// Operations on matrix layouts.
 axm %matrix.layout_complement: %matrix.Layout → Nat → %matrix.Layout, normalize_layout_complement;
 axm %matrix.layout_composition: %matrix.Layout → %matrix.Layout → %matrix.Layout, normalize_layout_composition;
-axm %matrix.layout_zip_divide: %matrix.Layout → %matrix.Layout → «2; %matrix.Layout», normalize_layout_zip_divide;
+axm %matrix.layout_zip_divide: %matrix.Layout → %matrix.Tiler
+                             → «2; %matrix.Layout», normalize_layout_zip_divide;
 ///
 /// ### %%matrix.tile
 ///
 /// Tiles a %%matrix.Mat given the dimensions and strides of the tiles.
-lam %matrix.tile {layout: %matrix.Layout, T: *}
-                 (mat: %matrix.Mat layout T) (tiler: %matrix.Layout) =
-    let layout_size = %matrix.size layout;
-    let tiler_compl = %matrix.layout_complement tiler layout_size;
-    let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
-
-    lm {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx outer_layout)
-     : [%mem.M outer_a, %matrix.Mat tile_layout T] =
-        let outer_idx = %matrix.idx_NDto1D outer_layout outer_idx;
-        let (outer_mem, outer_idx) = %matrix.idx_1DtoND tiler_compl (outer_mem, outer_idx);
-        let outer_off = %matrix.idx_NDto1D tiler_compl outer_idx;
-        (outer_mem, inner_mat)
-        where
-            lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx tile_layout)
-              : [%mem.M a, T] =
-                let inner_idx = %matrix.idx_NDto1D tile_layout inner_idx;
-                let (mem, inner_idx) = %matrix.idx_1DtoND tiler (mem, inner_idx);
-                let inner_idx = %matrix.idx_NDto1D tiler inner_idx;
-
-                let IdxT = Idx (%matrix.size layout);
-                let outer_idx = %core.bitcast IdxT outer_idx;
-                let inner_idx = %core.bitcast IdxT inner_idx;
-                let idx = %core.wrap.add 0 (outer_idx, inner_idx);
-
-                let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
-                mat (mem, idx);
-        end;
+// lam %matrix.tile {layout: %matrix.Layout, T: *}
+//                  (mat: %matrix.Mat layout T) (n: Nat, tiler: «n; %matrix.Layout») =
+//     let layout_size = %matrix.size layout;
+//     let tiler_compl = <i: n; %matrix.layout_complement tiler#i layout_size>;
+//     let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout (n, tiler);
+// 
+//     lm {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx outer_layout)
+//      : [%mem.M outer_a, %matrix.Mat tile_layout T] =
+//         let outer_idx = %matrix.idx_NDto1D outer_layout outer_idx;
+//         let (outer_mem, outer_idx) = %matrix.idx_1DtoND tiler_compl (outer_mem, outer_idx);
+//         let outer_off = %matrix.idx_NDto1D tiler_compl outer_idx;
+//         (outer_mem, inner_mat)
+//         where
+//             lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx tile_layout)
+//               : [%mem.M a, T] =
+//                 let inner_idx = %matrix.idx_NDto1D tile_layout inner_idx;
+//                 let (mem, inner_idx) = %matrix.idx_1DtoND tiler (mem, inner_idx);
+//                 let inner_idx = %matrix.idx_NDto1D tiler inner_idx;
+// 
+//                 let IdxT = Idx (%matrix.size layout);
+//                 let outer_idx = %core.bitcast IdxT outer_idx;
+//                 let inner_idx = %core.bitcast IdxT inner_idx;
+//                 let idx = %core.wrap.add 0 (outer_idx, inner_idx);
+// 
+//                 let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
+//                 mat (mem, idx);
+//         end;
 
