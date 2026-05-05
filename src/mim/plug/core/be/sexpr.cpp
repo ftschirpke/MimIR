@@ -295,7 +295,9 @@ std::set<Lam*> Emitter::next_lams(Lam* lam) {
 void Emitter::emit_lam(Lam* lam, LamSet& rec_lams) {
     // We do not want to re-emit recursively defined lambdas because it would result in an endless loop
     auto lam_node = nest()[lam];
-    if (lam_node->is_recursive()) rec_lams.emplace(lam);
+    // TODO: pow in rebuild_pow.mim should be recursive
+    // but is neither marked as directly or mutually recursive.
+    if (lam_node->is_directly_recursive() || lam_node->is_mutually_recursive()) rec_lams.emplace(lam);
     assert(lam2bb_.contains(lam));
     auto& bb = lam2bb_[lam];
 
@@ -307,7 +309,6 @@ void Emitter::emit_lam(Lam* lam, LamSet& rec_lams) {
     int unclosed_parens = 0;
     for (auto next_lam : next_lams(lam)) {
         if (!rec_lams.contains(next_lam)) {
-            std::cout << "emit_lam(" << next_lam << ")\n";
             emit_lam(next_lam, rec_lams);
             // A lambda-binding in slotted opens two parentheses, one for the let-node and one for its scope
             unclosed_parens += slotted() ? 2 : 1;
