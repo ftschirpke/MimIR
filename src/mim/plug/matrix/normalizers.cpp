@@ -486,7 +486,7 @@ namespace plug::matrix {
 const Def* normalize_size(const Def* type, const Def* _, const Def* arg) {
     auto& world = type->world();
 
-    auto [dims_n, dims_ms, dims_def] = arg->projs<3>();
+    auto [dims_n, dims_ms, dims_def, __] = arg->projs<4>();
 
     auto dims_tup = tuple_from_def(dims_def);
     if (!dims_tup) return {};
@@ -533,30 +533,19 @@ const Def* normalize_idx_1DtoND(const Def* type, const Def* callee, const Def* a
 const Def* normalize_idx_NDto1D(const Def* type, const Def* callee, const Def* arg) {
     auto& world = type->world();
 
-    auto [strides_n_def, strides_ms_def, strides_tup] = arg->projs<3>();
-
-    auto strides_n_lit = Lit::isa(strides_n_def);
-    if (!strides_n_lit) return {};
-    auto strides_n = strides_n_lit.value();
-
-    auto strides_ms_opt = extract_ms(strides_n, strides_ms_def);
-    if (!strides_ms_opt) return {};
-    auto strides_ms = strides_ms_opt.value();
+    auto nd_idx = arg;
 
     auto callee_app = callee->isa<App>();
     assert(callee_app);
-    auto [dims, nd_idx]                      = callee_app->uncurry_args<2>();
-    auto [dims_n_def, dims_ms_def, dims_tup] = dims->projs<3>();
+    auto [n_def, ms_def, dims_def, strides_def] = callee_app->arg()->projs<4>();
 
-    auto dims_n_lit = Lit::isa(dims_n_def);
-    if (!dims_n_lit) return {};
-    auto dims_n = dims_n_lit.value();
+    auto n_lit = Lit::isa(n_def);
+    if (!n_lit) return {};
+    auto n = n_lit.value();
 
-    auto dims_ms_opt = extract_ms(dims_n, dims_ms_def);
-    if (!dims_ms_opt) return {};
-    auto& dims_ms = dims_ms_opt.value();
-
-    if (dims_n != strides_n || dims_ms != strides_ms) error("Dimensions and strides must align in size.");
+    auto ms_opt = extract_ms(n, ms_def);
+    if (!ms_opt) return {};
+    auto& ms = ms_opt.value();
 
     auto s = Idx::isa_lit(type);
     if (!s) return {};
@@ -565,9 +554,9 @@ const Def* normalize_idx_NDto1D(const Def* type, const Def* callee, const Def* a
     auto add               = world.call(core::wrap::add, world.lit_nat_0());
     auto nat_bitcast       = world.call<core::bitcast>(world.type_idx(size));
     const Def* dot_product = static_cast<const Def*>(world.lit_idx(size, 0));
-    for (size_t i = 0; i < strides_n; ++i) {
-        for (size_t j = 0; j < strides_ms[i]; ++j) {
-            auto stride      = world.app(nat_bitcast, strides_tup->proj(i)->proj(j));
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < ms[i]; ++j) {
+            auto stride      = world.app(nat_bitcast, strides_def->proj(i)->proj(j));
             auto idx_bitcast = world.call<core::bitcast>(world.type_idx(size));
             auto idx         = world.app(idx_bitcast, nd_idx->proj(i)->proj(j));
             auto mul         = world.call(core::wrap::mul, world.lit_nat_0());
