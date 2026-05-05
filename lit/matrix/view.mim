@@ -30,7 +30,7 @@ con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «2; Nat», Nat, Nat]] =
     let mat = %matrix.create_mat (%matrix.MemMat (T, a, s)) layout ptr;
     let idx = (%core.idx n 0 4, 3_4);
     // let idx = %matrix.dims (4, 3);
-    let val_ptr = mat idx;
+    let (mem, val_ptr) = mat (mem, idx);
     let (mem, val) = %mem.load (mem, val_ptr);
     let dims = %matrix.layout_dims layout;
     let shape = %matrix.shape dims;
@@ -104,14 +104,72 @@ fun extern idx_map2 (mem: %gpu.SharedM) =
     //             => ((ff, tt), (ff, 2_4))
     return (mem, mat_idx);
 
+lam tile {layout: %matrix.Layout}
+         (mat: %matrix.Mat layout (%mem.Ptr0 I32)) (tiler: %matrix.Layout) =
+    // let layout_size = %matrix.size (%matrix.layout_dims layout);
+    // let tiler_compl = %matrix.layout_complement tiler layout_size;
+    let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
+
+    lm {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx (%matrix.layout_dims outer_layout))
+     : [%mem.M outer_a, %matrix.Mat tile_layout (%mem.Ptr0 I32)] =
+        // let outer_idx = %matrix.idx_NDto1D outer_idx (%matrix.layout_strides outer_layout);
+        // let (outer_mem, outer_idx) = %matrix.idx_1DtoND tiler_compl (outer_mem, outer_idx);
+        // let outer_off = %matrix.idx_NDto1D outer_idx (%matrix.layout_strides tiler_compl);
+        (outer_mem, inner_mat)
+        where
+            lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx (%matrix.layout_dims tile_layout))
+              : [%mem.M a, %mem.Ptr0 I32] =
+                // let inner_idx = %matrix.idx_NDto1D inner_idx (%matrix.layout_strides tile_layout);
+                // let (mem, inner_idx) = %matrix.idx_1DtoND tiler (mem, inner_idx);
+                // let inner_idx = %matrix.idx_NDto1D inner_idx (%matrix.layout_strides tiler);
+
+                let outer_idx = 0_16;
+                let inner_idx = 0_16;
+
+                let IdxT = Idx (%matrix.size (%matrix.layout_dims layout));
+                // let IdxT = Idx 32;
+                let outer_idx = %core.bitcast IdxT outer_idx;
+                let inner_idx = %core.bitcast IdxT inner_idx;
+                let idx = %core.wrap.add 0 (outer_idx, inner_idx);
+
+                // let idx = 0_32;
+
+                let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
+                mat (mem, idx);
+        end;
+
 fun extern tile1 (mem: %mem.M 0) =
     let layout = %matrix.layout (4, 8) (1, 4);
     let tiler = %matrix.layout (2, 4) (1, 1);
 
     let (mem, ptr) = %mem.alloc («32; I32», 0) mem;
     let mat = %matrix.create_mat (%matrix.MemMat (I32, 0, 32)) layout ptr;
-    let mat = %matrix.tile mat tiler mem;
-
-    let tiled_layout = %matrix.get_layout mat;
-    return tiled_layout;
+//     let mat = %matrix.tile@(layout, %mem.Ptr0 I32) mat tiler;
+    let mat = tile@layout mat tiler;
+// 
+//     // let (mem, test) = %matrix.idx_1DtoND layout (mem, 0_32);
+// 
+//     // let test =  %matrix.MatIdx (%matrix.layout_dims tile_layout);
+//     // lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx (%matrix.layout_dims tile_layout))
+//     //   : [%mem.M a, %mem.Ptr0 I32] =
+//     //     let outer_idx = 0_16;
+//     //     let inner_idx = 2_16;
+// 
+//     //     // let IdxT = Idx (%matrix.size (%matrix.layout_dims layout));
+//     //     let IdxT = Idx 32;
+//     //     let outer_idx = %core.bitcast IdxT outer_idx;
+//     //     let inner_idx = %core.bitcast IdxT inner_idx;
+//     //     let idx = %core.wrap.add 0 (outer_idx, inner_idx);
+//     //     // let idx = 0_32;
+// 
+//     //     let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
+//     //     mat (mem, idx);
+// 
+//     // let test = %matrix.get_layout@(tile_layout, %mem.Ptr0 I32) inner_mat;
+//     let test = (%matrix.size (%matrix.layout_dims layout));
+// 
+//     // let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
+//     // let test = %matrix.get_layout@(outer_layout, %matrix.Mat tile_layout (%mem.Ptr0 I32)) mat;
+    let test = 333;
+    return (layout, tiler, mat);
 

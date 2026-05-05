@@ -351,15 +351,30 @@ static std::optional<Vector<nat_t>> extract_ms(nat_t n, const Def* ms_def) {
     return ms;
 }
 
-static std::optional<NatTuple> tuple_from_def(const Def* tup) {
+static std::optional<NatTuple> tuple_from_def(const Def* def) {
     NatTuple result;
-    for (auto op : tup->projs())
-        if (auto lit = Lit::isa(op))
-            result.items.push_back(lit.value());
-        else if (auto inner_tup = tuple_from_def(op))
-            result.items.push_back(inner_tup.value());
+    if (def->type()->isa<Nat>()) {
+        if (auto lit = Lit::isa(def))
+            result.items = {lit.value()};
         else
             return std::nullopt;
+    } else if (auto pack = def->isa<Pack>()) {
+        auto arity_lit = Lit::isa(pack->arity());
+        auto value_lit = Lit::isa(pack->body());
+        if (!arity_lit || !value_lit) return std::nullopt;
+        for (size_t i = 0; i < arity_lit.value(); ++i)
+            result.items.push_back(value_lit.value());
+    } else if (auto tup = def->isa<Tuple>()) {
+        for (auto op : tup->projs())
+            if (auto lit = Lit::isa(op))
+                result.items.push_back(lit.value());
+            else if (auto inner_tup = tuple_from_def(op))
+                result.items.push_back(inner_tup.value());
+            else
+                return std::nullopt;
+    } else {
+        return std::nullopt;
+    }
     return result;
 }
 
@@ -468,26 +483,50 @@ static const Def* make_layout(World& world, RecLayout&& layout) {
 
 namespace plug::matrix {
 
+const Def* normalize_size(const Def* type, const Def* _, const Def* arg) {
+    auto& world = type->world();
+
+    auto [dims_n, dims_ms, dims_def] = arg->projs<3>();
+
+    auto dims_tup = tuple_from_def(dims_def);
+    if (!dims_tup) return {};
+    auto dims = dims_tup.value();
+
+    nat_t dims_size = 1;
+    visit(dims, [&dims_size](nat_t value) { dims_size *= value; });
+    return world.lit_nat(dims_size);
+}
+
 const Def* normalize_idx_1DtoND(const Def* type, const Def* callee, const Def* arg) {
     auto& world = type->world();
 
-    world.WLOG("FRIEDRICH: still here 1");
-
     auto [mem, idx] = arg->projs<2>();
-    world.WLOG("FRIEDRICH: still here 2");
 
     auto callee_app = callee->isa<App>();
     assert(callee_app);
-    auto layout_def = callee_app->arg();
-    world.WLOG("FRIEDRICH: still here 4");
+    auto [implicits, layout_def] = callee_app->uncurry_args<2>();
+    auto [n_def, _]              = implicits->projs<2>();
+
+    auto n_lit = Lit::isa(n_def);
+    if (!n_lit) {
+        world.ELOG("FRIEDRICH 1dNd n {} is not lit!", n_def);
+        return {};
+    }
+    auto n = n_lit.value();
 
     auto layout_opt = extract_layout_static(layout_def);
-    if (!layout_opt) return {};
+    if (!layout_opt) {
+        world.ELOG("FRIEDRICH 1dNd layout {} is not lit!", layout_def);
+        return {};
+    }
     const RecLayout& layout = layout_opt.value();
-    world.WLOG("FRIEDRICH: still here 6");
+
+    nat_t layout_size = 1;
+    visit(layout.dims, [&layout_size](nat_t value) { layout_size *= value; });
+    if (n != layout_size)
+        error("size of 1d-index must align with matrix dimensions ({} != {}) layout = {}", n, layout_size, layout_def);
 
     auto [result_mem, result_idx] = impl_idx_1DtoND(world, mem, idx, layout);
-    world.WLOG("FRIEDRICH: still here 7");
     return world.tuple({result_mem, result_idx});
 }
 
@@ -536,9 +575,6 @@ const Def* normalize_idx_NDto1D(const Def* type, const Def* callee, const Def* a
             dot_product      = world.app(add, {dot_product, product});
         }
     }
-
-    world.ELOG("FRIEDRICH: successfully normalized idx_NDto1D!");
-
     return dot_product;
 }
 
@@ -606,8 +642,6 @@ const Def* normalize_layout_zip_divide(const Def* type, const Def* callee, const
     result.emplace_back(make_layout(world, std::move(outer_layout)));
     return world.tuple(result);
 }
-
-const Def* normalize_tile(const Def* type, const Def* callee, const Def* arg) { return {}; }
 
 MIM_matrix_NORMALIZER_IMPL
 
