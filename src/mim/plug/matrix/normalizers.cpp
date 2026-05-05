@@ -58,6 +58,39 @@ struct FlatLayout {
     FlatNatTuple strides;
 };
 
+static void print_tuple(const NatTuple& tup) {
+    print(std::cerr, "(");
+    bool first = true;
+    for (const auto& element : tup.items) {
+        if (first)
+            first = false;
+        else
+            print(std::cerr, ", ");
+        switch (element.index()) {
+            case 0: {
+                auto value = std::get<0>(element);
+                print(std::cerr, "{}", value);
+                break;
+            }
+            case 1: {
+                const auto& inner_tup = std::get<1>(element);
+                print_tuple(inner_tup);
+                break;
+            }
+        }
+    }
+    print(std::cerr, ")");
+}
+
+static void print_layout(const RecLayout& layout, const char* end) {
+    print_tuple(layout.dims);
+    print(std::cerr, " : ");
+    print_tuple(layout.strides);
+    print(std::cerr, end);
+}
+
+static void print_layout(const RecLayout& layout) { print_layout(layout, "\n"); }
+
 static RecLayout layout_elevate(FlatLayout&& flat_layout) {
     RecLayout result;
     for (auto dim : flat_layout.dims)
@@ -85,6 +118,39 @@ static nat_t tuple_size(const NatTuple& tuple) {
     auto total_size = 1;
     visit(tuple, [&total_size](nat_t value) { total_size *= value; });
     return total_size;
+}
+
+static NatTuple tuple_simplify(NatTuple&& tuple) {
+    NatTuple result;
+    for (auto&& element : tuple.items) {
+        switch (element.index()) {
+            case 0: {
+                auto value = std::get<0>(element);
+                result.items.emplace_back(value);
+                break;
+            }
+            case 1: {
+                auto& inner_tup     = std::get<1>(element);
+                auto simplified_tup = tuple_simplify(std::move(inner_tup));
+                if (simplified_tup.items.size() == 1) {
+                    assert(std::get_if<nat_t>(&simplified_tup.items[0]));
+                    result.items.emplace_back(simplified_tup.items[0]);
+                } else {
+                    result.items.emplace_back(simplified_tup);
+                }
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+static RecLayout layout_simplify(RecLayout&& layout) {
+    RecLayout result;
+    result.dims    = tuple_simplify(std::move(layout.dims));
+    result.strides = tuple_simplify(std::move(layout.strides));
+    assert(is_valid_layout(result));
+    return result;
 }
 
 static FlatNatTuple tuple_flatten(const NatTuple& tuple) {
@@ -243,32 +309,55 @@ static FlatLayout complement(const RecLayout& layout, nat_t size) {
     return coalesced;
 }
 
+static RecLayout layout_concat(Vector<RecLayout>&& layouts, bool simplify) {
+    RecLayout result;
+    for (auto&& layout : layouts) {
+        if (simplify && layout.dims.items.size() == 1) {
+            assert(layout.strides.items.size() == 1);
+            result.dims.items.emplace_back(std::move(layout.dims.items[0]));
+            result.strides.items.emplace_back(std::move(layout.strides.items[0]));
+        } else {
+            result.dims.items.emplace_back(std::move(layout.dims));
+            result.strides.items.emplace_back(std::move(layout.strides));
+        }
+    }
+    return result;
+}
+static RecLayout layout_concat(Vector<RecLayout>&& layouts) { return layout_concat(std::move(layouts), true); }
+
 static RecLayout layout_logical_divide(const RecLayout& layout, const RecLayout& tiler) {
     assert(is_valid_layout(layout));
     assert(is_valid_layout(tiler));
-    auto is_integral_tiler = tiler.dims.items.size() == 1 && std::get_if<nat_t>(&tiler.dims.items[0]);
-    if (is_integral_tiler) {
-        FlatLayout tiler_flat_complement = complement(tiler, tuple_size(layout.dims));
-        RecLayout tiler_complement       = layout_elevate(std::move(tiler_flat_complement));
-        RecLayout tile                   = impl_layout_composition(layout, tiler);
-        RecLayout outer                  = impl_layout_composition(layout, tiler_complement);
-        return RecLayout{.dims    = {.items = {tile.dims, outer.dims}},
-                         .strides = {.items = {tile.strides, outer.strides}}};
-    }
 
-    assert(layout.dims.items.size() >= tiler.dims.items.size());
-    RecLayout result;
+    auto is_integral_tiler           = tiler.dims.items.size() == 1 && std::get_if<nat_t>(&tiler.dims.items[0]);
+    FlatLayout tiler_flat_complement = complement(tiler, tuple_size(layout.dims));
+    RecLayout tiler_complement       = layout_elevate(std::move(tiler_flat_complement));
+    RecLayout concat                 = layout_concat({tiler, tiler_complement});
+    RecLayout result                 = impl_layout_composition(layout, concat);
+    print(std::cerr, "     INTEGRAL logical divide   -  ");
+    print_layout(layout, " div ");
+    print_layout(tiler, " = ");
+    print_layout(concat, " => ");
+    print_layout(result);
+    return result;
+}
+
+static RecLayout layout_zipped_divide(const RecLayout& layout, const RecLayout& tiler) {
+    Vector<RecLayout> divided_layouts;
     for (size_t i = 0; i < tiler.dims.items.size(); ++i) {
         RecLayout sublayout = layout_ith_sublayout(layout, i);
         RecLayout subtiler  = layout_ith_sublayout(tiler, i);
         RecLayout subresult = layout_logical_divide(sublayout, subtiler);
-        result.dims.items.emplace_back(std::move(subresult.dims));
-        result.strides.items.emplace_back(std::move(subresult.strides));
+        divided_layouts.emplace_back(std::move(subresult));
     }
-    for (size_t i = tiler.dims.items.size(); i < layout.dims.items.size(); ++i) {
-        result.dims.items.push_back(layout.dims.items[i]);
-        result.strides.items.push_back(layout.strides.items[i]);
-    }
+    Vector<RecLayout> layouts;
+    for (const auto& div_layout : divided_layouts)
+        layouts.emplace_back(layout_ith_sublayout(div_layout, 0));
+    for (const auto& div_layout : divided_layouts)
+        layouts.emplace_back(layout_ith_sublayout(div_layout, 1));
+    for (size_t i = tiler.dims.items.size(); i < layout.dims.items.size(); ++i)
+        layouts.emplace_back(layout_ith_sublayout(layout, i));
+    auto result = layout_concat(std::move(layouts));
     return result;
 }
 
@@ -492,8 +581,7 @@ const Def* normalize_size(const Def* type, const Def* _, const Def* arg) {
     if (!dims_tup) return {};
     auto dims = dims_tup.value();
 
-    nat_t dims_size = 1;
-    visit(dims, [&dims_size](nat_t value) { dims_size *= value; });
+    nat_t dims_size = tuple_size(dims);
     return world.lit_nat(dims_size);
 }
 
@@ -521,8 +609,7 @@ const Def* normalize_idx_1DtoND(const Def* type, const Def* callee, const Def* a
     }
     const RecLayout& layout = layout_opt.value();
 
-    nat_t layout_size = 1;
-    visit(layout.dims, [&layout_size](nat_t value) { layout_size *= value; });
+    nat_t layout_size = tuple_size(layout.dims);
     if (n != layout_size)
         error("size of 1d-index must align with matrix dimensions ({} != {}) layout = {}", n, layout_size, layout_def);
 
@@ -614,17 +701,73 @@ const Def* normalize_layout_zip_divide(const Def* type, const Def* callee, const
 
     auto layout_opt = extract_layout_static(layout_def);
     if (!layout_opt) return {};
-    auto& layout_tup = layout_opt.value();
+    auto& layout = layout_opt.value();
 
-    auto tiler_layout_opt = extract_layout_static(arg);
-    if (!tiler_layout_opt) return {};
-    auto& tiler_layout_tup = tiler_layout_opt.value();
+    auto [tiler_num, tiler_def] = arg->projs<2>();
 
-    RecLayout logical_div = layout_logical_divide(layout_tup, tiler_layout_tup);
+    auto tiler_n_lit = Lit::isa(tiler_num);
+    if (!tiler_n_lit) return {};
+    auto tiler_n = tiler_n_lit.value();
 
-    assert(logical_div.dims.items.size() == 2);
-    RecLayout tile_layout  = layout_ith_sublayout(logical_div, 0);
-    RecLayout outer_layout = layout_ith_sublayout(logical_div, 1);
+    world.ELOG("FRIEDRICH {}", tiler_def);
+
+    RecLayout tile_layout;
+    RecLayout outer_layout;
+    print(std::cerr, "FRIEDRICH logical divide ===>\n");
+    if (tiler_n == 1) {
+        auto tiler_opt = extract_layout_static(tiler_def);
+        if (!tiler_opt) return {};
+        auto& tiler = tiler_opt.value();
+
+        RecLayout result = layout_logical_divide(layout, tiler);
+        print_layout(layout, " div ");
+        print_layout(tiler, " = ");
+        print_layout(result);
+        tile_layout  = layout_ith_sublayout(result, 0);
+        outer_layout = layout_ith_sublayout(result, 1);
+    } else {
+        Vector<RecLayout> tile_layouts;
+        Vector<RecLayout> outer_layouts;
+        for (size_t i = 0; i < tiler_n; ++i) {
+            auto subtiler_def = tiler_def->proj(i);
+            world.ELOG("FRIEDRICH subtiler {}", subtiler_def);
+            auto subtiler_opt = extract_layout_static(subtiler_def);
+            if (!subtiler_opt) return {};
+            auto& subtiler = subtiler_opt.value();
+
+            RecLayout sublayout = layout_ith_sublayout(layout, i);
+            RecLayout subresult = layout_logical_divide(sublayout, subtiler);
+            print_layout(sublayout, " div ");
+            print_layout(subtiler, " = ");
+            print_layout(subresult);
+            tile_layouts.emplace_back(layout_ith_sublayout(subresult, 0));
+            outer_layouts.emplace_back(layout_ith_sublayout(subresult, 1));
+        }
+        for (size_t i = tiler_n; i < layout.dims.items.size(); ++i)
+            outer_layouts.emplace_back(layout_ith_sublayout(layout, i));
+        tile_layout  = layout_concat(std::move(tile_layouts), false);
+        outer_layout = layout_concat(std::move(outer_layouts), false);
+    }
+    print(std::cerr, "FRIEDRICH: logical layout: ");
+    print_layout(outer_layout);
+    print_layout(tile_layout);
+    // print_layout(logical_div);
+
+    tile_layout  = layout_simplify(std::move(tile_layout));
+    outer_layout = layout_simplify(std::move(outer_layout));
+
+    // RecLayout zipped_div = layout_zipped_divide(layout, tiler);
+
+    print(std::cerr, "FRIEDRICH: logical layout: ");
+    print_layout(outer_layout);
+    print_layout(tile_layout);
+    // print(std::cerr, "FRIEDRICH: zipped layout: ");
+    // print_layout(zipped_div);
+
+    print(std::cerr, "FRIEDRICH: outer layout: ");
+    print_layout(outer_layout);
+    print(std::cerr, "FRIEDRICH: tile layout: ");
+    print_layout(tile_layout);
 
     DefVec result;
     result.emplace_back(make_layout(world, std::move(tile_layout)));

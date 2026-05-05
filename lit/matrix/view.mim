@@ -24,7 +24,7 @@ let s = %core.nat.mul (n, d);
 let a = 0;
 let T = I32;
 
-con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «2; Nat», Nat, Nat]] =
+fun extern f (mem : %mem.M a) =
     let (mem, ptr) = %mem.alloc («s; T», a) mem;
     let layout = %matrix.layout (n, d) (1, n);
     let mat = %matrix.create_mat (%matrix.MemMat (T, a, s)) layout ptr;
@@ -35,7 +35,7 @@ con extern f [mem : %mem.M a, return: Cn[%mem.M a, T, «2; Nat», Nat, Nat]] =
     let shape = %matrix.shape layout;
     let size = %matrix.size layout;
 
-    let test = 333;
+    let test = mat;
     return (mem, val, shape, size, test);
 
 fun extern complement1 () =
@@ -80,11 +80,20 @@ fun extern composition3 () =
 
 fun extern divide1 () =
     let layout = %matrix.layout (4, 2, 3) (2, 1, 8);
-    let tiler = %matrix.layout 4 2;
+    let tiler = %matrix.tiler 1 (%matrix.layout 4 2);
 
     let div = %matrix.layout_zip_divide layout tiler;
     // EXPECTATION => ((2, 2), (2, 3)) : ((4, 1), (2, 8))
     return div;
+
+fun extern divide2 () =
+    let layout = %matrix.layout (9, (4, 8)) (59, (13, 1));
+    let tiler = %matrix.tiler2 (%matrix.layout 3 3) (%matrix.layout (2, 4) (1, 8));
+
+    let div = %matrix.layout_zip_divide layout tiler;
+    // EXPECTATION => ((3, 3), ((2, 4), (2, 2)) : ((177, 59), ((13, 2), (26, 1)))
+    return div;
+
 
 fun extern idx_map1 (mem: %gpu.SharedM) =
     let layout = %matrix.layout (4, 8) (8, 1);
@@ -103,72 +112,71 @@ fun extern idx_map2 (mem: %gpu.SharedM) =
     //             => ((ff, tt), (ff, 2_4))
     return (mem, mat_idx);
 
-lam tile {layout: %matrix.Layout}
-         (mat: %matrix.Mat layout (%mem.Ptr0 I32)) (tiler: %matrix.Layout) =
+lam dumbtile {layout: %matrix.Layout}
+         (mat: %matrix.Mat layout (%mem.Ptr0 I32)) (tiler: %matrix.Tiler) =
     // let layout_size = %matrix.size (%matrix.layout_dims layout);
-    // let tiler_compl = %matrix.layout_complement tiler layout_size;
+    // let tiler_compl = %matrix.layout_complement (n, tiler) layout_size;
     let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
+    let size = %matrix.size layout;
 
-    lm {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx outer_layout)
-     : [%mem.M outer_a, %matrix.Mat tile_layout (%mem.Ptr0 I32)] =
-        // let outer_idx = %matrix.idx_NDto1D outer_idx (%matrix.layout_strides outer_layout);
-        // let (outer_mem, outer_idx) = %matrix.idx_1DtoND tiler_compl (outer_mem, outer_idx);
-        // let outer_off = %matrix.idx_NDto1D outer_idx (%matrix.layout_strides tiler_compl);
-        (outer_mem, inner_mat)
-        where
-            lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx tile_layout)
-              : [%mem.M a, %mem.Ptr0 I32] =
-                // let inner_idx = %matrix.idx_NDto1D inner_idx (%matrix.layout_strides tile_layout);
-                // let (mem, inner_idx) = %matrix.idx_1DtoND tiler (mem, inner_idx);
-                // let inner_idx = %matrix.idx_NDto1D inner_idx (%matrix.layout_strides tiler);
+    (outer_layout, tile_layout, outer_mat)
+    where
+        lam outer_mat {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx outer_layout)
+                    : [%mem.M outer_a, %matrix.Mat tile_layout (%mem.Ptr0 I32)] =
+            let outer_idx = %matrix.idx_NDto1D outer_layout outer_idx;
+            (outer_mem, inner_mat)
+            where
+                lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx tile_layout)
+                            : [%mem.M a, %mem.Ptr0 I32] =
+                    let inner_idx = %matrix.idx_NDto1D tile_layout inner_idx;
 
-                let outer_idx = 0_16;
-                let inner_idx = 0_16;
+                    let outer_idx = %core.idx 16 0 1;
+                    let inner_idx = %core.idx 16 0 4;
 
-                let IdxT = Idx (%matrix.size layout);
-                // let IdxT = Idx 32;
-                let outer_idx = %core.bitcast IdxT outer_idx;
-                let inner_idx = %core.bitcast IdxT inner_idx;
-                let idx = %core.wrap.add 0 (outer_idx, inner_idx);
+                    let outer_idx = %core.bitcast (Idx size) outer_idx;
+                    let inner_idx = %core.bitcast (Idx size) inner_idx;
 
-                // let idx = 0_32;
+                    let idx = %core.wrap.add 0 (outer_idx, inner_idx);
+                    let idx = %core.bitcast (Idx size) idx;
 
-                let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
-                mat (mem, idx);
-        end;
+                    let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
+                    mat (mem, idx);
+            end;
+    end;
+
+fun extern t1 (mem: %mem.M 0) =
+    let layout = %matrix.layout (4, 8) (1, 4);
+
+    let test = %matrix.size layout;
+
+    return (mem, test);
 
 fun extern tile1 (mem: %mem.M 0) =
     let layout = %matrix.layout (4, 8) (1, 4);
-    let tiler = %matrix.layout (2, 4) (1, 1);
+    let tiler = %matrix.tiler2 (%matrix.layout 2 1) (%matrix.layout 4 1);
 
     let (mem, ptr) = %mem.alloc («32; I32», 0) mem;
+
+    let vals: «32; I32» = (
+        0I32, 1I32, 2I32, 3I32, 4I32, 5I32, 6I32, 7I32, 8I32, 9I32,
+        10I32, 11I32, 12I32, 13I32, 14I32, 15I32, 16I32, 17I32, 18I32, 19I32,
+        20I32, 21I32, 22I32, 23I32, 24I32, 25I32, 26I32, 27I32, 28I32, 29I32,
+        30I32, 31I32
+    );
+
+    let mem = %mem.store (mem, ptr, vals);
+
     let mat = %matrix.create_mat (%matrix.MemMat (I32, 0, 32)) layout ptr;
-//     let mat = %matrix.tile@(layout, %mem.Ptr0 I32) mat tiler;
-    let mat = tile@layout mat tiler;
-// 
-//     // let (mem, test) = %matrix.idx_1DtoND layout (mem, 0_32);
-// 
-//     // let test =  %matrix.MatIdx (%matrix.layout_dims tile_layout);
-//     // lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx (%matrix.layout_dims tile_layout))
-//     //   : [%mem.M a, %mem.Ptr0 I32] =
-//     //     let outer_idx = 0_16;
-//     //     let inner_idx = 2_16;
-// 
-//     //     // let IdxT = Idx (%matrix.size (%matrix.layout_dims layout));
-//     //     let IdxT = Idx 32;
-//     //     let outer_idx = %core.bitcast IdxT outer_idx;
-//     //     let inner_idx = %core.bitcast IdxT inner_idx;
-//     //     let idx = %core.wrap.add 0 (outer_idx, inner_idx);
-//     //     // let idx = 0_32;
-// 
-//     //     let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
-//     //     mat (mem, idx);
-// 
-//     // let test = %matrix.get_layout@(tile_layout, %mem.Ptr0 I32) inner_mat;
-//     let test = (%matrix.size (%matrix.layout_dims layout));
-// 
-//     // let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
-//     // let test = %matrix.get_layout@(outer_layout, %matrix.Mat tile_layout (%mem.Ptr0 I32)) mat;
-    let test = 333;
-    return (layout, tiler, mat);
+
+    let (tl, ol, tmat) = dumbtile@layout mat tiler;
+
+    // let (mem, test) = tmat (mem, (ff, tt));
+
+    let oidx = (0_2, 1_2);
+    let iidx = (1_2, 2_4);
+
+    let (mem, test1) = tmat (mem, oidx);
+    let (mem, test2) = test1 (mem, iidx);
+    return (ol, tl, test2);
+
 
