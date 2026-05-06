@@ -115,11 +115,7 @@ const Def* SymExprOpt::Analysis::rewrite_imm_App(const App* app) {
         map(lam->var(), abstr_var);
         lattice_[lam->var()] = abstr_var;
 
-        if (!lookup(lam))
-            for (auto d : lam->deps())
-                rewrite(d);
-
-        return world().app(lam, abstr_args);
+        return world().app(rewrite_deps(lam), abstr_args);
     }
 
     return mim::Analysis::rewrite_imm_App(app);

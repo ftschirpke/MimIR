@@ -105,13 +105,8 @@ public:
     ///@}
 
 protected:
-    /// Helps to keep track of curr_mut():
-    /// ```
-    /// {
-    ///     auto _ = enter(new_mut);
-    ///     // rewrite new_mut
-    /// }
-    /// ```
+    /// Helps to keep track of curr_mut().
+    /// @see enter()
     class Enter {
     public:
         Enter(Analysis* analysis, Def* new_mut)
@@ -129,10 +124,26 @@ protected:
     /// @name Rewrite
     ///@{
     void start() override;
+    Enter enter(Def* new_mut) { return {this, new_mut}; } //< Updates curr_mut() to @p new_mut.
     virtual void rewrite_annex(flags_t, const Def*);
     virtual void rewrite_external(Def*);
-    Def* rewrite_mut(Def*) override;                      ///< Keeps old muts/vars.
-    Enter enter(Def* new_mut) { return {this, new_mut}; } //< Updates curr_mut() to @p new_mut.
+
+    /// Traverses the mutable's dependencies under the current curr_mut() scope
+    /// without recording the mutable itself as visited and without initializing
+    /// any binder-related lattice state.
+    ///
+    /// This is useful for analyses that want to inspect a mutable under a
+    /// custom binder environment while still reusing Analysis' structured
+    /// dependency traversal.
+    virtual Def* rewrite_deps(Def*);
+
+    /// Keeps the mutable itself in place by mapping `mut -> mut`, initializes
+    /// the default binder state for Lam binders in the analysis lattice, and
+    /// then traverses the mutable's dependencies via rewrite_deps().
+    ///
+    /// In other words, this is the normal "visit a mutable" entry point for
+    /// Analysis, whereas rewrite_deps() only performs the recursive traversal.
+    Def* rewrite_mut(Def*) override;
     ///@}
 
     Def2Def lattice_;
