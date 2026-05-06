@@ -24,19 +24,19 @@ let s = %core.nat.mul (n, d);
 let a = 0;
 let T = I32;
 
-fun extern f (mem : %mem.M a) =
-    let (mem, ptr) = %mem.alloc («s; T», a) mem;
-    let layout = %matrix.layout (n, d) (1, n);
-    let mat = %matrix.create_mat (%matrix.MemMat (T, a, s)) layout ptr;
-    let idx = (%core.idx n 0 4, 3_4);
-    // let idx = %matrix.dims (4, 3);
-    let (mem, val_ptr) = mat (mem, idx);
-    let (mem, val) = %mem.load (mem, val_ptr);
-    let shape = %matrix.shape layout;
-    let size = %matrix.size layout;
-
-    let test = mat;
-    return (mem, val, shape, size, test);
+// fun extern f (mem : %mem.M a) =
+//     let (mem, ptr) = %mem.alloc («s; T», a) mem;
+//     let layout = %matrix.layout (n, d) (1, n);
+//     let mat = %matrix.create_mat (%matrix.MemMat (T, a, s)) layout ptr;
+//     let idx = (%core.idx n 0 4, 3_4);
+//     // let idx = %matrix.dims (4, 3);
+//     let (mem, val_ptr) = mat (mem, idx);
+//     let (mem, val) = %mem.load (mem, val_ptr);
+//     let shape = %matrix.shape layout;
+//     let size = %matrix.size layout;
+// 
+//     let test = mat;
+//     return (mem, val, shape, size, test);
 
 fun extern complement1 () =
     let layout = %matrix.layout (2, 4) (1, 6);
@@ -82,7 +82,7 @@ fun extern divide1 () =
     let layout = %matrix.layout (4, 2, 3) (2, 1, 8);
     let tiler = %matrix.tiler 1 (%matrix.layout 4 2);
 
-    let div = %matrix.layout_zip_divide layout tiler;
+    let div = %matrix.layout_zipped_divide layout tiler;
     // EXPECTATION => ((2, 2), (2, 3)) : ((4, 1), (2, 8))
     return div;
 
@@ -90,7 +90,7 @@ fun extern divide2 () =
     let layout = %matrix.layout (9, (4, 8)) (59, (13, 1));
     let tiler = %matrix.tiler2 (%matrix.layout 3 3) (%matrix.layout (2, 4) (1, 8));
 
-    let div = %matrix.layout_zip_divide layout tiler;
+    let div = %matrix.layout_zipped_divide layout tiler;
     // EXPECTATION => ((3, 3), ((2, 4), (2, 2)) : ((177, 59), ((13, 2), (26, 1)))
     return div;
 
@@ -113,11 +113,11 @@ fun extern idx_map2 (mem: %gpu.SharedM) =
     return (mem, mat_idx);
 
 lam dumbtile {layout: %matrix.Layout}
-         (mat: %matrix.Mat layout (%mem.Ptr0 I32)) (tiler: %matrix.Tiler) =
+         (mat: %matrix.Mat layout (%mem.Ptr0 I32), size: Nat) (tiler: %matrix.Tiler) =
     // let layout_size = %matrix.size (%matrix.layout_dims layout);
     // let tiler_compl = %matrix.layout_complement (n, tiler) layout_size;
-    let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout tiler;
-    let size = %matrix.size layout;
+    let (tile_layout, outer_layout) = %matrix.layout_zipped_divide layout tiler;
+    // let size = %matrix.size layout;
 
     (outer_layout, tile_layout, outer_mat)
     where
@@ -130,14 +130,14 @@ lam dumbtile {layout: %matrix.Layout}
                             : [%mem.M a, %mem.Ptr0 I32] =
                     let inner_idx = %matrix.idx_NDto1D tile_layout inner_idx;
 
-                    let outer_idx = %core.idx 16 0 1;
-                    let inner_idx = %core.idx 16 0 4;
+                    let outer_idx = %core.bitcast (Idx 16) 1;
+                    let inner_idx = %core.bitcast (Idx 16) 4;
 
-                    let outer_idx = %core.bitcast (Idx size) outer_idx;
-                    let inner_idx = %core.bitcast (Idx size) inner_idx;
+                    let outer_idx = %core.bitcast (Idx 32) outer_idx;
+                    let inner_idx = %core.bitcast (Idx 32) inner_idx;
 
                     let idx = %core.wrap.add 0 (outer_idx, inner_idx);
-                    let idx = %core.bitcast (Idx size) idx;
+                    let idx = %core.bitcast (Idx 32) idx;
 
                     let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
                     mat (mem, idx);
@@ -168,7 +168,7 @@ fun extern tile1 (mem: %mem.M 0) =
 
     let mat = %matrix.create_mat (%matrix.MemMat (I32, 0, 32)) layout ptr;
 
-    let (tl, ol, tmat) = dumbtile@layout mat tiler;
+    let (tl, ol, tmat) = dumbtile@layout (mat, 32) tiler;
 
     // let (mem, test) = tmat (mem, (ff, tt));
 

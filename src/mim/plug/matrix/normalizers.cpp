@@ -1,5 +1,7 @@
 #include <mim/normalize.h>
 
+#include <mim/plug/matrix/layout_algebra.h>
+
 #include "mim/world.h"
 
 #include "mim/plug/core/core.h"
@@ -18,45 +20,11 @@ namespace mim {
 
 namespace {
 
+using namespace plug::matrix::layalg;
+
 //
 // Layout Algebra
 //
-
-using NatPair = std::pair<nat_t, nat_t>;
-
-struct NatTuple {
-    std::vector<std::variant<nat_t, NatTuple>> items;
-};
-
-using FlatNatTuple = Vector<nat_t>;
-
-template<class Visitor>
-static void visit(const NatTuple& tuple, Visitor&& visitor) {
-    for (const auto& item : tuple.items) {
-        switch (item.index()) {
-            case 0: {
-                nat_t value = std::get<0>(item);
-                visitor(value);
-                break;
-            }
-            case 1: {
-                const NatTuple& nested_tuple = std::get<1>(item);
-                visit(nested_tuple, visitor);
-                break;
-            }
-        }
-    }
-}
-
-struct RecLayout {
-    NatTuple dims;
-    NatTuple strides;
-};
-
-struct FlatLayout {
-    FlatNatTuple dims;
-    FlatNatTuple strides;
-};
 
 static void print_tuple(const NatTuple& tup) {
     print(std::cerr, "(");
@@ -82,345 +50,14 @@ static void print_tuple(const NatTuple& tup) {
     print(std::cerr, ")");
 }
 
-static void print_layout(const RecLayout& layout, const char* end) {
+static void print_layout(const Layout& layout, const char* end) {
     print_tuple(layout.dims);
     print(std::cerr, " : ");
     print_tuple(layout.strides);
     print(std::cerr, end);
 }
 
-static void print_layout(const RecLayout& layout) { print_layout(layout, "\n"); }
-
-static RecLayout layout_elevate(FlatLayout&& flat_layout) {
-    RecLayout result;
-    for (auto dim : flat_layout.dims)
-        result.dims.items.emplace_back(dim);
-    for (auto stride : flat_layout.strides)
-        result.strides.items.emplace_back(stride);
-    return result;
-}
-
-static bool is_valid_dims_strides_pair(const NatTuple& dims, const NatTuple& strides) {
-    if (dims.items.size() != strides.items.size()) return false;
-    for (size_t i = 0; i < dims.items.size(); ++i) {
-        if (dims.items[i].index() != strides.items[i].index()) return false;
-        if (auto inner_dims = std::get_if<NatTuple>(&dims.items[i])) {
-            auto inner_strides = std::get_if<NatTuple>(&strides.items[i]);
-            if (!is_valid_dims_strides_pair(*inner_dims, *inner_strides)) return false;
-        }
-    }
-    return true;
-}
-
-static bool is_valid_layout(const RecLayout& layout) { return is_valid_dims_strides_pair(layout.dims, layout.strides); }
-
-static nat_t tuple_size(const NatTuple& tuple) {
-    auto total_size = 1;
-    visit(tuple, [&total_size](nat_t value) { total_size *= value; });
-    return total_size;
-}
-
-static NatTuple tuple_simplify(NatTuple&& tuple) {
-    NatTuple result;
-    for (auto&& element : tuple.items) {
-        switch (element.index()) {
-            case 0: {
-                auto value = std::get<0>(element);
-                result.items.emplace_back(value);
-                break;
-            }
-            case 1: {
-                auto& inner_tup     = std::get<1>(element);
-                auto simplified_tup = tuple_simplify(std::move(inner_tup));
-                if (simplified_tup.items.size() == 1) {
-                    assert(std::get_if<nat_t>(&simplified_tup.items[0]));
-                    result.items.emplace_back(simplified_tup.items[0]);
-                } else {
-                    result.items.emplace_back(simplified_tup);
-                }
-                break;
-            }
-        }
-    }
-    return result;
-}
-
-static RecLayout layout_simplify(RecLayout&& layout) {
-    RecLayout result;
-    result.dims    = tuple_simplify(std::move(layout.dims));
-    result.strides = tuple_simplify(std::move(layout.strides));
-    assert(is_valid_layout(result));
-    return result;
-}
-
-static FlatNatTuple tuple_flatten(const NatTuple& tuple) {
-    FlatNatTuple result;
-    visit(tuple, [&result](nat_t value) { result.push_back(value); });
-    return result;
-}
-
-static FlatLayout layout_flatten(const RecLayout& layout) {
-    FlatLayout result{.dims = tuple_flatten(layout.dims), .strides = tuple_flatten(layout.strides)};
-    assert(result.dims.size() == result.strides.size());
-    return result;
-}
-
-static FlatLayout coalesce(const FlatLayout& layout) {
-    FlatLayout result;
-
-    assert(layout.dims.size() == layout.strides.size());
-
-    result.dims.push_back(1);
-    result.strides.push_back(0);
-
-    for (size_t i = 0; i < layout.dims.size(); ++i) {
-        auto dim    = layout.dims[i];
-        auto stride = layout.strides[i];
-        if (dim == 1) {
-            continue;
-        } else if (result.dims.back() == 1) {
-            result.dims.back()    = dim;
-            result.strides.back() = stride;
-        } else if (result.dims.back() * result.strides.back() == stride) {
-            result.dims.back() = result.dims.back() * dim;
-        } else {
-            result.dims.push_back(dim);
-            result.strides.push_back(stride);
-        }
-    }
-
-    return result;
-}
-
-static RecLayout layout_ith_sublayout(const RecLayout& layout, size_t i) {
-    assert(i < layout.dims.items.size());
-    assert(i < layout.strides.items.size());
-
-    RecLayout result;
-    switch (layout.dims.items[i].index()) {
-        case 0: // nat_t
-        {
-            result.dims.items    = {std::get<0>(layout.dims.items[i])};
-            result.strides.items = {std::get<0>(layout.strides.items[i])};
-            break;
-        }
-        case 1: // NatTuple
-        {
-            result.dims    = std::get<1>(layout.dims.items[i]);
-            result.strides = std::get<1>(layout.strides.items[i]);
-            break;
-        }
-    }
-    return result;
-}
-
-static FlatLayout layout_composition_integral(const RecLayout& layout, nat_t compose_dim, nat_t compose_stride) {
-    FlatLayout result;
-    nat_t rest_dim    = compose_dim;
-    nat_t rest_stride = compose_stride;
-
-    if (compose_stride == 0) {
-        result.dims.push_back(compose_dim);
-        result.strides.push_back(0);
-        return result;
-    }
-
-    FlatLayout flattened = layout_flatten(layout);
-    FlatLayout coalesced = coalesce(flattened);
-    assert(coalesced.dims.size() == coalesced.strides.size());
-    for (size_t i = 0; i < coalesced.dims.size() - 1; ++i) {
-        auto current_dim    = coalesced.dims[i];
-        auto current_stride = coalesced.strides[i];
-        assert(current_dim % rest_stride == 0 || rest_stride % current_dim == 0);
-        auto new_dim = std::min(std::max(1ul, current_dim / rest_stride), rest_dim);
-        if (new_dim != 1) {
-            result.dims.push_back(new_dim);
-            result.strides.push_back(rest_stride * current_stride);
-        }
-
-        rest_dim /= new_dim;
-
-        auto stride_div = rest_stride / current_dim;
-        auto stride_rem = rest_stride % current_dim;
-        if (stride_rem > 0)
-            rest_stride = stride_div + 1;
-        else
-            rest_stride = stride_div;
-    }
-
-    if (rest_dim != 1 || result.dims.size() == 0) {
-        result.dims.push_back(rest_dim);
-        result.strides.push_back(rest_stride * coalesced.strides.back());
-    }
-    return result;
-}
-
-static RecLayout impl_layout_composition(const RecLayout& layout1, const RecLayout& layout2) {
-    assert(is_valid_layout(layout1));
-    assert(is_valid_layout(layout2));
-
-    auto is_integral = layout2.dims.items.size() == 1 && std::get_if<nat_t>(&layout2.dims.items[0]);
-    if (is_integral) {
-        auto dim    = std::get<nat_t>(layout2.dims.items[0]);
-        auto stride = std::get<nat_t>(layout2.strides.items[0]);
-        return layout_elevate(layout_composition_integral(layout1, dim, stride));
-    }
-    RecLayout result;
-    for (size_t i = 0; i < layout2.dims.items.size(); ++i) {
-        RecLayout sublayout2 = layout_ith_sublayout(layout2, i);
-        RecLayout subresult  = impl_layout_composition(layout1, sublayout2);
-        result.dims.items.emplace_back(std::move(subresult.dims));
-        result.strides.items.emplace_back(std::move(subresult.strides));
-    }
-    return result;
-}
-
-static FlatLayout complement(const RecLayout& layout, nat_t size) {
-    Vector<nat_t> dims;
-    visit(layout.dims, [&dims](nat_t dim) { dims.push_back(dim); });
-
-    Vector<NatPair> pairs;
-    visit(layout.strides, [&dims, &pairs](nat_t stride) {
-        size_t i = pairs.size();
-        pairs.emplace_back(dims[i], stride);
-    });
-
-    std::sort(pairs.begin(), pairs.end(), [](const NatPair& a, const NatPair& b) {
-        if (a.first == b.first) return a.second < b.second;
-        return a.first < b.first;
-    });
-
-    Vector<nat_t> result_dims, result_strides;
-    size_t current_idx = 1;
-    for (const auto& [dim, stride] : pairs) {
-        if (dim == 1 || stride == 0) continue;
-
-        bool is_inbound = current_idx <= dim * stride;
-        assert(is_inbound);
-
-        result_dims.push_back(stride / current_idx);
-        result_strides.push_back(current_idx);
-        current_idx = dim * stride;
-    }
-    result_dims.push_back((size + current_idx - 1) / current_idx);
-    result_strides.push_back(current_idx);
-
-    FlatLayout coalesced = coalesce(FlatLayout{.dims = result_dims, .strides = result_strides});
-    return coalesced;
-}
-
-static RecLayout layout_concat(Vector<RecLayout>&& layouts, bool simplify) {
-    RecLayout result;
-    for (auto&& layout : layouts) {
-        if (simplify && layout.dims.items.size() == 1) {
-            assert(layout.strides.items.size() == 1);
-            result.dims.items.emplace_back(std::move(layout.dims.items[0]));
-            result.strides.items.emplace_back(std::move(layout.strides.items[0]));
-        } else {
-            result.dims.items.emplace_back(std::move(layout.dims));
-            result.strides.items.emplace_back(std::move(layout.strides));
-        }
-    }
-    return result;
-}
-static RecLayout layout_concat(Vector<RecLayout>&& layouts) { return layout_concat(std::move(layouts), true); }
-
-static RecLayout layout_logical_divide(const RecLayout& layout, const RecLayout& tiler) {
-    assert(is_valid_layout(layout));
-    assert(is_valid_layout(tiler));
-
-    auto is_integral_tiler           = tiler.dims.items.size() == 1 && std::get_if<nat_t>(&tiler.dims.items[0]);
-    FlatLayout tiler_flat_complement = complement(tiler, tuple_size(layout.dims));
-    RecLayout tiler_complement       = layout_elevate(std::move(tiler_flat_complement));
-    RecLayout concat                 = layout_concat({tiler, tiler_complement});
-    RecLayout result                 = impl_layout_composition(layout, concat);
-    print(std::cerr, "     INTEGRAL logical divide   -  ");
-    print_layout(layout, " div ");
-    print_layout(tiler, " = ");
-    print_layout(concat, " => ");
-    print_layout(result);
-    return result;
-}
-
-static RecLayout layout_zipped_divide(const RecLayout& layout, const RecLayout& tiler) {
-    Vector<RecLayout> divided_layouts;
-    for (size_t i = 0; i < tiler.dims.items.size(); ++i) {
-        RecLayout sublayout = layout_ith_sublayout(layout, i);
-        RecLayout subtiler  = layout_ith_sublayout(tiler, i);
-        RecLayout subresult = layout_logical_divide(sublayout, subtiler);
-        divided_layouts.emplace_back(std::move(subresult));
-    }
-    Vector<RecLayout> layouts;
-    for (const auto& div_layout : divided_layouts)
-        layouts.emplace_back(layout_ith_sublayout(div_layout, 0));
-    for (const auto& div_layout : divided_layouts)
-        layouts.emplace_back(layout_ith_sublayout(div_layout, 1));
-    for (size_t i = tiler.dims.items.size(); i < layout.dims.items.size(); ++i)
-        layouts.emplace_back(layout_ith_sublayout(layout, i));
-    auto result = layout_concat(std::move(layouts));
-    return result;
-}
-
-static NatTuple prefix_product(const NatTuple& tup, nat_t init_val) {
-    NatTuple result;
-    for (const auto& element : tup.items) {
-        switch (element.index()) {
-            case 0: // nat_t
-            {
-                auto val = std::get<0>(element);
-                result.items.push_back(init_val);
-                init_val *= val;
-                break;
-            }
-            case 1: // NatTuple
-            {
-                auto& inner_tup = std::get<1>(element);
-                nat_t product   = 1;
-                visit(inner_tup, [&product](nat_t val) { product *= val; });
-                result.items.emplace_back(std::move(inner_tup));
-                init_val *= product;
-                break;
-            }
-        }
-    }
-    return result;
-}
-
-using DefPair = std::pair<const Def*, const Def*>;
-
-static DefPair impl_idx_1DtoND(World& world, const Def* mem, const Def* idx, const RecLayout& layout) {
-    auto is_integral = layout.dims.items.size() == 1 && std::get_if<nat_t>(&layout.dims.items[0]);
-    if (is_integral) {
-        auto dim    = std::get<nat_t>(layout.dims.items[0]);
-        auto stride = std::get<nat_t>(layout.strides.items[0]);
-
-        auto bitcast_calc   = world.call<plug::core::bitcast>(idx->type());
-        auto bitcast_result = world.call<plug::core::bitcast>(world.type_idx(dim));
-
-        auto dim_lit_nat    = world.lit_nat(dim);
-        auto stride_lit_nat = world.lit_nat(stride);
-        auto dim_lit        = world.app(bitcast_calc, dim_lit_nat);
-        auto stride_lit     = world.app(bitcast_calc, stride_lit_nat);
-
-        auto idx_div = world.call(plug::core::div::udiv, world.tuple({mem, world.tuple({idx, stride_lit})}));
-        mem          = world.extract(idx_div, 2, 0);
-        idx          = world.extract(idx_div, 2, 1);
-        auto idx_rem = world.call(plug::core::div::urem, world.tuple({mem, world.tuple({idx, dim_lit})}));
-        mem          = world.extract(idx_rem, 2, 0);
-        idx          = world.extract(idx_rem, 2, 1);
-        auto result  = world.app(bitcast_result, idx);
-        return std::make_pair(mem, result);
-    }
-
-    DefVec tuple_entries;
-    for (size_t i = 0; i < layout.dims.items.size(); ++i) {
-        RecLayout sublayout = layout_ith_sublayout(layout, i);
-        DefPair pair        = impl_idx_1DtoND(world, mem, idx, sublayout);
-        mem                 = pair.first;
-        tuple_entries.push_back(pair.second);
-    }
-    return std::make_pair(mem, world.tuple(tuple_entries));
-}
+static void print_layout(const Layout& layout) { print_layout(layout, "\n"); }
 
 //
 // Layout Parsing
@@ -467,8 +104,8 @@ static std::optional<NatTuple> tuple_from_def(const Def* def) {
     return result;
 }
 
-static std::optional<RecLayout> extract_layout_static(const Def* layout_tup) {
-    RecLayout result;
+static std::optional<Layout> extract_layout_static(const Def* layout_tup) {
+    Layout result;
 
     auto [n_def, ms_def, dims_def, strides_def] = layout_tup->projs<4>();
 
@@ -489,6 +126,9 @@ static std::optional<RecLayout> extract_layout_static(const Def* layout_tup) {
     else
         return std::nullopt;
 
+    print(std::cerr, "FRIEDRICH: extracted ");
+    print_layout(result);
+
     assert(is_valid_layout(result));
     assert(n == result.dims.items.size());
     for (size_t i = 0; i < n; ++i)
@@ -496,6 +136,8 @@ static std::optional<RecLayout> extract_layout_static(const Def* layout_tup) {
             assert(ms[i] == inner_dims->items.size());
         else
             assert(ms[i] == 1);
+
+    // if (result.dims.items.empty() || result.strides.items.empty()) return std::nullopt; // TODO: is this needed
 
     return result;
 }
@@ -544,7 +186,7 @@ static const Def* make_tup(World& world, NatTuple&& tup) {
     return world.tuple(outer_tup);
 }
 
-static const Def* make_layout(World& world, RecLayout&& layout) {
+static const Def* make_layout(World& world, Layout&& layout) {
     assert(is_valid_layout(layout));
 
     nat_t n = layout.dims.items.size();
@@ -596,24 +238,18 @@ const Def* normalize_idx_1DtoND(const Def* type, const Def* callee, const Def* a
     auto [n_def, _]              = implicits->projs<2>();
 
     auto n_lit = Lit::isa(n_def);
-    if (!n_lit) {
-        world.ELOG("FRIEDRICH 1dNd n {} is not lit!", n_def);
-        return {};
-    }
+    if (!n_lit) return {};
     auto n = n_lit.value();
 
     auto layout_opt = extract_layout_static(layout_def);
-    if (!layout_opt) {
-        world.ELOG("FRIEDRICH 1dNd layout {} is not lit!", layout_def);
-        return {};
-    }
-    const RecLayout& layout = layout_opt.value();
+    if (!layout_opt) return {};
+    const auto& layout = layout_opt.value();
 
     nat_t layout_size = tuple_size(layout.dims);
     if (n != layout_size)
         error("size of 1d-index must align with matrix dimensions ({} != {}) layout = {}", n, layout_size, layout_def);
 
-    auto [result_mem, result_idx] = impl_idx_1DtoND(world, mem, idx, layout);
+    auto [result_mem, result_idx] = layalg::idx_1DtoND(world, mem, idx, layout);
     return world.tuple({result_mem, result_idx});
 }
 
@@ -669,7 +305,7 @@ const Def* normalize_layout_complement(const Def* type, const Def* callee, const
     if (!layout_opt) return {};
     auto& layout_tup = layout_opt.value();
 
-    auto complement_layout = layout_elevate(complement(layout_tup, size));
+    auto complement_layout = elevate(complement(layout_tup, size));
     return make_layout(world, std::move(complement_layout));
 }
 
@@ -688,11 +324,11 @@ const Def* normalize_layout_composition(const Def* type, const Def* callee, cons
     if (!layout2_opt) return {};
     auto& layout2_tup = layout2_opt.value();
 
-    RecLayout comp = impl_layout_composition(layout1_tup, layout2_tup);
+    layalg::Layout comp = composition(layout1_tup, layout2_tup);
     return make_layout(world, std::move(comp));
 }
 
-const Def* normalize_layout_zip_divide(const Def* type, const Def* callee, const Def* arg) {
+const Def* normalize_layout_zipped_divide(const Def* type, const Def* callee, const Def* arg) {
     auto& world = type->world();
 
     auto callee_app = callee->isa<App>();
@@ -703,76 +339,75 @@ const Def* normalize_layout_zip_divide(const Def* type, const Def* callee, const
     if (!layout_opt) return {};
     auto& layout = layout_opt.value();
 
-    auto [tiler_num, tiler_def] = arg->projs<2>();
+    auto [num_tilers, tiler_def] = arg->projs<2>();
 
-    auto tiler_n_lit = Lit::isa(tiler_num);
+    auto tiler_n_lit = Lit::isa(num_tilers);
     if (!tiler_n_lit) return {};
     auto tiler_n = tiler_n_lit.value();
 
-    world.ELOG("FRIEDRICH {}", tiler_def);
-
-    RecLayout tile_layout;
-    RecLayout outer_layout;
-    print(std::cerr, "FRIEDRICH logical divide ===>\n");
+    Vector<layalg::Layout> tiler_layouts;
     if (tiler_n == 1) {
         auto tiler_opt = extract_layout_static(tiler_def);
         if (!tiler_opt) return {};
-        auto& tiler = tiler_opt.value();
-
-        RecLayout result = layout_logical_divide(layout, tiler);
-        print_layout(layout, " div ");
-        print_layout(tiler, " = ");
-        print_layout(result);
-        tile_layout  = layout_ith_sublayout(result, 0);
-        outer_layout = layout_ith_sublayout(result, 1);
+        tiler_layouts.emplace_back(std::move(tiler_opt.value()));
     } else {
-        Vector<RecLayout> tile_layouts;
-        Vector<RecLayout> outer_layouts;
         for (size_t i = 0; i < tiler_n; ++i) {
             auto subtiler_def = tiler_def->proj(i);
-            world.ELOG("FRIEDRICH subtiler {}", subtiler_def);
             auto subtiler_opt = extract_layout_static(subtiler_def);
             if (!subtiler_opt) return {};
-            auto& subtiler = subtiler_opt.value();
-
-            RecLayout sublayout = layout_ith_sublayout(layout, i);
-            RecLayout subresult = layout_logical_divide(sublayout, subtiler);
-            print_layout(sublayout, " div ");
-            print_layout(subtiler, " = ");
-            print_layout(subresult);
-            tile_layouts.emplace_back(layout_ith_sublayout(subresult, 0));
-            outer_layouts.emplace_back(layout_ith_sublayout(subresult, 1));
+            tiler_layouts.emplace_back(std::move(subtiler_opt.value()));
         }
-        for (size_t i = tiler_n; i < layout.dims.items.size(); ++i)
-            outer_layouts.emplace_back(layout_ith_sublayout(layout, i));
-        tile_layout  = layout_concat(std::move(tile_layouts), false);
-        outer_layout = layout_concat(std::move(outer_layouts), false);
     }
-    print(std::cerr, "FRIEDRICH: logical layout: ");
-    print_layout(outer_layout);
-    print_layout(tile_layout);
-    // print_layout(logical_div);
 
-    tile_layout  = layout_simplify(std::move(tile_layout));
-    outer_layout = layout_simplify(std::move(outer_layout));
-
-    // RecLayout zipped_div = layout_zipped_divide(layout, tiler);
-
-    print(std::cerr, "FRIEDRICH: logical layout: ");
-    print_layout(outer_layout);
-    print_layout(tile_layout);
-    // print(std::cerr, "FRIEDRICH: zipped layout: ");
-    // print_layout(zipped_div);
-
-    print(std::cerr, "FRIEDRICH: outer layout: ");
-    print_layout(outer_layout);
-    print(std::cerr, "FRIEDRICH: tile layout: ");
-    print_layout(tile_layout);
+    auto pair          = zipped_divide(layout, tiler_layouts);
+    auto& tile_layout  = pair.first;
+    auto& outer_layout = pair.second;
 
     DefVec result;
     result.emplace_back(make_layout(world, std::move(tile_layout)));
     result.emplace_back(make_layout(world, std::move(outer_layout)));
     return world.tuple(result);
+}
+
+const Def* normalize_tile(const Def* type, const Def* callee, const Def* arg) {
+    auto& world = type->world();
+
+    auto [num_tilers, tiler_defs] = arg->projs<2>();
+
+    auto tiler_n_lit = Lit::isa(num_tilers);
+    if (!tiler_n_lit) return {};
+    auto tiler_n = tiler_n_lit.value();
+
+    auto callee_app = callee->isa<App>();
+    assert(callee_app);
+    auto [implicits, mat] = callee_app->uncurry_args<2>();
+
+    auto [layout_def, _] = implicits->projs<2>();
+    auto layout_opt      = extract_layout_static(layout_def);
+    if (!layout_opt) return {};
+    auto& layout = layout_opt.value();
+
+    Vector<layalg::Layout> tilers, tiler_complements;
+    for (size_t i = 0; i < tiler_n; ++i) {
+        auto tiler_def = tiler_defs->proj(i);
+        auto tiler_opt = extract_layout_static(tiler_def);
+        if (!tiler_opt) return {};
+        auto& tiler = tiler_opt.value();
+
+        auto sublay           = layalg::sublayout(layout, i);
+        auto sublay_size      = layalg::size(sublay);
+        auto tiler_flat_compl = layalg::complement(tiler, sublay_size);
+        auto tiler_complement = layalg::elevate(std::move(tiler_flat_compl));
+
+        tilers.emplace_back(std::move(tiler));
+        tiler_complements.emplace_back(std::move(tiler_complement));
+    }
+
+    auto pair          = zipped_divide(layout, tilers);
+    auto& tile_layout  = pair.first;
+    auto& outer_layout = pair.second;
+
+    return {};
 }
 
 MIM_matrix_NORMALIZER_IMPL
