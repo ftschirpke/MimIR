@@ -18,7 +18,6 @@ void register_error(py::module_&);
 namespace mim::ast{
     void init_ast(py::module_&);
     void init_parser(py::module_&);
-    void init_parser_wrapper(py::module_&);
 }
 
 
@@ -28,20 +27,22 @@ void init_sym_pool(py::module_&);
 }
 
 PYBIND11_MODULE(mim, m) {
-    mim::init_world(m);
-    mim::init_def(m);
+    // Register foundational types first so World's method signatures resolve
+    // to Python class names instead of raw C++ spellings ("mim::Lit" -> "Lit").
+    mim::init_def(m);       // Def, Lit
     mim::init_lit(m);
-    fe::init_sym(m);
+    fe::init_sym(m);        // Sym
     fe::init_sym_pool(m);
-    mim::init_driver(m);
+    mim::init_lam(m);       // Pi, Lam (derive from Def)
+    mim::init_pi(m);
 
+    mim::init_world(m);
+
+    mim::init_driver(m);
     mim::ast::init_ast(m);
     mim::init_log(m);
     mim::init_flags(m);
-    mim::init_lam(m);
-    mim::init_pi(m);
     mim::ast::init_parser(m);
-    mim::ast::init_parser_wrapper(m);
     // mim::init_app(m);
 
     mim::register_error(m);

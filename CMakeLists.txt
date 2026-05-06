@@ -116,10 +116,34 @@ add_custom_target(mim_py_venv
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${MIM_PY_VENV}"
     COMMAND "${Python3_EXECUTABLE}" -m venv "${MIM_PY_VENV}"
     COMMAND "${MIM_PY_PYTHON}" -m pip install --upgrade pip
-    COMMAND "${MIM_PY_PYTHON}" -m pip install build
+    COMMAND "${MIM_PY_PYTHON}" -m pip install build pybind11-stubgen
     COMMENT "mim_py: (re)creating ${MIM_PY_VENV}"
     VERBATIM
 )
+
+# Generate __init__.pyi for the mim_py package via pybind11-stubgen.
+# Output lands in build/mim_py_stubs/mim_py/__init__.pyi, then is mirrored
+# into the source tree so Pyright (extraPaths -> mim_py/src) sees fresh types
+# and the wheel build picks it up via the source-tree copy below.
+set(_mim_py_stubs_build "${CMAKE_BINARY_DIR}/mim_py_stubs/mim_py")
+add_custom_target(mim_py_stubs
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_mim_py_stubs_build}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_mim_py_stubs_build}"
+    COMMAND "${CMAKE_COMMAND}" -E env
+            "PYTHONPATH=$<TARGET_FILE_DIR:pymim>"
+            "${MIM_PY_PYTHON}" -m pybind11_stubgen
+                --output-dir "${CMAKE_BINARY_DIR}/mim_py_stubs"
+                mim
+    COMMAND "${CMAKE_COMMAND}" -E rename
+            "${CMAKE_BINARY_DIR}/mim_py_stubs/mim.pyi"
+            "${_mim_py_stubs_build}/__init__.pyi"
+    COMMAND "${CMAKE_COMMAND}" -E copy
+            "${_mim_py_stubs_build}/__init__.pyi"
+            "${PROJECT_SOURCE_DIR}/mim_py/src/mim_py/__init__.pyi"
+    COMMENT "mim_py: generating __init__.pyi via pybind11-stubgen"
+    VERBATIM
+)
+add_dependencies(mim_py_stubs pymim mim_py_venv)
 
 # main mim_py package: stage source, drop pymim .so in, build wheel, pip install
 set(_mim_py_main_stage  "${MIM_PY_STAGE}/main")
@@ -140,7 +164,7 @@ add_custom_target(mim_py_main
     COMMENT "mim_py: building & installing main package"
     VERBATIM
 )
-add_dependencies(mim_py_main pymim mim_all_plugins mim_py_venv)
+add_dependencies(mim_py_main pymim mim_all_plugins mim_py_venv mim_py_stubs)
 
 # plugins: discovered at configure time under mim_py/plugins/*/pyproject.toml
 file(GLOB _mim_py_plugin_tomls CONFIGURE_DEPENDS

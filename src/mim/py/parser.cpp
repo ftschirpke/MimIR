@@ -1,6 +1,5 @@
 #include <pybind11/pybind11.h>
 
-#include "parser_wrapper.cpp"
 #include <mim/ast/parser.h>
 #include <pybind11/stl.h>
 
@@ -17,12 +16,5 @@ void init_parser(py::module_& m) {
             if (auto mod = p.plugin(plug)) mod->compile(ast);
         });
 }
-
-void init_parser_wrapper(py::module_& m){
-    py::class_<mim::ast::PyParser>(m, "PyParser")
-        .def(py::init<mim::ast::Parser*>())
-        .def("plugin", &mim::ast::PyParser::plugin);
-}
-
 
 } // namespace mim::ast

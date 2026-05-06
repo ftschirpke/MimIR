@@ -163,3 +163,4 @@ class MimRegex():
     def jit(self):
         self.builder_._set_final_def(self.def_)
         return self.builder_.jit()
+        

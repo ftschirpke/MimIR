@@ -50,8 +50,6 @@ void init_world(py::module_& m) {
             "mut_fun",
             [](mim::World& w, const mim::Def* dom, std::vector<mim::Def*> codom) {
                 auto d = dom;
-
-                // std::cout << "called mut_fun with domain: " << d << std::endl;
                 return w.mut_fun(dom, codom);
             },
             py::return_value_policy::reference_internal)
@@ -62,21 +60,11 @@ void init_world(py::module_& m) {
             "call_by_id",
             [](mim::World& w, uint64_t id, std::vector<Def*> args) {
                 if (args.size() < 1) return w.annex(id);
-                // auto defs = args.cast<std::vector<mim::Def*>>();
-                // for (auto d : defs)
-                // {
-                //     std::cout << d << std::endl;
-                // }
                 return w.call(id, mim::Defs(args));
             },
             pybind11::arg("sym"), pybind11::arg("args") = std::vector<mim::Def*>())
         .def("optimize",
              [](mim::World& w) {
-                 // std::cout << "printing world externals: " << std::endl;
-                 // for(auto[sym, _] :  w.externals().sym2mut()){
-                 //     std::cout << sym.str() << std::endl;
-                 // }
-                 // std::cout << "----" << std::endl;
                  mim::optimize(w);
              })
         .def("dot", static_cast<void (World::*)(const char*, bool, bool) const>(&mim::World::dot))
