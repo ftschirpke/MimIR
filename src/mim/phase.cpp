@@ -49,7 +49,11 @@ Def* Analysis::rewrite_mut(Def* mut) {
         if (mut->isa<Lam>())
             for (auto var : mut->tvars()) {
                 map(var, var);
-                lattice_[var] = var;
+                if (auto [i, ins] = lattice_.emplace(var, var); !ins && i->second != var) {
+                    // var was mapped to sth else beforehand so we need another fixed-point round
+                    invalidate();
+                    i->second = var;
+                }
             }
     }
 
