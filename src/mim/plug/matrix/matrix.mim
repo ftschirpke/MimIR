@@ -32,8 +32,7 @@ lam %matrix.MatIdx (layout: %matrix.Layout) =
 ///
 /// TODO: description
 /// NOTE: this current implementation is intuitive and useful, but nothing prevents the user to fake the strides
-lam %matrix.Mat (layout: %matrix.Layout) (T: *) : * =
-    {a: Nat} → [%mem.M a, %matrix.MatIdx layout] → [%mem.M a, T];
+lam %matrix.Mat (layout: %matrix.Layout) (T: *) : * = {a: Nat} → [%mem.M a, %matrix.MatIdx layout] → [%mem.M a, T];
 // TODO: ensure dims and strides have equal n and ms
 ///
 /// ## Operations
@@ -84,15 +83,15 @@ axm %matrix.size: %matrix.Layout → Nat, normalize_size;
 /// ### %%matrix.get
 ///
 /// Retrieve an element from a %%matrix.Mat
-lam %matrix.get {a: Nat, layout: %matrix.Layout, T: *} (mat: %matrix.Mat layout T)
+lam %matrix.get {layout: %matrix.Layout, a: Nat, T: *} (mat: %matrix.Mat layout T)
                 (mem: %mem.M a, idx: %matrix.MatIdx layout) : [%mem.M a, T] = mat (mem, idx);
 // TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_1DtoND
 ///
 /// Converts one-dimensional index to multi-dimensional equivalent for given dimensions and strides.
-axm %matrix.idx_1DtoND: {n a: Nat} → [layout: %matrix.Layout]
-                      → [%mem.M a, Idx n] → [%mem.M a, %matrix.MatIdx layout], normalize_idx_1DtoND;
+axm %matrix.idx_1DtoND: {n a: Nat} → [layout: %matrix.Layout] → [%mem.M a, Idx n]
+                      → [%mem.M a, %matrix.MatIdx layout], normalize_idx_1DtoND;
 // TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_NDto1D
@@ -117,7 +116,8 @@ lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (layout: %matrix.Layo
     lm {a: Nat} (mem: %mem.M a, idx: %matrix.MatIdx layout) : [%mem.M a, Opts#OutT] =
         let idx1d = %matrix.idx_NDto1D layout idx;
         let idx1d = %core.bitcast (Idx Opts#n) idx1d; // TODO: remove - this should be checked via refly
-        (mem, Opts#extract (data, idx1d));
+        let result = Opts#extract (data, idx1d);
+        (mem, result);
 // TODO: validate strides
 ///
 /// ### Layout Operations
@@ -125,12 +125,14 @@ lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (layout: %matrix.Layo
 /// Operations on matrix layouts.
 axm %matrix.layout_complement: %matrix.Layout → Nat → %matrix.Layout, normalize_layout_complement;
 axm %matrix.layout_composition: %matrix.Layout → %matrix.Layout → %matrix.Layout, normalize_layout_composition;
-axm %matrix.layout_zip_divide: %matrix.Layout → %matrix.Tiler
-                             → «2; %matrix.Layout», normalize_layout_zip_divide;
+axm %matrix.layout_zipped_divide: %matrix.Layout → %matrix.Tiler → «2; %matrix.Layout», normalize_layout_zipped_divide;
 ///
 /// ### %%matrix.tile
 ///
 /// Tiles a %%matrix.Mat given the dimensions and strides of the tiles.
+axm %matrix.tile: {layout: %matrix.Layout, T: *} → %matrix.Mat layout T → [tiler: %matrix.Tiler]
+                → let (tile_layout, outer_layout) = %matrix.layout_zipped_divide layout tiler;
+                  %matrix.Mat outer_layout (%matrix.Mat tile_layout T), normalize_tile;
 // lam %matrix.tile {layout: %matrix.Layout, T: *}
 //                  (mat: %matrix.Mat layout T) (n: Nat, tiler: «n; %matrix.Layout») =
 //     let layout_size = %matrix.size layout;
