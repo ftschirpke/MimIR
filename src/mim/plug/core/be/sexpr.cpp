@@ -33,14 +33,17 @@ struct BB {
     }
 
     template<class... Args>
-    std::string assign(Tab tab, bool slotted, std::string name, const char* s, Args&&... args) {
+    std::string
+    assign(Tab tab, bool slotted, bool typed, std::string name, std::string type, const char* s, Args&&... args) {
         if (!assigned.contains(name)) {
             assigned.insert(name);
             auto& os = body().emplace_back();
             if (slotted) {
                 tab.lnprint(os, "(let");
                 ++tab;
+                if (typed) tab.lnprint(os, "(@ {}", type);
                 tab.lnprint(os, "{}", name);
+                if (typed) print(os, ")");
                 tab.lnprint(os, "(scope");
                 ++tab;
                 tab.lnprint(os, s, std::forward<Args&&>(args)...);
@@ -49,7 +52,9 @@ struct BB {
             } else {
                 tab.lnprint(os, "(let");
                 ++tab;
+                if (typed) tab.lnprint(os, "(@ {}", type);
                 tab.lnprint(os, "{}", name);
+                if (typed) print(os, ")");
                 tab.lnprint(os, s, std::forward<Args&&>(args)...);
                 --tab;
             }
@@ -58,21 +63,25 @@ struct BB {
     }
 
     template<class Fn>
-    std::string assign(Tab tab, bool slotted, std::string name, Fn&& print_term) {
+    std::string assign(Tab tab, bool slotted, bool typed, std::string name, std::string type, Fn&& print_term) {
         if (!assigned.contains(name)) {
             assigned.insert(name);
             auto& os = body().emplace_back();
             if (slotted) {
                 tab.lnprint(os, "(let");
                 ++tab;
+                if (typed) tab.lnprint(os, "(@ {}", type);
                 tab.lnprint(os, "{}", name);
+                if (typed) print(os, ")");
                 tab.lnprint(os, "(scope");
                 print_term(tab, os);
                 --tab;
             } else {
                 tab.lnprint(os, "(let");
                 ++tab;
+                if (typed) tab.lnprint(os, "(@ {}", type);
                 tab.lnprint(os, "{}", name);
+                if (typed) print(os, ")");
                 --tab;
                 print_term(tab, os);
             }
@@ -250,17 +259,21 @@ void Emitter::emit_imported(Lam* lam) {
     if (slotted()) {
         print(func_decls_, "(root {} {}", ext, id(lam));
         ++tab;
+        if (typed()) tab.lnprint(func_decls_, "(@ {}", emit_type(bb, lam->type()));
         tab.lnprint(func_decls_, "(lam");
         print(func_decls_, "{}", emit_var(bb, lam->var(), lam->type()->dom()));
         ++tab;
         tab.lnprint(func_decls_, "(scope nil nil)");
         --tab;
+        if (typed()) print(func_decls_, ")");
         print(func_decls_, "))\n\n");
         --tab;
 
     } else {
+        if (typed()) tab.lnprint(func_decls_, "(@ {}", emit_type(bb, lam->type()));
         print(func_decls_, "(lam {} {}", ext, id(lam));
         print(func_decls_, "{}", emit_var(bb, lam->var(), lam->type()->dom()));
+        if (typed()) print(func_decls_, ")");
         print(func_decls_, ")\n\n");
     }
 }
@@ -638,8 +651,9 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
 
     std::vector<std::string> op_vals;
 
+    auto type_val = emit_type(bb, def->type());
     if (with_type) {
-        if (auto type_val = emit_bb(bb, def->type()); !type_val.empty()) op_vals.push_back(type_val);
+        if (!type_val.empty()) op_vals.push_back(type_val);
     }
 
     // This is a bit of an edge case? because the ops of a pack don't contain its arity
@@ -652,9 +666,9 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
     if (!def->sym().empty() && vars_enabled_) {
         // 1) Emits a let-binding to the lambda body() and then emits the name of the binding in the lambda tail()
 
-        bb.assign(tab, slotted(), id(def), [&](Tab tab, auto& os) {
+        bb.assign(tab, slotted(), typed(), id(def), type_val, [&](Tab tab, auto& os) {
             ++tab;
-            if (typed()) tab.lnprint(os, "(@ {}", emit_type(bb, def->type()));
+            if (typed()) tab.lnprint(os, "(@ {}", type_val);
 
             tab.lnprint(os, "({}", node_name);
 
@@ -697,10 +711,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
     ++tab;
     if (typed()) tab.lnprint(os, "(@ {}", emit_type(bb, def->type()));
 
-    if (def->type()->isa<Type>() || def->type()->isa<Univ>()) {
-        tab.lnprint(os, "{}", emit_type(bb, def));
-
-    } else if (auto lam = def->isa<Lam>()) {
+    if (auto lam = def->isa<Lam>()) {
         tab.lnprint(os, "{}", id(lam, true));
 
     } else if (auto lit = def->isa<Lit>()) {
@@ -764,17 +775,17 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
 
     } else if (auto bot = def->isa<Bot>()) {
         if (bot->sym().empty())
-            tab.lnprint(os, "(bot {})", emit_type(bb, bot->type()));
+            tab.lnprint(os, "(bot)");
         else {
-            bb.assign(tab, slotted(), id(bot), "(bot {})", emit_type(bb, bot->type()));
+            bb.assign(tab, slotted(), typed(), id(bot), emit_type(bb, bot->type()), "(bot)");
             tab.lnprint(os, "{}", id(bot, true));
         }
 
     } else if (auto top = def->isa<Top>()) {
         if (top->sym().empty())
-            tab.lnprint(os, "(top {})", emit_type(bb, top->type()));
+            tab.lnprint(os, "(top)");
         else {
-            bb.assign(tab, slotted(), id(top), "(top {})", emit_type(bb, top->type()));
+            bb.assign(tab, slotted(), typed(), id(top), emit_type(bb, top->type()), "(top)");
             tab.lnprint(os, "{}", id(top, true));
         }
 
@@ -822,7 +833,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
                 print(os, "{}", op_val);
             print(os, ")");
         } else {
-            bb.assign(tab, slotted(), id(proxy), [&](Tab tab, auto& os) {
+            bb.assign(tab, slotted(), typed(), id(proxy), emit_type(bb, proxy), [&](Tab tab, auto& os) {
                 ++tab;
                 tab.lnprint(os, "(proxy");
                 ++tab;
