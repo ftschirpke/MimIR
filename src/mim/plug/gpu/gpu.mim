@@ -50,6 +50,22 @@ lam %gpu.ConstSymPtr(id: Nat, T: *): *  = %gpu.SymPtr (id, T, %gpu.addr_space_co
 axm %gpu.Stream: *;
 axm %gpu.default_stream: %gpu.Stream;
 ///
+/// ### Grid
+///
+axm %gpu.WorkItem: *;
+axm %gpu.WorkGroup: Nat → *;
+axm %gpu.Grid: [Nat, Nat] → *;
+
+axm %gpu.for_each_group: {n_groups n_items n_in n_out: Nat, T: *, InTs: «n_in; *», OutTs: «n_out; *»}
+                       → %gpu.Grid (n_groups, n_items)
+                       → [Fn [Idx n_groups, %gpu.WorkGroup n_items, InTs] → OutTs]
+                       → Fn InTs → [%gpu.Grid (n_groups, n_items), OutTs];
+axm %gpu.for_each_item: {n_items n_in n_out: Nat, T: *, InTs: «n_in; *», OutTs: «n_out; *»}
+                      → %gpu.WorkGroup n_items
+                      → [Fn [Idx n_items, %gpu.WorkGroup n_items, InTs] → OutTs]
+                      → Fn InTs → [%gpu.WorkGroup n_items, OutTs];
+
+///
 /// ## Operations
 ///
 /// ### Context
@@ -247,9 +263,22 @@ let %gpu.alloc_copy.async = lm {T: *}
 /// Launches a kernel function on the device with dynamic shared memory and module symbols
 // TODO: refactor to {n m s: Nat, STs: «s; [Nat, *, Nat]»} as soon as bug is fixed
 axm %gpu.launch: {n: Nat, Ts: «n; *»}
-               → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream, m: Bool, s: Nat,
-                  STs: «s; [Nat, *, Nat]», «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
+               → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream,
+                  m: Bool, s: Nat, STs: «s; [Nat, *, Nat]», // TODO: these <- should all be implicit
+                  «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
                → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
+                     «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
+                     Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
+               → Fn «i: n; Ts#i» → %mem.M 0;
+///
+/// #### %%gpu.hier_launch
+///
+/// Launches a kernel function on the device with a hierarchical programming model
+axm %gpu.hier_launch: {n: Nat, Ts: «n; *»}
+               → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream,
+                  m: Bool, s: Nat, STs: «s; [Nat, *, Nat]», // <- should all be implicit
+                  «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
+               → Cn [%gpu.Grid (n_groups, n_items), %gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM,
                      «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
                → Fn «i: n; Ts#i» → %mem.M 0;
