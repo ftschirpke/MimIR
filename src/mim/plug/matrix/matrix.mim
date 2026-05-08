@@ -13,13 +13,19 @@ plugin refly;
 ///
 /// ### %%matrix.Layout
 ///
-/// Matrix layouts consist of dimensions of strides
+/// Matrix layouts consist of dimensions of strides and represent mappings from indices to indices
 let %matrix.Layout = [n: Nat, ms: «n; Nat», dims: «i: n; «j: ms#i; Nat»», strides: «i: n; «j: ms#i; Nat»»];
+// TODO: this representation of a layout is only an interim solution:
+// - preferably, layouts would consist of generally recursive tuples of Nat to allow any kind of mapping
+// - the type checker has a lot of problems with tuples/arrays of layouts this way,
+//   which is why functions below curry multiple layouts in the inputs instead of using «n; %matrix.Layout»
 ///
 /// ### %%matrix.Tiler
 ///
 /// Matrix layouts consist of dimensions of strides
 let %matrix.Tiler = [n: Nat, tilers: «i: n; %matrix.Layout»];
+// TODO: A tiler should just be a tuple of layouts. This type should not exist and it is just a consequence
+//       of the limitations of %matrix.Layout. It also inherits the type checking issues from %matrix.Layout.
 ///
 /// ### %%matrix.MatIdx
 ///
@@ -27,13 +33,17 @@ let %matrix.Tiler = [n: Nat, tilers: «i: n; %matrix.Layout»];
 lam %matrix.MatIdx (layout: %matrix.Layout) =
     let (n, ms, dims, _) = layout;
     «i: n; «j: ms#i; Idx dims#i#j»»;
+// TODO: the index type does not and should not depend on the layout's strides (and preferably also be recursive)
 ///
 /// ### %%matrix.Mat
 ///
-/// TODO: description
-/// NOTE: this current implementation is intuitive and useful, but nothing prevents the user to fake the strides
+/// A matrix is the mapping from an index to an output type facilitated by layouts (index-index mappings)
 lam %matrix.Mat (layout: %matrix.Layout) (T: *) : * = {a: Nat} → [%mem.M a, %matrix.MatIdx layout] → [%mem.M a, T];
-// TODO: ensure dims and strides have equal n and ms
+// TODO: this representation of a matrix as just a mapping from index to value is intuitive but has problems:
+// - the strides of the matrix layout are not encoded in the type (because the index ignores them; see above)
+//   -> thus, you usually need to supply the layout as an argument where it should have been implicit
+// - anyone can create such a type and call it a matrix - is this desirable?
+// - matrices should not actually require %mem.M a, but in tiled matrices we use idx_1DtoND which requires division
 ///
 /// ## Operations
 ///
@@ -46,61 +56,33 @@ lam %matrix.layout {n: Nat, ms: «n; Nat»} (dims: «i: n; «j: ms#i; Nat»») (
 ///
 /// ### %%matrix.tiler
 ///
-/// Creates a %%matrix.Tiler tuple from just the integer tuples for dimensions and strides
-lam %matrix.tiler (n: Nat) (tilers: «i: n; %matrix.Layout») : %matrix.Tiler = (n, tilers);
-lam %matrix.tiler1 (layout: %matrix.Layout) : %matrix.Tiler = (1, layout);
+/// Helper functions to create a %%matrix.Tiler tuple
+lam %matrix.tiler (layout: %matrix.Layout) : %matrix.Tiler = (1, layout);
 lam %matrix.tiler2 (l1: %matrix.Layout) (l2: %matrix.Layout) : %matrix.Tiler = (2, (l1, l2));
-///
-/// ### %%matrix.shape
-///
-/// Creates a 1-dimensional tuple of the dimensions of the matrix by flattening the given %%matrix.Dims object.
-/// In this context, flatten means multiplying the elements of the nested arrays into one number each
-lam %matrix.shape (layout: %matrix.Layout) : «layout#n; Nat» =
-    let (n, ms, dims, _) = layout;
-    <i: n; accumulate_dimension (i, 0, 1)>
-    where
-        lam accumulate_dimension (nidx: Idx n, mi acc: Nat) : Nat =
-            let m = ms#nidx;
-            let dim = dims#nidx;
-            let next_mi = %core.nat.add (mi, 1);
-            let mend = %core.ncmp.e (next_mi, m);
-            let midx = %core.idx m 0 mi;
-            let val = dim#midx;
-            let new_acc = %core.nat.mul (acc, val);
-            (accumulate_dimension, return_acc)#mend (nidx, next_mi, new_acc)
-            where
-                lam return_acc (nidx: Idx n, mi acc: Nat) : Nat = acc;
-            end;
-    end;
-// TODO: consider moving this into normalization (like the other functions below)
 ///
 /// ### %%matrix.size
 ///
 /// Calculates the total number elements expected for a matrix of the form of a given %%matrix.Dims object
 axm %matrix.size: %matrix.Layout → Nat, normalize_size;
-// TODO: consider moving this into normalization (like the other functions below)
 ///
 /// ### %%matrix.get
 ///
 /// Retrieve an element from a %%matrix.Mat
 lam %matrix.get {layout: %matrix.Layout, a: Nat, T: *} (mat: %matrix.Mat layout T)
                 (mem: %mem.M a, idx: %matrix.MatIdx layout) : [%mem.M a, T] = mat (mem, idx);
-// TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_1DtoND
 ///
 /// Converts one-dimensional index to multi-dimensional equivalent for given dimensions and strides.
 axm %matrix.idx_1DtoND: {n a: Nat} → [layout: %matrix.Layout] → [%mem.M a, Idx n]
                       → [%mem.M a, %matrix.MatIdx layout], normalize_idx_1DtoND;
-// TODO: ensure dims and strides have equal n and ms
 ///
 /// ### %%matrix.idx_NDto1D
 ///
 /// Converts multi-dimensional index to one-dimensional equivalent for given strides.
-/// Effectively, this is only a (potentially nested) dot-product of the multi-dimensional index with the strides.
+/// Effectively, this is only a dot-product of the index with the strides.
 axm %matrix.idx_NDto1D: [layout: %matrix.Layout] → %matrix.MatIdx layout
                       → Idx (%matrix.size layout), normalize_idx_NDto1D;
-// TODO: ensure dims and strides have equal n and ms
 
 let %matrix.MatrixCreateOptions = [n: Nat, DataT: *, OutT: *, extract: [DataT, Idx n] → OutT];
 
@@ -111,53 +93,23 @@ lam %matrix.MemMat (T: *, a n: Nat) : %matrix.MatrixCreateOptions =
 /// ### %%matrix.create_mat
 ///
 /// Create a %%matrix.Mat
-lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (layout: %matrix.Layout)
-                       (data: Opts#DataT) : %matrix.Mat layout (Opts#OutT) =
+lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (layout: %matrix.Layout) (data: Opts#DataT)
+                     : %matrix.Mat layout (Opts#OutT) =
     lm {a: Nat} (mem: %mem.M a, idx: %matrix.MatIdx layout) : [%mem.M a, Opts#OutT] =
         let idx1d = %matrix.idx_NDto1D layout idx;
-        let idx1d = %core.bitcast (Idx Opts#n) idx1d; // TODO: remove - this should be checked via refly
+        let idx1d = %core.bitcast (Idx Opts#n) idx1d; // TODO: remove bitcast and check via refly
         let result = Opts#extract (data, idx1d);
         (mem, result);
-// TODO: validate strides
 ///
 /// ### Layout Operations
 ///
 /// Operations on matrix layouts.
-axm %matrix.layout_complement: %matrix.Layout → Nat → %matrix.Layout, normalize_layout_complement;
-axm %matrix.layout_composition: %matrix.Layout → %matrix.Layout → %matrix.Layout, normalize_layout_composition;
-axm %matrix.layout_zipped_divide: %matrix.Layout → %matrix.Tiler → «2; %matrix.Layout», normalize_layout_zipped_divide;
+axm %matrix.tiling_layouts: %matrix.Layout → %matrix.Tiler
+                          → [tile_layout: %matrix.Layout, outer_layout: %matrix.Layout], normalize_tiling_layouts;
 ///
 /// ### %%matrix.tile
 ///
 /// Tiles a %%matrix.Mat given the dimensions and strides of the tiles.
 axm %matrix.tile: {layout: %matrix.Layout, T: *} → %matrix.Mat layout T → [tiler: %matrix.Tiler]
-                → let (tile_layout, outer_layout) = %matrix.layout_zipped_divide layout tiler;
-                  %matrix.Mat outer_layout (%matrix.Mat tile_layout T), normalize_tile;
-// lam %matrix.tile {layout: %matrix.Layout, T: *}
-//                  (mat: %matrix.Mat layout T) (n: Nat, tiler: «n; %matrix.Layout») =
-//     let layout_size = %matrix.size layout;
-//     let tiler_compl = <i: n; %matrix.layout_complement tiler#i layout_size>;
-//     let (tile_layout, outer_layout) = %matrix.layout_zip_divide layout (n, tiler);
-// 
-//     lm {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx outer_layout)
-//      : [%mem.M outer_a, %matrix.Mat tile_layout T] =
-//         let outer_idx = %matrix.idx_NDto1D outer_layout outer_idx;
-//         let (outer_mem, outer_idx) = %matrix.idx_1DtoND tiler_compl (outer_mem, outer_idx);
-//         let outer_off = %matrix.idx_NDto1D tiler_compl outer_idx;
-//         (outer_mem, inner_mat)
-//         where
-//             lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx tile_layout)
-//               : [%mem.M a, T] =
-//                 let inner_idx = %matrix.idx_NDto1D tile_layout inner_idx;
-//                 let (mem, inner_idx) = %matrix.idx_1DtoND tiler (mem, inner_idx);
-//                 let inner_idx = %matrix.idx_NDto1D tiler inner_idx;
-// 
-//                 let IdxT = Idx (%matrix.size layout);
-//                 let outer_idx = %core.bitcast IdxT outer_idx;
-//                 let inner_idx = %core.bitcast IdxT inner_idx;
-//                 let idx = %core.wrap.add 0 (outer_idx, inner_idx);
-// 
-//                 let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
-//                 mat (mem, idx);
-//         end;
-
+                → let (tile_layout, outer_layout) = %matrix.tiling_layouts layout tiler;
+                  [%matrix.Mat outer_layout (%matrix.Mat tile_layout T)], normalize_tile, 3;
