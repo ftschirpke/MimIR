@@ -313,7 +313,6 @@ axm %gpu.host_malloc2gpualloc_repl: %compile.Repl;
 ///
 axm %gpu.mem_checks_phase:                 %compile.Phase;
 axm %gpu.remove_double_syncs:              %compile.Phase;
-axm %gpu.device_rewrite_kernel_args_phase: %compile.Phase;
 axm %gpu.setup4backend:                    %compile.Phase;
 ///
 /// ### Pipelines
@@ -330,5 +329,4 @@ lam %gpu.host_specific_phases () = %compile.phases ff (
 );
 lam %gpu.device_specific_phases () = %compile.phases ff (
     %gpu.remove_double_syncs,
-    %gpu.device_rewrite_kernel_args_phase,
 );

@@ -77,7 +77,6 @@ void HostEmitter::start() {
         find_kernels(def);
 
     for (auto [kernel, kid] : kernel_ids_) {
-        ILOG("FRIEDRICH HostEmitter determined '{}' to be a kernel", kernel);
         auto name = id(kernel).substr(1);
         print(vars_decls_, "{}{} = private constant [{} x i8] c\"{}\\00\"\n", kernel_name_prefix, kid, name.size() + 1,
               name);
@@ -625,7 +624,6 @@ void DeviceEmitter::start() {
     for (auto kernel : world().externals().muts()) {
         auto kernel_lam = kernel->isa_mut<Lam>();
         assert(kernel_lam && "Expect kernel passed to %gpu.launch to be a mutable lambda");
-        ILOG("FRIEDRICH DeviceEmitter determined '{}' to be a kernel", kernel);
         kernels_.emplace(kernel_lam);
     }
     Super::start();
@@ -693,7 +691,6 @@ std::string DeviceEmitter::prepare() {
         print(vars_decls_, "{} = internal addrspace({}) global {} undef\n", name, a, convert(T));
     }
 
-    ILOG("Found symbol variables in kernel definition: {} : {}", symptrs, symptrs->type());
     DefVec syms;
     if (auto sigma = symptrs->type()->isa<Sigma>())
         for (auto op : sigma->ops())

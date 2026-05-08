@@ -8,7 +8,6 @@
 
 #include <mim/plug/gpu/phase/mem_checks.h>
 #include <mim/plug/gpu/phase/remove_double_syncs.h>
-#include <mim/plug/gpu/phase/rewrite_kernel_args.h>
 #include <mim/plug/gpu/phase/setup4backend.h>
 #include <mim/plug/mem/mem.h>
 
@@ -65,7 +64,6 @@ void reg_stages(Flags2Stages& stages) {
     Stage::hook<gpu::mem_checks_phase,                 gpu::phase::MemChecks        >(stages);
     Stage::hook<gpu::remove_double_syncs,              gpu::phase::RemoveDoubleSyncs>(stages);
     Stage::hook<gpu::setup4backend,                    gpu::phase::Setup4Backend    >(stages);
-    Stage::hook<gpu::device_rewrite_kernel_args_phase, gpu::phase::RewriteKernelArgs>(stages);
     // clang-format on
 }
 
