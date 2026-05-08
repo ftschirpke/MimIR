@@ -6,6 +6,16 @@
 
 namespace mim::plug::matrix::layalg {
 
+//
+// This file implements many of the Layout algebra operations found in CuTe and is inspired by the Python implementation
+// * see https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/02_layout_algebra.html
+// * see https://github.com/NVIDIA/cutlass/blob/main/python/pycute/layout.py
+//
+// The implementations in this file assume all layouts to be static, i.e. compile-time-known literals,
+// and all indices to be dynamic, i.e. calculations are done in the IR.
+// TODO: Is there a way to perform the operations on the MimIR's `Nat` nodes directly and is there a use case for it?
+
+// TODO: remove
 static void print_tuple(const NatTuple& tup) {
     print(std::cerr, "(");
     bool first = true;
@@ -30,6 +40,7 @@ static void print_tuple(const NatTuple& tup) {
     print(std::cerr, ")");
 }
 
+// TODO: remove
 static void print_layout(const Layout& layout, const char* end) {
     print_tuple(layout.dims);
     print(std::cerr, " : ");
@@ -37,6 +48,7 @@ static void print_layout(const Layout& layout, const char* end) {
     print(std::cerr, end);
 }
 
+// TODO: remove
 static void print_layout(const Layout& layout) { print_layout(layout, "\n"); }
 
 using FlatNatTuple = Vector<nat_t>;
@@ -311,6 +323,33 @@ std::pair<Layout, Layout> zipped_divide(const Layout& layout, const Vector<Layou
     return std::make_pair(tile_layout, outer_layout);
 }
 
+static NatTuple impl_tuple_prefix_product(nat_t start, const NatTuple& tuple) {
+    NatTuple result;
+    for (const auto& element : tuple.items) {
+        switch (element.index()) {
+            case 0: // nat_t
+            {
+                auto value = std::get<0>(element);
+                result.items.push_back(start);
+                start *= value;
+                break;
+            }
+            case 1: // NatTuple
+            {
+                const auto& inner_tuple = std::get<1>(element);
+                nat_t product           = 1;
+                tuple_visit(inner_tuple, [&product](nat_t value) { product *= value; });
+                result.items.emplace_back(impl_tuple_prefix_product(start, inner_tuple));
+                start *= product;
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+NatTuple tuple_prefix_product(const NatTuple& tuple) { return impl_tuple_prefix_product(1, tuple); }
+
 std::pair<const Def*, const Def*> idx_1DtoND(World& world, const Def* mem, const Def* idx, const Layout& layout) {
     auto is_integral = layout.dims.items.size() == 1 && std::get_if<nat_t>(&layout.dims.items[0]);
     if (is_integral) {
@@ -343,6 +382,37 @@ std::pair<const Def*, const Def*> idx_1DtoND(World& world, const Def* mem, const
         tuple_entries.push_back(pair.second);
     }
     return std::make_pair(mem, world.tuple(tuple_entries));
+}
+
+const Def* idx_NDto1D(World& world, nat_t idx_size, const NatTuple& strides, const Def* nd_idx) {
+    assert(strides.items.size() == nd_idx->num_projs());
+
+    auto add               = world.call(core::wrap::add, world.lit_nat_0());
+    auto mul               = world.call(core::wrap::mul, world.lit_nat_0());
+    const Def* dot_product = static_cast<const Def*>(world.lit_idx(idx_size, 0));
+    for (size_t i = 0; i < strides.items.size(); ++i) {
+        auto bitcast = world.call<core::bitcast>(world.type_idx(idx_size));
+        auto& stride = strides.items[i];
+        const Def* product;
+        switch (stride.index()) {
+            case 0: // nat_t
+            {
+                auto lit_stride = std::get<0>(stride);
+                auto idx_stride = world.lit_idx(idx_size, lit_stride);
+                auto idx        = world.app(bitcast, nd_idx->proj(i));
+                product         = world.app(mul, {idx_stride, idx});
+                break;
+            }
+            case 1: // NatTuple
+            {
+                const auto& tup_stride = std::get<1>(stride);
+                product                = idx_NDto1D(world, idx_size, tup_stride, nd_idx->proj(i));
+                break;
+            }
+        }
+        dot_product = world.app(add, {dot_product, product});
+    }
+    return dot_product;
 }
 
 } // namespace mim::plug::matrix::layalg

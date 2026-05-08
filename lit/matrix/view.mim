@@ -1,88 +1,16 @@
 // RUN: rm -f %t.ll
 // RUN: %mim %s
 
-// let %nvptx.warp = %matrix.ThreadMat 32 1;
-//
-// ldmatrix per thread: i.e. (%matrix.Mat (2, 2) (2, 1) (%matrix.ThreadMat 8 1))
-// thus:
-//     (maybe integrate into op)
-//      %matrix.Idx (2, 2) (2, 1) (%matrix.Idx 8 1) // thread index - 2nd part = Idx 8
-// axm %nvptx.ldmatrix: [%matrix.MemMat (1, 8) (8, 1) (%math.F16, %gpu.addr_space_shared)]
-//                   -> [%matrix.Mat (2, 2) (2, 1) (%matrix.MemMat (1, 2) (2, 1) (%math.F16, %gpu_addr_space_local))]
-//
-// for quad pairs:
-// ... execute block with %matrix.ThreadMat (4, 2) (1, 16) -> %matrix.Idx (4, 2)  i.e. multi-dimensional indices
-
 plugin core;
 plugin gpu;
 plugin matrix;
 plugin mem;
 
-let d = 4;
-let n = 1024;
-let s = %core.nat.mul (n, d);
-let a = 0;
-let T = I32;
-
-// fun extern f (mem : %mem.M a) =
-//     let (mem, ptr) = %mem.alloc («s; T», a) mem;
-//     let layout = %matrix.layout (n, d) (1, n);
-//     let mat = %matrix.create_mat (%matrix.MemMat (T, a, s)) layout ptr;
-//     let idx = (%core.idx n 0 4, 3_4);
-//     // let idx = %matrix.dims (4, 3);
-//     let (mem, val_ptr) = mat (mem, idx);
-//     let (mem, val) = %mem.load (mem, val_ptr);
-//     let shape = %matrix.shape layout;
-//     let size = %matrix.size layout;
-// 
-//     let test = mat;
-//     return (mem, val, shape, size, test);
-
-fun extern complement1 () =
-    let layout = %matrix.layout (2, 4) (1, 6);
-    let size = 24;
-
-    let compl = %matrix.layout_complement layout size;
-    // EXPECTATION => (3) : (2)
-    return compl;
-
-fun extern complement2 () =
-    let layout = %matrix.layout (2, 2) (1, 6);
-    let size = 24;
-
-    let compl = %matrix.layout_complement layout size;
-    // EXPECTATION => (3, 2) : (2, 12)
-    return compl;
-
-fun extern composition1 () =
-    let layout1 = %matrix.layout (6, 2) (8, 2);
-    let layout2 = %matrix.layout (4, 3) (3, 1);
-
-    let comp = %matrix.layout_composition layout1 layout2;
-    // EXPECTATION => ((2, 2), 3) : ((24, 2), 8)
-    return comp;
-
-fun extern composition2 () =
-    let layout1 = %matrix.layout 20 2;
-    let layout2 = %matrix.layout (5, 4) (4, 1);
-
-    let comp = %matrix.layout_composition layout1 layout2;
-    // EXPECTATION => (5, 4) : (8, 2)
-    return comp;
-
-fun extern composition3 () =
-    let layout1 = %matrix.layout (10, 2) (16, 4);
-    let layout2 = %matrix.layout (5, 4) (1, 5);
-
-    let comp = %matrix.layout_composition layout1 layout2;
-    // EXPECTATION => (5, (2, 2)) : (16, (80, 4))
-    return comp;
-
 fun extern divide1 () =
     let layout = %matrix.layout (4, 2, 3) (2, 1, 8);
-    let tiler = %matrix.tiler 1 (%matrix.layout 4 2);
+    let tiler = %matrix.tiler (%matrix.layout 4 2);
 
-    let div = %matrix.layout_zipped_divide layout tiler;
+    let div = %matrix.tiling_layouts layout tiler;
     // EXPECTATION => ((2, 2), (2, 3)) : ((4, 1), (2, 8))
     return div;
 
@@ -90,10 +18,9 @@ fun extern divide2 () =
     let layout = %matrix.layout (9, (4, 8)) (59, (13, 1));
     let tiler = %matrix.tiler2 (%matrix.layout 3 3) (%matrix.layout (2, 4) (1, 8));
 
-    let div = %matrix.layout_zipped_divide layout tiler;
+    let div = %matrix.tiling_layouts layout tiler;
     // EXPECTATION => ((3, 3), ((2, 4), (2, 2)) : ((177, 59), ((13, 2), (26, 1)))
     return div;
-
 
 fun extern idx_map1 (mem: %gpu.SharedM) =
     let layout = %matrix.layout (4, 8) (8, 1);
@@ -112,71 +39,48 @@ fun extern idx_map2 (mem: %gpu.SharedM) =
     //             => ((ff, tt), (ff, 2_4))
     return (mem, mat_idx);
 
-lam dumbtile {layout: %matrix.Layout}
-         (mat: %matrix.Mat layout (%mem.Ptr0 I32), size: Nat) (tiler: %matrix.Tiler) =
-    // let layout_size = %matrix.size (%matrix.layout_dims layout);
-    // let tiler_compl = %matrix.layout_complement (n, tiler) layout_size;
-    let (tile_layout, outer_layout) = %matrix.layout_zipped_divide layout tiler;
-    // let size = %matrix.size layout;
-
-    (outer_layout, tile_layout, outer_mat)
-    where
-        lam outer_mat {outer_a: Nat} (outer_mem: %mem.M outer_a, outer_idx: %matrix.MatIdx outer_layout)
-                    : [%mem.M outer_a, %matrix.Mat tile_layout (%mem.Ptr0 I32)] =
-            let outer_idx = %matrix.idx_NDto1D outer_layout outer_idx;
-            (outer_mem, inner_mat)
-            where
-                lam inner_mat {a: Nat} (mem: %mem.M a, inner_idx: %matrix.MatIdx tile_layout)
-                            : [%mem.M a, %mem.Ptr0 I32] =
-                    let inner_idx = %matrix.idx_NDto1D tile_layout inner_idx;
-
-                    let outer_idx = %core.bitcast (Idx 16) 1;
-                    let inner_idx = %core.bitcast (Idx 16) 4;
-
-                    let outer_idx = %core.bitcast (Idx 32) outer_idx;
-                    let inner_idx = %core.bitcast (Idx 32) inner_idx;
-
-                    let idx = %core.wrap.add 0 (outer_idx, inner_idx);
-                    let idx = %core.bitcast (Idx 32) idx;
-
-                    let (mem, idx) = %matrix.idx_1DtoND layout (mem, idx);
-                    mat (mem, idx);
-            end;
-    end;
-
-fun extern t1 (mem: %mem.M 0) =
-    let layout = %matrix.layout (4, 8) (1, 4);
-
-    let test = %matrix.size layout;
-
-    return (mem, test);
-
-fun extern tile1 (mem: %mem.M 0) =
+fun extern tile1 (mem: %mem.M 0, ptr: %mem.Ptr0 «32; I32») =
     let layout = %matrix.layout (4, 8) (1, 4);
     let tiler = %matrix.tiler2 (%matrix.layout 2 1) (%matrix.layout 4 1);
 
-    let (mem, ptr) = %mem.alloc («32; I32», 0) mem;
+    let mat = %matrix.create_mat (%matrix.MemMat (I32, 0, 32)) layout ptr;
 
-    let vals: «32; I32» = (
-        0I32, 1I32, 2I32, 3I32, 4I32, 5I32, 6I32, 7I32, 8I32, 9I32,
-        10I32, 11I32, 12I32, 13I32, 14I32, 15I32, 16I32, 17I32, 18I32, 19I32,
-        20I32, 21I32, 22I32, 23I32, 24I32, 25I32, 26I32, 27I32, 28I32, 29I32,
-        30I32, 31I32
-    );
+    let (tile_layout, outer_layout) = %matrix.tiling_layouts layout tiler;
+    let mat = %matrix.tile@(layout, %mem.Ptr0 I32) mat tiler;
 
-    let mem = %mem.store (mem, ptr, vals);
+    let (mem, A1) = mat (mem, (tt, tt));
+    let (mem, A2) = A1 (mem, (ff, 3_4));
+    // EXPECTATION => lea 30_32
+
+    let (mem, B1) = mat (mem, (ff, tt));
+    let (mem, B2) = B1 (mem, (tt, 0_4));
+    // EXPECTATION => lea 17_32
+
+    let (mem, C1) = mat (mem, (tt, ff));
+    let (mem, C2) = C1 (mem, (tt, 2_4));
+    // EXPECTATION => lea 11_32
+
+    return (mem, A2, B2, C2);
+
+fun extern tile2 (mem: %mem.M 0, ptr: %mem.Ptr0 «32; I32») =
+    let layout = %matrix.layout (4, 8) (1, 4);
+    let tiler = %matrix.tiler2 (%matrix.layout 2 2) (%matrix.layout (2, 2) (1, 4));
 
     let mat = %matrix.create_mat (%matrix.MemMat (I32, 0, 32)) layout ptr;
 
-    let (tl, ol, tmat) = dumbtile@layout (mat, 32) tiler;
+    let (tile_layout, outer_layout) = %matrix.tiling_layouts layout tiler;
+    let mat = %matrix.tile@(layout, %mem.Ptr0 I32) mat tiler;
 
-    // let (mem, test) = tmat (mem, (ff, tt));
+    let (mem, A1) = mat (mem, (tt, tt));
+    let (mem, A2) = A1 (mem, (ff, (tt, tt)));
+    // EXPECTATION => lea 29_32
 
-    let oidx = (0_2, 1_2);
-    let iidx = (1_2, 2_4);
+    let (mem, B1) = mat (mem, (ff, ff));
+    let (mem, B2) = B1 (mem, (tt, (tt, ff)));
+    // EXPECTATION => lea 6_32
 
-    let (mem, test1) = tmat (mem, oidx);
-    let (mem, test2) = test1 (mem, iidx);
-    return (ol, tl, test2);
+    let (mem, C1) = mat (mem, (tt, ff));
+    let (mem, C2) = C1 (mem, (tt, (ff, tt)));
+    // EXPECTATION => lea 19_32
 
-
+    return (mem, A2, B2, C2);

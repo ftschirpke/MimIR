@@ -6,26 +6,15 @@
 
 #include "mim/plug/core/core.h"
 #include "mim/plug/matrix/matrix.h"
+#include "mim/plug/mem/mem.h"
 
 namespace mim {
-
-//
-// This file implements many of the FlatLayout algebra operations found in CuTe and is inspired by the Python
-// implementation see https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/02_layout_algebra.html see
-// https://github.com/NVIDIA/cutlass/blob/main/python/pycute/layout.py
-//
-// Most of the implementations in this file work on the layouts assuming they are static i.e. all numbers are literals.
-// TODO: Is there a way to perform the operations on the MimIR's `Nat` nodes directly and is there a use case for it?
-//
 
 namespace {
 
 using namespace plug::matrix::layalg;
 
-//
-// Layout Algebra
-//
-
+// TODO: remove
 static void print_tuple(const NatTuple& tup) {
     print(std::cerr, "(");
     bool first = true;
@@ -50,6 +39,7 @@ static void print_tuple(const NatTuple& tup) {
     print(std::cerr, ")");
 }
 
+// TODO: remove
 static void print_layout(const Layout& layout, const char* end) {
     print_tuple(layout.dims);
     print(std::cerr, " : ");
@@ -57,12 +47,12 @@ static void print_layout(const Layout& layout, const char* end) {
     print(std::cerr, end);
 }
 
+// TODO: remove
 static void print_layout(const Layout& layout) { print_layout(layout, "\n"); }
 
 //
 // Layout Parsing
 //
-// TODO: rewrite parsing when MimIR supports recursive Nat tuples
 
 static std::optional<Vector<nat_t>> extract_ms(nat_t n, const Def* ms_def) {
     Vector<nat_t> ms;
@@ -126,9 +116,6 @@ static std::optional<Layout> extract_layout_static(const Def* layout_tup) {
     else
         return std::nullopt;
 
-    print(std::cerr, "FRIEDRICH: extracted ");
-    print_layout(result);
-
     assert(is_valid_layout(result));
     assert(n == result.dims.items.size());
     for (size_t i = 0; i < n; ++i)
@@ -137,34 +124,12 @@ static std::optional<Layout> extract_layout_static(const Def* layout_tup) {
         else
             assert(ms[i] == 1);
 
-    // if (result.dims.items.empty() || result.strides.items.empty()) return std::nullopt; // TODO: is this needed
-
     return result;
 }
 
 //
 // Layout Generation
 //
-//
-static const Def* make_dims(World& world, Vector<nat_t>&& dims_vec) {
-    nat_t n = dims_vec.size();
-    DefVec result;
-    result.emplace_back(world.lit_nat(n));
-    DefVec ms, dims;
-
-    for (size_t i = 0; i < n; ++i) {
-        DefVec dim;
-        nat_t m = 1;
-        ms.emplace_back(world.lit_nat(m));
-        nat_t val = dims_vec[i];
-        dim.emplace_back(world.lit_nat(val));
-        dims.emplace_back(world.tuple(dim));
-    }
-
-    result.emplace_back(world.tuple(ms));
-    result.emplace_back(world.tuple(dims));
-    return world.tuple(result);
-}
 
 static const Def* make_tup(World& world, NatTuple&& tup) {
     DefVec outer_tup;
@@ -260,75 +225,20 @@ const Def* normalize_idx_NDto1D(const Def* type, const Def* callee, const Def* a
 
     auto callee_app = callee->isa<App>();
     assert(callee_app);
-    auto [n_def, ms_def, dims_def, strides_def] = callee_app->arg()->projs<4>();
+    auto layout_def = callee_app->arg();
 
-    auto n_lit = Lit::isa(n_def);
-    if (!n_lit) return {};
-    auto n = n_lit.value();
-
-    auto ms_opt = extract_ms(n, ms_def);
-    if (!ms_opt) return {};
-    auto& ms = ms_opt.value();
+    auto layout_opt = extract_layout_static(layout_def);
+    if (!layout_opt) return {};
+    const auto& layout = layout_opt.value();
 
     auto s = Idx::isa_lit(type);
     if (!s) return {};
     auto size = s.value();
 
-    auto add               = world.call(core::wrap::add, world.lit_nat_0());
-    auto nat_bitcast       = world.call<core::bitcast>(world.type_idx(size));
-    const Def* dot_product = static_cast<const Def*>(world.lit_idx(size, 0));
-    for (size_t i = 0; i < n; ++i) {
-        for (size_t j = 0; j < ms[i]; ++j) {
-            auto stride      = world.app(nat_bitcast, strides_def->proj(i)->proj(j));
-            auto idx_bitcast = world.call<core::bitcast>(world.type_idx(size));
-            auto idx         = world.app(idx_bitcast, nd_idx->proj(i)->proj(j));
-            auto mul         = world.call(core::wrap::mul, world.lit_nat_0());
-            auto product     = world.app(mul, {stride, idx});
-            dot_product      = world.app(add, {dot_product, product});
-        }
-    }
-    return dot_product;
+    return layalg::idx_NDto1D(world, size, layout.strides, nd_idx);
 }
 
-const Def* normalize_layout_complement(const Def* type, const Def* callee, const Def* arg) {
-    auto& world = type->world();
-
-    auto size_lit = Lit::isa(arg);
-    if (!size_lit) return {};
-    auto size = size_lit.value();
-
-    auto callee_app = callee->isa<App>();
-    assert(callee_app);
-    auto layout = callee_app->arg();
-
-    auto layout_opt = extract_layout_static(layout);
-    if (!layout_opt) return {};
-    auto& layout_tup = layout_opt.value();
-
-    auto complement_layout = elevate(complement(layout_tup, size));
-    return make_layout(world, std::move(complement_layout));
-}
-
-const Def* normalize_layout_composition(const Def* type, const Def* callee, const Def* arg) {
-    auto& world = type->world();
-
-    auto callee_app = callee->isa<App>();
-    assert(callee_app);
-    auto layout1 = callee_app->arg();
-
-    auto layout1_opt = extract_layout_static(layout1);
-    if (!layout1_opt) return {};
-    auto& layout1_tup = layout1_opt.value();
-
-    auto layout2_opt = extract_layout_static(arg);
-    if (!layout2_opt) return {};
-    auto& layout2_tup = layout2_opt.value();
-
-    layalg::Layout comp = composition(layout1_tup, layout2_tup);
-    return make_layout(world, std::move(comp));
-}
-
-const Def* normalize_layout_zipped_divide(const Def* type, const Def* callee, const Def* arg) {
+const Def* normalize_tiling_layouts(const Def* type, const Def* callee, const Def* arg) {
     auto& world = type->world();
 
     auto callee_app = callee->isa<App>();
@@ -372,20 +282,23 @@ const Def* normalize_layout_zipped_divide(const Def* type, const Def* callee, co
 const Def* normalize_tile(const Def* type, const Def* callee, const Def* arg) {
     auto& world = type->world();
 
-    auto [num_tilers, tiler_defs] = arg->projs<2>();
+    auto tiler_def = arg;
+
+    auto callee_app = callee->isa<App>();
+    assert(callee_app);
+    auto [implicits, mat]         = callee_app->uncurry_args<2>();
+    auto [num_tilers, tiler_defs] = tiler_def->projs<2>();
 
     auto tiler_n_lit = Lit::isa(num_tilers);
     if (!tiler_n_lit) return {};
     auto tiler_n = tiler_n_lit.value();
 
-    auto callee_app = callee->isa<App>();
-    assert(callee_app);
-    auto [implicits, mat] = callee_app->uncurry_args<2>();
-
-    auto [layout_def, _] = implicits->projs<2>();
+    auto [layout_def, T] = implicits->projs<2>();
     auto layout_opt      = extract_layout_static(layout_def);
     if (!layout_opt) return {};
     auto& layout = layout_opt.value();
+
+    auto layout_size = layalg::size(layout);
 
     Vector<layalg::Layout> tilers, tiler_complements;
     for (size_t i = 0; i < tiler_n; ++i) {
@@ -407,7 +320,57 @@ const Def* normalize_tile(const Def* type, const Def* callee, const Def* arg) {
     auto& tile_layout  = pair.first;
     auto& outer_layout = pair.second;
 
-    return {};
+    auto tile_lay_def  = make_layout(world, layalg::Layout(tile_layout));
+    auto outer_lay_def = make_layout(world, layalg::Layout(outer_layout));
+
+    auto inner_pi_impl  = world.mut_pi(world.type(), true)->set_dom(world.type_nat());
+    auto inner_pi_mem_t = world.call<mem::M>(inner_pi_impl->var());
+    auto inner_idx_t    = world.call<matrix::MatIdx>(tile_lay_def);
+    inner_pi_impl->set_codom(world.pi({inner_pi_mem_t, inner_idx_t}, {inner_pi_mem_t, T}));
+
+    auto inner_lam_impl         = world.mut_lam(inner_pi_impl);
+    auto inner_lam_mem_t        = world.call<mem::M>(inner_lam_impl->var());
+    auto inner_pi               = world.pi({inner_lam_mem_t, inner_idx_t}, {inner_lam_mem_t, T});
+    auto inner_lam              = world.mut_lam(inner_pi);
+    auto [inner_mem, inner_idx] = inner_lam->vars<2>();
+
+    auto outer_pi_impl  = world.mut_pi(world.type(), true)->set_dom(world.type_nat());
+    auto outer_pi_mem_t = world.call<mem::M>(outer_pi_impl->var());
+    auto outer_idx_t    = world.call<matrix::MatIdx>(outer_lay_def);
+    outer_pi_impl->set_codom(world.pi({outer_pi_mem_t, outer_idx_t}, {outer_pi_mem_t, inner_pi_impl}));
+
+    auto outer_lam_impl         = world.mut_lam(outer_pi_impl);
+    auto outer_lam_mem_t        = world.call<mem::M>(outer_lam_impl->var());
+    auto outer_pi               = world.pi({outer_lam_mem_t, outer_idx_t}, {outer_lam_mem_t, inner_pi_impl});
+    auto outer_lam              = world.mut_lam(outer_pi);
+    auto [outer_mem, outer_idx] = outer_lam->vars<2>();
+
+    DefVec layout_idx_defs;
+    auto add = world.call(core::wrap::add, world.lit_nat_0());
+    for (size_t i = 0; i < tiler_n; ++i) {
+        auto sublay          = sublayout(layout, i);
+        auto& subtiler       = tilers[i];
+        auto& subtiler_compl = tiler_complements[i];
+
+        auto inner_idx_1d = layalg::idx_NDto1D(world, layout_size, subtiler.strides, inner_idx->proj(i));
+        auto outer_idx_1d = layalg::idx_NDto1D(world, layout_size, subtiler_compl.strides, outer_idx->proj(i));
+
+        sublay.strides   = layalg::tuple_prefix_product(sublay.dims);
+        auto idx_1d      = world.app(add, {inner_idx_1d, outer_idx_1d});
+        auto toND_result = layalg::idx_1DtoND(world, inner_mem, idx_1d, sublay);
+        inner_mem        = toND_result.first;
+        layout_idx_defs.push_back(toND_result.second);
+    }
+
+    auto nd_idx   = world.tuple(layout_idx_defs);
+    auto mat_call = world.app(mat, inner_lam_impl->var());
+    auto call     = world.app(mat_call, world.tuple({inner_mem, nd_idx}));
+
+    inner_lam->set(true, call);
+    inner_lam_impl->set(true, inner_lam);
+    outer_lam->set(true, world.tuple({outer_mem, inner_lam_impl}));
+    outer_lam_impl->set(true, outer_lam);
+    return outer_lam_impl;
 }
 
 MIM_matrix_NORMALIZER_IMPL

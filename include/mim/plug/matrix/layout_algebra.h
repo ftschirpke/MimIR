@@ -64,6 +64,9 @@ FlatLayout complement(const Layout&, nat_t);
 Layout logical_divide(const Layout&, const Layout&);
 std::pair<Layout, Layout> zipped_divide(const Layout&, const Vector<Layout>&);
 
+NatTuple tuple_prefix_product(const NatTuple& tuple);
+
 std::pair<const Def*, const Def*> idx_1DtoND(World&, const Def* mem, const Def* idx, const Layout&);
+const Def* idx_NDto1D(World&, nat_t, const NatTuple&, const Def*);
 
 } // namespace mim::plug::matrix::layalg
