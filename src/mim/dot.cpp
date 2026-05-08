@@ -119,7 +119,7 @@ public:
         else if (def->is_meta())  hue = 0.15f; // yellow - universe/meta
         else                      hue = 0.80f; // purple - Hole
         // clang-format on
-        return print(os_, "fillcolor=\"{} 0.5 0.75\"", hue);
+        return os_ << std::format("fillcolor=\"{} 0.5 0.75\"", hue);
     }
 
     std::ostream& tooltip(const Def* def) {
@@ -132,14 +132,14 @@ public:
         print(os_, "<b>type:</b> {}{}", type, NL);
         print(os_, "<b>name:</b> {}{}", def->sym(), NL);
         print(os_, "<b>gid:</b> {}{}", def->gid(), NL);
-        print(os_, "<b>flags:</b> 0x{x}{}", def->flags(), NL);
-        print(os_, "<b>mark:</b> 0x{x}{}", def->mark(), NL);
-        print(os_, "<b>local_muts:</b> {, }{}", def->local_muts(), NL);
-        print(os_, "<b>local_vars:</b> {, }{}", def->local_vars(), NL);
-        print(os_, "<b>free_vars:</b> {, }{}", def->free_vars(), NL);
-        if (auto mut = def->isa_mut()) print(os_, "<b>users:</b> {{{, }}}{}", mut->users(), NL);
+        print(os_, "<b>flags:</b> 0x{:x}{}", def->flags(), NL);
+        print(os_, "<b>mark:</b> 0x{:x}{}", def->mark(), NL);
+        print(os_, "<b>local_muts:</b> {}{}", fe::join(def->local_muts(), ", "), NL);
+        print(os_, "<b>local_vars:</b> {}{}", fe::join(def->local_vars(), ", "), NL);
+        print(os_, "<b>free_vars:</b> {}{}", fe::join(def->free_vars(), ", "), NL);
+        if (auto mut = def->isa_mut()) print(os_, "<b>users:</b> {{{}}}{}", fe::join(mut->users(), ", "), NL);
         print(os_, "<b>loc:</b> {}", loc);
-        return print(os_, "\"");
+        return os_ << std::format("\"");
     }
 
 private:

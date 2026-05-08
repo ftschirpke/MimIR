@@ -23,13 +23,13 @@ struct BB {
     std::deque<std::ostringstream>& tail() { return parts[2]; }
 
     template<class... Args>
-    void body(const char* s, Args&&... args) {
-        print(body().emplace_back(), s, std::forward<Args>(args)...);
+    void body(std::format_string<Args...> s, Args&&... args) {
+        std::print(body().emplace_back(), s, std::forward<Args>(args)...);
     }
 
     template<class... Args>
-    void tail(const char* s, Args&&... args) {
-        print(tail().emplace_back(), s, std::forward<Args>(args)...);
+    void tail(std::format_string<Args...> s, Args&&... args) {
+        std::print(tail().emplace_back(), s, std::forward<Args>(args)...);
     }
 
     template<class... Args>
@@ -523,12 +523,14 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
         if (slotted())
             print(os, "(sigma {})", emit_cons_type(bb, sigma->ops()));
         else
-            print(os, "(sigma { })", Elem(sigma->ops(), [&](auto op) { print(os, "{}", emit_type(bb, op)); }));
+            print(os, "(sigma {})",
+                  fe::join(sigma->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto tuple = type->isa<Tuple>()) {
         if (slotted())
             print(os, "(tuple {})", emit_cons_type(bb, tuple->ops()));
         else
-            print(os, "(tuple { })", Elem(tuple->ops(), [&](auto op) { print(os, "{}", emit_type(bb, op)); }));
+            print(os, "(tuple {})",
+                  fe::join(tuple->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto app = type->isa<App>()) {
         print(os, "(app {} {})", emit_type(bb, app->callee()), emit_type(bb, app->arg()));
     } else if (auto axm = type->isa<Axm>()) {
@@ -573,12 +575,14 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
         if (slotted())
             print(os, "(join {})", emit_cons_type(bb, join->ops()));
         else
-            print(os, "(join { })", Elem(join->ops(), [&](auto op) { print(os, "{}", emit_type(bb, op)); }));
+            print(os, "(join {})",
+                  fe::join(join->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto meet = type->isa<Meet>()) {
         if (slotted())
             print(os, "(meet {})", emit_cons_type(bb, meet->ops()));
         else
-            print(os, "(meet { })", Elem(meet->ops(), [&](auto op) { print(os, "{}", emit_type(bb, op)); }));
+            print(os, "(meet {})",
+                  fe::join(meet->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto bot = type->isa<Bot>()) {
         print(os, "(bot {})", emit_type(bb, bot->type()));
     } else if (auto top = type->isa<Top>()) {

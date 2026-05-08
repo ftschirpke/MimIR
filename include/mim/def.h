@@ -988,3 +988,10 @@ private:
 };
 
 } // namespace mim
+
+#ifndef DOXYGEN
+template<>
+struct std::formatter<mim::Muts> : fe::ostream_formatter {};
+template<>
+struct std::formatter<mim::Vars> : fe::ostream_formatter {};
+#endif

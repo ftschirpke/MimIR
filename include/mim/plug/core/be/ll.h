@@ -92,14 +92,16 @@ struct BB {
     std::deque<std::ostringstream>& tail() { return parts[2]; }
 
     template<class... Args>
-    inline std::string assign(std::string_view name, const char* s, Args&&... args) {
-        print(print(body().emplace_back(), "{} = ", name), s, std::forward<Args>(args)...);
+    inline std::string assign(std::string_view name, std::format_string<Args...> s, Args&&... args) {
+        auto& os = body().emplace_back();
+        std::print(os, "{} = ", name);
+        std::print(os, s, std::forward<Args>(args)...);
         return std::string(name);
     }
 
     template<class... Args>
-    inline void tail(const char* s, Args&&... args) {
-        print(tail().emplace_back(), s, std::forward<Args>(args)...);
+    inline void tail(std::format_string<Args...> s, Args&&... args) {
+        std::print(tail().emplace_back(), s, std::forward<Args>(args)...);
     }
 
     friend inline void swap(BB& a, BB& b) noexcept {
@@ -134,9 +136,10 @@ public:
     }
 
     template<class... Args>
-    void declare(const char* s, Args&&... args) {
+    void declare(std::format_string<Args...> s, Args&&... args) {
         std::ostringstream decl;
-        print(decl << "declare ", s, std::forward<Args>(args)...);
+        decl << "declare ";
+        std::print(decl, s, std::forward<Args>(args)...);
         decls_.emplace(decl.str());
     }
 
@@ -513,7 +516,7 @@ inline void Emitter::emit_epilogue(Lam* lam) {
         if (app->args().back()->isa<Bot>()) {
             // TODO: Perhaps it'd be better to simply η-wrap this prior to the BE...
             assert(convert_ret_pi(app->callee_type()->ret_pi()) == "void");
-            bb.tail("call void {}({, })", v_callee, args);
+            bb.tail("call void {}({})", v_callee, fe::join(args, ", "));
             return bb.tail("unreachable");
         }
 
@@ -530,11 +533,11 @@ inline void Emitter::emit_epilogue(Lam* lam) {
         }
 
         if (n == 0) {
-            bb.tail("call void {}({, })", v_callee, args);
+            bb.tail("call void {}({})", v_callee, fe::join(args, ", "));
         } else {
             auto name  = "%" + app->unique_name() + "ret";
             auto t_ret = convert_ret_pi(ret_lam->type());
-            bb.tail("{} = call {} {}({, })", name, t_ret, v_callee, args);
+            bb.tail("{} = call {} {}({})", name, t_ret, v_callee, fe::join(args, ", "));
             auto phi = ret_lam->var();
             lam2bb_[ret_lam].phis[phi].emplace_back(name, id(lam, true));
             locals_[phi] = id(phi);
@@ -773,8 +776,8 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
             case core::bit2::nand: return neg(bb.assign(name, "and {} {}, {}", t, a, b));
             case core::bit2:: nor: return neg(bb.assign(name, "or  {} {}, {}", t, a, b));
             case core::bit2::nxor: return neg(bb.assign(name, "xor {} {}, {}", t, a, b));
-            case core::bit2:: iff: return bb.assign(name, "and {} {}, {}", neg(a), b);
-            case core::bit2::niff: return bb.assign(name, "or  {} {}, {}", neg(a), b);
+            case core::bit2:: iff: return bb.assign(name, "and {} {}, {}", t, neg(a), b);
+            case core::bit2::niff: return bb.assign(name, "or  {} {}, {}", t, neg(a), b);
             // clang-format on
             default: fe::unreachable();
         }

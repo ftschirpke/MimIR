@@ -89,7 +89,7 @@ const Def* normalize_check(const Def* type, const Def*, const Def* arg) {
     if (cond == w.lit_ff()) {
         auto s = tuple2str(msg);
         if (s.empty()) s = "unknown error"s;
-        w.ELOG(s.c_str());
+        w.ELOG("{}", s);
     }
 
     return nullptr;

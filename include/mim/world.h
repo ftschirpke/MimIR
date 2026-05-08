@@ -197,7 +197,7 @@ public:
     const Def* annex(Id id) {
         auto flags = static_cast<flags_t>(id);
         if (auto i = move_.flags2annex.find(flags); i != move_.flags2annex.end()) return i->second;
-        error("Axm with ID '{x}' not found; demangled plugin name is '{}'", flags, Annex::demangle(driver(), flags));
+        error("Axm with ID '{:x}' not found; demangled plugin name is '{}'", flags, Annex::demangle(driver(), flags));
     }
 
     /// Get Axm from a plugin.

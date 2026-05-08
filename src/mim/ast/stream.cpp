@@ -27,15 +27,32 @@ namespace mim::ast {
 
 template<class T>
 struct R {
-    R(Tab& tab, const Ptrs<T>& range)
+    R(Tab& tab, const Ptrs<T>& range, std::string_view sep = ", ")
         : tab(tab)
         , range(range)
-        , f([&tab](std::ostream& os, const Ptr<T>& ptr) { ptr->stream(tab, os); }) {}
+        , sep(sep) {}
 
     Tab& tab;
     const Ptrs<T>& range;
-    std::function<void(std::ostream&, const Ptr<T>&)> f;
+    std::string_view sep;
+
+    friend std::ostream& operator<<(std::ostream& os, const R& r) {
+        std::string_view curr_sep;
+        for (const auto& ptr : r.range) {
+            os << curr_sep;
+            ptr->stream(r.tab, os);
+            curr_sep = r.sep;
+        }
+        return os;
+    }
 };
+
+} // namespace mim::ast
+
+template<class T>
+struct std::formatter<mim::ast::R<T>> : fe::ostream_formatter {};
+
+namespace mim::ast {
 
 void Node::dump() const {
     Tab tab{"    "};
@@ -61,34 +78,36 @@ std::ostream& Module::stream(Tab& tab, std::ostream& os) const {
  */
 
 std::ostream& ErrorPtrn::stream(Tab&, std::ostream& os) const { return os << "<error pattern>"; }
-std::ostream& AliasPtrn::stream(Tab& tab, std::ostream& os) const { return print(os, "{}: {}", S(tab, ptrn()), dbg()); }
+std::ostream& AliasPtrn::stream(Tab& tab, std::ostream& os) const {
+    return os << std::format("{}: {}", S(tab, ptrn()), dbg());
+}
 std::ostream& GrpPtrn::stream(Tab&, std::ostream& os) const { return os << dbg(); }
 
 std::ostream& IdPtrn::stream(Tab& tab, std::ostream& os) const {
     // clang-format off
-    if ( dbg() &&  type()) return print(os, "{}: {}", dbg(), S(tab, type()));
-    if ( dbg() && !type()) return print(os, "{}", dbg());
-    if (!dbg() &&  type()) return print(os, "{}", S(tab, type()));
+    if ( dbg() &&  type()) return os << std::format("{}: {}", dbg(), S(tab, type()));
+    if ( dbg() && !type()) return os << std::format("{}", dbg());
+    if (!dbg() &&  type()) return os << std::format("{}", S(tab, type()));
     // clang-format on
     return os << "<invalid identifier pattern>";
 }
 
 std::ostream& TuplePtrn::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "{}{, }{}", delim_l(), R(tab, ptrns()), delim_r());
+    return os << std::format("{}{}{}", delim_l(), R(tab, ptrns()), delim_r());
 }
 
 /*
  * Expr
  */
 
-std::ostream& IdExpr::stream(Tab&, std::ostream& os) const { return print(os, "{}", dbg()); }
+std::ostream& IdExpr::stream(Tab&, std::ostream& os) const { return os << std::format("{}", dbg()); }
 std::ostream& ErrorExpr::stream(Tab&, std::ostream& os) const { return os << "<error expression>"; }
 std::ostream& HoleExpr::stream(Tab&, std::ostream& os) const { return os << "?"; }
-std::ostream& PrimaryExpr::stream(Tab&, std::ostream& os) const { return print(os, "{}", tag()); }
+std::ostream& PrimaryExpr::stream(Tab&, std::ostream& os) const { return os << std::format("{}", tag()); }
 
 std::ostream& LitExpr::stream(Tab& tab, std::ostream& os) const {
     switch (tag()) {
-        case Tag::L_i: return print(os, "{}", tok().lit_i());
+        case Tag::L_i: return os << std::format("{}", tok().lit_i());
         case Tag::L_f: return os << std::bit_cast<double>(tok().lit_u());
         case Tag::L_s:
         case Tag::L_u:
@@ -111,25 +130,31 @@ std::ostream& DeclExpr::stream(Tab& tab, std::ostream& os) const {
     } else {
         for (const auto& decl : decls())
             tab.println(os, "{}", S(tab, decl.get()));
-        return print(os, "{}", S(tab, expr()));
+        return os << std::format("{}", S(tab, expr()));
     }
 }
 
-std::ostream& TypeExpr::stream(Tab& tab, std::ostream& os) const { return print(os, "(Type {})", S(tab, level())); }
-std::ostream& RuleExpr::stream(Tab& tab, std::ostream& os) const { return print(os, "(Rule {})", S(tab, dom())); }
-
-std::ostream& ArrowExpr::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "{} -> {}", S(tab, dom()), S(tab, codom()));
+std::ostream& TypeExpr::stream(Tab& tab, std::ostream& os) const {
+    return os << std::format("(Type {})", S(tab, level()));
+}
+std::ostream& RuleExpr::stream(Tab& tab, std::ostream& os) const {
+    return os << std::format("(Rule {})", S(tab, dom()));
 }
 
-std::ostream& UnionExpr::stream(Tab& tab, std::ostream& os) const { return print(os, "({∪ })", R(tab, types())); }
+std::ostream& ArrowExpr::stream(Tab& tab, std::ostream& os) const {
+    return os << std::format("{} -> {}", S(tab, dom()), S(tab, codom()));
+}
+
+std::ostream& UnionExpr::stream(Tab& tab, std::ostream& os) const {
+    return os << std::format("({})", R(tab, types(), "∪ "));
+}
 
 std::ostream& InjExpr::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "{} inj {}", S(tab, value()), S(tab, type()));
+    return os << std::format("{} inj {}", S(tab, value()), S(tab, type()));
 }
 
 std::ostream& MatchExpr::Arm::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "{} => {}", S(tab, ptrn()), S(tab, body()));
+    return os << std::format("{} => {}", S(tab, ptrn()), S(tab, body()));
 }
 
 std::ostream& MatchExpr::stream(Tab& tab, std::ostream& os) const {
@@ -154,10 +179,10 @@ std::ostream& PiExpr::stream(Tab& tab, std::ostream& os) const {
     return os;
 }
 
-std::ostream& LamExpr::stream(Tab& tab, std::ostream& os) const { return print(os, "{};", S(tab, lam())); }
+std::ostream& LamExpr::stream(Tab& tab, std::ostream& os) const { return os << std::format("{};", S(tab, lam())); }
 
 std::ostream& AppExpr::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "{} {} {}", S(tab, callee()), is_explicit() ? "@" : "", S(tab, arg()));
+    return os << std::format("{} {} {}", S(tab, callee()), is_explicit() ? "@" : "", S(tab, arg()));
 }
 
 std::ostream& RetExpr::stream(Tab& tab, std::ostream& os) const {
@@ -166,22 +191,26 @@ std::ostream& RetExpr::stream(Tab& tab, std::ostream& os) const {
 }
 
 std::ostream& SigmaExpr::stream(Tab& tab, std::ostream& os) const { return ptrn()->stream(tab, os); }
-std::ostream& TupleExpr::stream(Tab& tab, std::ostream& os) const { return print(os, "({, })", R(tab, elems())); }
+std::ostream& TupleExpr::stream(Tab& tab, std::ostream& os) const { return os << std::format("({})", R(tab, elems())); }
 
 std::ostream& SeqExpr::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "{}{}; {}{}", is_pack() ? "‹" : "«", S(tab, arity()), S(tab, body()), is_pack() ? "›" : "»");
+    return os << std::format("{}{}; {}{}", is_pack() ? "‹" : "«", S(tab, arity()), S(tab, body()),
+                             is_pack() ? "›" : "»");
 }
 
 std::ostream& ExtractExpr::stream(Tab& tab, std::ostream& os) const {
-    if (auto expr = std::get_if<Ptr<Expr>>(&index())) return print(os, "{}#{}", S(tab, tuple()), S(tab, expr->get()));
-    return print(os, "{}#{}", S(tab, tuple()), std::get<Dbg>(index()));
+    if (auto expr = std::get_if<Ptr<Expr>>(&index()))
+        return os << std::format("{}#{}", S(tab, tuple()), S(tab, expr->get()));
+    return os << std::format("{}#{}", S(tab, tuple()), std::get<Dbg>(index()));
 }
 
 std::ostream& InsertExpr::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "ins({}, {}, {})", S(tab, tuple()), S(tab, index()), S(tab, value()));
+    return os << std::format("ins({}, {}, {})", S(tab, tuple()), S(tab, index()), S(tab, value()));
 }
 
-std::ostream& UniqExpr::stream(Tab& tab, std::ostream& os) const { return print(os, "⦃{}⦄", S(tab, inhabitant())); }
+std::ostream& UniqExpr::stream(Tab& tab, std::ostream& os) const {
+    return os << std::format("⦃{}⦄", S(tab, inhabitant()));
+}
 
 /*
  * Decl
@@ -194,7 +223,7 @@ std::ostream& AxmDecl::stream(Tab& tab, std::ostream& os) const {
     if (num_subs() != 0) {
         os << '(';
         for (auto sep = ""; const auto& aliases : subs()) {
-            print(os, "{}{ = }", sep, R(tab, aliases));
+            print(os, "{}{}", sep, R(tab, aliases, " = "));
             sep = ", ";
         }
         os << ')';
@@ -207,13 +236,13 @@ std::ostream& AxmDecl::stream(Tab& tab, std::ostream& os) const {
 }
 
 std::ostream& LetDecl::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "let {} = {};", S(tab, ptrn()), S(tab, value()));
+    return os << std::format("let {} = {};", S(tab, ptrn()), S(tab, value()));
 }
 
 std::ostream& RecDecl::stream(Tab& tab, std::ostream& os) const {
     print(os, ".rec {}", dbg());
     if (!type()->isa<HoleExpr>()) print(os, ": {}", S(tab, type()));
-    return print(os, " = {};", S(tab, body()));
+    return os << std::format(" = {};", S(tab, body()));
 }
 
 std::ostream& LamDecl::Dom::stream(Tab& tab, std::ostream& os) const {
@@ -247,6 +276,7 @@ std::ostream& CDecl::stream(Tab& tab, std::ostream& os) const {
 }
 
 std::ostream& RuleDecl::stream(Tab& tab, std::ostream& os) const {
-    return print(os, "rule {} : {} => {} when {}", S(tab, var()), S(tab, lhs()), S(tab, rhs()), S(tab, guard()));
+    return os << std::format("rule {} : {} => {} when {}", S(tab, var()), S(tab, lhs()), S(tab, rhs()),
+                             S(tab, guard()));
 }
 } // namespace mim::ast
