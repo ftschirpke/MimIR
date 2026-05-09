@@ -795,7 +795,7 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
         auto [mode, ab] = wrap->uncurry_args<2>();
         auto [a, b]     = ab->projs<2>([this](auto def) { return emit(def); });
         auto t          = convert(wrap->type());
-        auto lmode      = Lit::as(mode);
+        auto lmode      = static_cast<core::Mode>(Lit::as(mode));
 
         switch (wrap.id()) {
             case core::wrap::add: op = "add"; break;
@@ -804,8 +804,8 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
             case core::wrap::shl: op = "shl"; break;
         }
 
-        if (lmode & core::Mode::nuw) op += " nuw";
-        if (lmode & core::Mode::nsw) op += " nsw";
+        if (fe::has_flag(lmode, core::Mode::nuw)) op += " nuw";
+        if (fe::has_flag(lmode, core::Mode::nsw)) op += " nsw";
 
         return bb.assign(name, "{} {} {}, {}", op, t, a, b);
     } else if (auto div = Axm::isa<core::div>(def)) {
@@ -985,7 +985,7 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
         auto [mode, ab] = arith->uncurry_args<2>();
         auto [a, b]     = ab->projs<2>([this](auto def) { return emit(def); });
         auto t          = convert(arith->type());
-        auto lmode      = Lit::as(mode);
+        auto lmode      = static_cast<math::Mode>(Lit::as(mode));
 
         switch (arith.id()) {
             case math::arith::add: op = "fadd"; break;
@@ -999,13 +999,13 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
             op += " fast";
         else {
             // clang-format off
-            if (lmode & math::Mode::nnan    ) op += " nnan";
-            if (lmode & math::Mode::ninf    ) op += " ninf";
-            if (lmode & math::Mode::nsz     ) op += " nsz";
-            if (lmode & math::Mode::arcp    ) op += " arcp";
-            if (lmode & math::Mode::contract) op += " contract";
-            if (lmode & math::Mode::afn     ) op += " afn";
-            if (lmode & math::Mode::reassoc ) op += " reassoc";
+            if (fe::has_flag(lmode, math::Mode::nnan    )) op += " nnan";
+            if (fe::has_flag(lmode, math::Mode::ninf    )) op += " ninf";
+            if (fe::has_flag(lmode, math::Mode::nsz     )) op += " nsz";
+            if (fe::has_flag(lmode, math::Mode::arcp    )) op += " arcp";
+            if (fe::has_flag(lmode, math::Mode::contract)) op += " contract";
+            if (fe::has_flag(lmode, math::Mode::afn     )) op += " afn";
+            if (fe::has_flag(lmode, math::Mode::reassoc )) op += " reassoc";
             // clang-format on
         }
 
@@ -1023,7 +1023,7 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
         } else {
             if (tri.sub() & sub_t(math::tri::a)) f += "a";
 
-            switch (math::tri((tri.id() & 0x3) | Annex::base<math::tri>())) {
+            switch (math::tri((fe::to_underlying(tri.id()) & 0x3) | Annex::base<math::tri>())) {
                 case math::tri::sin: f += "sin"; break;
                 case math::tri::cos: f += "cos"; break;
                 case math::tri::tan: f += "tan"; break;
@@ -1173,7 +1173,7 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
                 case core::nat::mul: op = "mul nuw nsw"; break;
             }
         } else if (auto arith_op = Axm::isa<math::arith, 1>(f)) {
-            auto lmode = Lit::as(f->as<App>()->arg());
+            auto lmode = static_cast<math::Mode>(Lit::as(f->as<App>()->arg()));
             switch (arith_op.id()) {
                 case math::arith::add: op = "fadd"; break;
                 case math::arith::sub: op = "fsub"; break;
@@ -1185,13 +1185,13 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
             if (lmode == math::Mode::fast)
                 op += " fast";
             else {
-                if (lmode & math::Mode::nnan) op += " nnan";
-                if (lmode & math::Mode::ninf) op += " ninf";
-                if (lmode & math::Mode::nsz) op += " nsz";
-                if (lmode & math::Mode::arcp) op += " arcp";
-                if (lmode & math::Mode::contract) op += " contract";
-                if (lmode & math::Mode::afn) op += " afn";
-                if (lmode & math::Mode::reassoc) op += " reassoc";
+                if (fe::has_flag(lmode, math::Mode::nnan)) op += " nnan";
+                if (fe::has_flag(lmode, math::Mode::ninf)) op += " ninf";
+                if (fe::has_flag(lmode, math::Mode::nsz)) op += " nsz";
+                if (fe::has_flag(lmode, math::Mode::arcp)) op += " arcp";
+                if (fe::has_flag(lmode, math::Mode::contract)) op += " contract";
+                if (fe::has_flag(lmode, math::Mode::afn)) op += " afn";
+                if (fe::has_flag(lmode, math::Mode::reassoc)) op += " reassoc";
             }
         } else if (auto ncmp_op = Axm::isa<core::ncmp, 1>(f)) {
             op = "icmp ";
