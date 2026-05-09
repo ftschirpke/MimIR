@@ -1,5 +1,6 @@
 #pragma once
 
+#include <format>
 #include <limits>
 #include <optional>
 #include <span>
@@ -989,9 +990,10 @@ private:
 
 } // namespace mim
 
-#ifndef DOXYGEN
-template<>
-struct std::formatter<mim::Muts> : fe::ostream_formatter {};
-template<>
-struct std::formatter<mim::Vars> : fe::ostream_formatter {};
-#endif
+#ifndef DOXYGEN // clang-format off
+/// Format any pointer to a `mim::Def` (or subclass) via its `operator<<`.
+template<class T> requires std::derived_from<T, mim::Def> struct std::formatter<      T*> : fe::ostream_formatter {};
+template<class T> requires std::derived_from<T, mim::Def> struct std::formatter<const T*> : fe::ostream_formatter {};
+template<> struct std::formatter<mim::Muts> : fe::ostream_formatter {};
+template<> struct std::formatter<mim::Vars> : fe::ostream_formatter {};
+#endif // clang-format on

@@ -14,7 +14,7 @@ namespace mim {
 namespace fs = std::filesystem;
 
 /// Facility to log what you are doing.
-/// @see @ref fmt "Formatted Output", @ref log "Logging Macros"
+/// @see @ref log "Logging Macros"
 class Log {
 public:
     Log(const Flags& flags)
@@ -47,7 +47,7 @@ public:
 
     /// @name Log
     /// Output @p fmt to Log::ostream; does nothing if Log::ostream is `nullptr`.
-    /// @see @ref fmt "Formatted Output", @ref log "Logging Macros"
+    /// @see @ref log "Logging Macros"
     ///@{
     template<class... Args>
     void log(Level level, Loc loc, std::format_string<Args...> fmt, Args&&... args) const {
@@ -83,7 +83,6 @@ private:
 /// @name Logging Macros
 /// @anchor log
 /// Macros for different mim::Log::Level%s for ease of use.
-/// @see @ref fmt "Formatted Output"
 ///@{
 // clang-format off
 #define ELOG(...) log().log(mim::Log::Level::Error,   __FILE__, __LINE__, __VA_ARGS__)

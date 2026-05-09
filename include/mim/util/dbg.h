@@ -1,14 +1,20 @@
 #pragma once
 
+#include <stdexcept>
+
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 #include <fe/loc.h>
 #include <fe/sym.h>
 #include <fe/term.h>
 
-#include "mim/util/print.h"
-
 namespace mim {
+
+/// Wraps `std::format` to throw `T` with a formatted message.
+template<class T = std::logic_error, class... Args>
+[[noreturn]] void error(std::format_string<Args...> fmt, Args&&... args) {
+    throw T("error: " + std::format(fmt, std::forward<Args>(args)...));
+}
 
 using fe::Loc;
 using fe::Pos;
@@ -163,16 +169,12 @@ private:
 
 } // namespace mim
 
-#ifndef DOXYGEN
-template<>
-struct std::formatter<mim::Dbg> : fe::ostream_formatter {};
-template<>
-struct std::formatter<mim::Error> : fe::ostream_formatter {};
-template<>
-struct std::formatter<mim::Error::Tag> : fe::ostream_formatter {};
-template<>
-struct std::formatter<mim::Error::Msg> : fe::ostream_formatter {};
-#endif
+#ifndef DOXYGEN // clang-format off
+template<> struct std::formatter<mim::Dbg       > : fe::ostream_formatter {};
+template<> struct std::formatter<mim::Error     > : fe::ostream_formatter {};
+template<> struct std::formatter<mim::Error::Tag> : fe::ostream_formatter {};
+template<> struct std::formatter<mim::Error::Msg> : fe::ostream_formatter {};
+#endif // clang-format on
 
 namespace mim {
 

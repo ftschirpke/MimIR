@@ -147,10 +147,10 @@ public:
 } // namespace
 } // namespace mim
 
-template<>
-struct std::formatter<mim::Op> : fe::ostream_formatter {};
-template<>
-struct std::formatter<mim::Dump> : fe::ostream_formatter {};
+// clang-format off
+template<> struct std::formatter<mim::Op  > : fe::ostream_formatter {};
+template<> struct std::formatter<mim::Dump> : fe::ostream_formatter {};
+// clang-format on
 
 namespace mim {
 namespace {
