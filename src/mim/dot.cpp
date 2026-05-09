@@ -7,8 +7,6 @@
 #include "mim/nest.h"
 #include "mim/world.h"
 
-#include "mim/util/print.h"
-
 using namespace std::string_literals;
 
 namespace mim {

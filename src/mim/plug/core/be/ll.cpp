@@ -3,7 +3,6 @@
 #include <fstream>
 #include <string>
 
-#include "mim/util/print.h"
 #include "mim/util/sys.h"
 
 namespace mim::ll {

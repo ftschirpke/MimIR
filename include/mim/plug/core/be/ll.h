@@ -16,7 +16,6 @@
 #include <mim/plug/vec/vec.h>
 
 #include "mim/be/emitter.h"
-#include "mim/util/print.h"
 
 #include "mim/plug/core/core.h"
 #include "mim/plug/math/autogen.h"

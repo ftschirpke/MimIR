@@ -1,7 +1,6 @@
 #include <ostream>
 
 #include "mim/ast/ast.h"
-#include "mim/util/print.h"
 
 namespace mim::ast {
 

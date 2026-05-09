@@ -8,7 +8,6 @@
 #include "mim/def.h"
 
 #include "mim/be/emitter.h"
-#include "mim/util/print.h"
 
 namespace mim::sexpr {
 
