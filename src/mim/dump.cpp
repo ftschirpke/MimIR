@@ -223,14 +223,14 @@ std::ostream& operator<<(std::ostream& os, Dump d) {
 
     if (auto type = d->isa<Type>()) {
         if (auto level = Lit::isa(type->level()); level && !ascii) {
-            if (level == 0) return os << std::format("*");
-            if (level == 1) return os << std::format("□");
+            if (level == 0) return os << "*";
+            if (level == 1) return os << "□";
         }
         return os << std::format("Type {}", Op::r(type->level(), Prec::App));
     } else if (d->isa<Nat>()) {
-        return os << std::format("Nat");
+        return os << "Nat";
     } else if (d->isa<Idx>()) {
-        return os << std::format("Idx");
+        return os << "Idx";
     } else if (auto ext = d->isa<Ext>()) {
         return os << std::format("{}:{}", ext->isa<Bot>() ? bot : top, Op::r(ext->type(), Prec::Lit));
     } else if (auto axm = d->isa<Axm>()) {
@@ -283,10 +283,11 @@ std::ostream& operator<<(std::ostream& os, Dump d) {
     } else if (auto [pi, var] = d->isa_binder<Pi>(); pi) {
         auto l = pi->is_implicit() ? '{' : '[';
         auto r = pi->is_implicit() ? '}' : ']';
-        return os << std::format("{}{}: {}{} {} {}", l, Op(var), Op(pi->dom()), r, arw, Op::r(pi->dom(), Prec::Arrow));
+        return os << std::format("{}{}: {}{} {} {}", l, Op(var), Op(pi->dom()), r, arw,
+                                 Op::r(pi->codom(), Prec::Arrow));
     } else if (auto pi = d->isa<Pi>()) {
         if (Pi::isa_cn(pi)) return os << std::format("Cn {}", Op(pi->dom()));
-        return os << std::format("{} {} {}", Op::l(pi->dom(), Prec::Arrow), arw, Op::r(pi->dom(), Prec::Arrow));
+        return os << std::format("{} {} {}", Op::l(pi->dom(), Prec::Arrow), arw, Op::r(pi->codom(), Prec::Arrow));
     } else if (auto lam = d->isa<Lam>()) {
         // TODO this output is really confuinsg
         return os << std::format("{}, {}", Op(lam->filter()), Op(lam->body()));
