@@ -202,7 +202,7 @@ const Def* normalize_disj(const Def* type, const Def*, const Def* arg) {
                 }
 
                 erase(new_args, to_remove);
-                world.DLOG("final ranges {}", fe::join(new_args, ", "));
+                world.DLOG("final ranges {}", fe::Join(new_args));
 
                 if (new_args.size() > 2) return make_binary_tree<disj>(new_args);
                 if (new_args.size() > 1) return world.call<disj, false>(new_args);

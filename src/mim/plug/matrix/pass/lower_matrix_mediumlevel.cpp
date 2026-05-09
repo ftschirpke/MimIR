@@ -248,7 +248,7 @@ const Def* LowerMatrixMediumLevel::rewrite_(const Def* def) {
 
         // Now the inner loops for the inputs:
         // Each of the inner loops contains the element accumulator and memory as accumulator (in an inner monad).
-        DLOG("acc at inner: {}", fe::join(acc, ";"));
+        DLOG("acc at inner: {}", fe::Join(acc, ";"));
 
         // First create the accumulator.
         auto element_acc = zero;
@@ -332,7 +332,7 @@ const Def* LowerMatrixMediumLevel::rewrite_(const Def* def) {
             input_elements[i]         = element_i;
         }
 
-        DLOG("  read elements {}", fe::join(input_elements, ","));
+        DLOG("  read elements {}", fe::Join(input_elements));
         DLOG("  fun {} : {}", fun, fun->type());
 
         // TODO: make non-scalar or completely scalar?

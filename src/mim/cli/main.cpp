@@ -156,7 +156,7 @@ int main(int argc, char** argv) {
                 mod->add_implicit_imports(std::move(imports));
 
                 if (auto s = os[AST]) {
-                    fe::Tab tab{"    "};
+                    auto tab = fe::Tab::spaces();
                     mod->stream(tab, *s);
                 }
 

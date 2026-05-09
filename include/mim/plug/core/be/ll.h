@@ -516,7 +516,7 @@ inline void Emitter::emit_epilogue(Lam* lam) {
         if (app->args().back()->isa<Bot>()) {
             // TODO: Perhaps it'd be better to simply η-wrap this prior to the BE...
             assert(convert_ret_pi(app->callee_type()->ret_pi()) == "void");
-            bb.tail("call void {}({})", v_callee, fe::join(args, ", "));
+            bb.tail("call void {}({})", v_callee, fe::Join(args));
             return bb.tail("unreachable");
         }
 
@@ -533,11 +533,11 @@ inline void Emitter::emit_epilogue(Lam* lam) {
         }
 
         if (n == 0) {
-            bb.tail("call void {}({})", v_callee, fe::join(args, ", "));
+            bb.tail("call void {}({})", v_callee, fe::Join(args));
         } else {
             auto name  = "%" + app->unique_name() + "ret";
             auto t_ret = convert_ret_pi(ret_lam->type());
-            bb.tail("{} = call {} {}({})", name, t_ret, v_callee, fe::join(args, ", "));
+            bb.tail("{} = call {} {}({})", name, t_ret, v_callee, fe::Join(args));
             auto phi = ret_lam->var();
             lam2bb_[ret_lam].phis[phi].emplace_back(name, id(lam, true));
             locals_[phi] = id(phi);

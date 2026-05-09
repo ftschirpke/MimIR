@@ -58,7 +58,7 @@ AnnexInfo* AST::name2annex(Dbg dbg, sub_t* sub_id) {
 }
 
 void AST::bootstrap(Sym plugin, std::ostream& h) {
-    fe::Tab tab{"    "};
+    auto tab = fe::Tab::spaces();
     tab.print(h, "#pragma once\n\n");
     tab.print(h, "#include <mim/axm.h>\n"
                  "#include <mim/plugin.h>\n\n");

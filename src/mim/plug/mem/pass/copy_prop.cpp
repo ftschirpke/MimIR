@@ -58,13 +58,13 @@ const Def* CopyProp::rewrite(const Def* def) {
         }
     }
 
-    DLOG("app->args(): {}", fe::join(app->args(), ", "));
-    DLOG("args: {}", fe::join(args, ", "));
-    DLOG("new_args: {}", fe::join(new_args, ", "));
+    DLOG("app->args(): {}", fe::Join(app->args()));
+    DLOG("args: {}", fe::Join(args));
+    DLOG("new_args: {}", fe::Join(new_args));
 
     if (appxy_ops.size() > 1) {
         auto appxy = proxy(app->type(), appxy_ops, Appxy);
-        DLOG("appxy: '{}': {}", appxy, fe::join(appxy_ops, ", "));
+        DLOG("appxy: '{}': {}", appxy, fe::Join(appxy_ops));
         return appxy;
     }
 

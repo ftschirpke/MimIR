@@ -134,10 +134,10 @@ public:
         print(os_, "<b>gid:</b> {}{}", def->gid(), NL);
         print(os_, "<b>flags:</b> 0x{:x}{}", def->flags(), NL);
         print(os_, "<b>mark:</b> 0x{:x}{}", def->mark(), NL);
-        print(os_, "<b>local_muts:</b> {}{}", fe::join(def->local_muts(), ", "), NL);
-        print(os_, "<b>local_vars:</b> {}{}", fe::join(def->local_vars(), ", "), NL);
-        print(os_, "<b>free_vars:</b> {}{}", fe::join(def->free_vars(), ", "), NL);
-        if (auto mut = def->isa_mut()) print(os_, "<b>users:</b> {{{}}}{}", fe::join(mut->users(), ", "), NL);
+        print(os_, "<b>local_muts:</b> {}{}", fe::Join(def->local_muts()), NL);
+        print(os_, "<b>local_vars:</b> {}{}", fe::Join(def->local_vars()), NL);
+        print(os_, "<b>free_vars:</b> {}{}", fe::Join(def->free_vars()), NL);
+        if (auto mut = def->isa_mut()) print(os_, "<b>users:</b> {{{}}}{}", fe::Join(mut->users()), NL);
         print(os_, "<b>loc:</b> {}", loc);
         return os_ << std::format("\"");
     }
@@ -146,7 +146,7 @@ private:
     std::ostream& os_;
     bool types_;
     const Def* root_;
-    fe::Tab tab_{"    "};
+    fe::Tab tab_ = fe::Tab::spaces();
     DefSet done_;
 };
 
@@ -197,7 +197,7 @@ void Nest::dot(const char* file) const {
 }
 
 void Nest::dot(std::ostream& os) const {
-    fe::Tab tab{"    "};
+    auto tab = fe::Tab::spaces();
     (tab++).println(os, "digraph {{");
     tab.println(os, "ordering=out;");
     tab.println(os, "node [shape=box,style=filled];");

@@ -323,10 +323,10 @@ std::ostream& operator<<(std::ostream& os, Dump d) {
         return os << std::format("[{}]", elem);
     } else if (auto sigma = d->isa<Sigma>()) {
         return os << std::format("[{}]",
-                                 fe::join(sigma->ops() | std::views::transform([](auto op) { return Op(op); }), ", "));
+                                 fe::Join(sigma->ops() | std::views::transform([](auto op) { return Op(op); })));
     } else if (auto tuple = d->isa<Tuple>()) {
         return os << std::format("({})",
-                                 fe::join(tuple->ops() | std::views::transform([](auto op) { return Op(op); }), ", "));
+                                 fe::Join(tuple->ops() | std::views::transform([](auto op) { return Op(op); })));
     } else if (auto [arr, var] = d->isa_binder<Arr>(); arr) {
         return os << std::format("{}{}: {}; {}{}", al, var, Op(arr->arity()), Op(arr->body()), ar);
     } else if (auto arr = d->isa<Arr>()) {
@@ -337,18 +337,18 @@ std::ostream& operator<<(std::ostream& os, Dump d) {
         return os << std::format("{}{}; {}{}", pl, Op(pack->arity()), Op(pack->body()), pr);
     } else if (auto proxy = d->isa<Proxy>()) {
         return os << std::format(".proxy#{}#{} {}", proxy->pass(), proxy->tag(),
-                                 fe::join(proxy->ops() | std::views::transform([](auto op) { return Op(op); }), ", "));
+                                 fe::Join(proxy->ops() | std::views::transform([](auto op) { return Op(op); })));
     } else if (auto bound = d->isa<Bound>()) {
         auto op = bound->isa<Join>() ? "∪" : "∩"; // TODO ascii
         if (auto mut = d->isa_mut()) print(os, "{}{}: {}", op, mut->unique_name(), Op(mut->type()));
         return os << std::format("{}({})", op,
-                                 fe::join(bound->ops() | std::views::transform([](auto op) { return Op(op); }), ", "));
+                                 fe::Join(bound->ops() | std::views::transform([](auto op) { return Op(op); })));
     }
 
     // other
-    if (d->flags() == 0) return os << std::format("({} {})", d->node_name(), fe::join(d->ops(), ", "));
+    if (d->flags() == 0) return os << std::format("({} {})", d->node_name(), fe::Join(d->ops()));
     return os << std::format("({}#{} {})", d->node_name(), d->flags(),
-                             fe::join(d->ops() | std::views::transform([](auto op) { return Op(op); }), ", "));
+                             fe::Join(d->ops() | std::views::transform([](auto op) { return Op(op); })));
 }
 
 /*
@@ -373,7 +373,7 @@ public:
 
     std::ostream& os;
     const Nest* nest;
-    fe::Tab tab{"    "};
+    fe::Tab tab = fe::Tab::spaces();
     unique_queue<MutSet> muts;
     DefSet defs;
 };
@@ -430,7 +430,7 @@ void Dumper::dump(Def* mut) {
     ++tab;
     if (nest) recurse((*nest)[mut]);
     recurse(mut);
-    tab.print(os, "{}\n", fe::join(mut->ops(), ", "));
+    tab.print(os, "{}\n", fe::Join(mut->ops()));
     --tab;
     tab.print(os, "}};\n");
 }

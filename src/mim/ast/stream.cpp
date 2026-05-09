@@ -55,7 +55,7 @@ struct std::formatter<mim::ast::R<T>> : fe::ostream_formatter {};
 namespace mim::ast {
 
 void Node::dump() const {
-    fe::Tab tab{"    "};
+    auto tab = fe::Tab::spaces();
     stream(tab, std::cout) << std::endl;
 }
 

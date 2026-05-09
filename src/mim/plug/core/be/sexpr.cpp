@@ -524,13 +524,13 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             print(os, "(sigma {})", emit_cons_type(bb, sigma->ops()));
         else
             print(os, "(sigma {})",
-                  fe::join(sigma->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
+                  fe::Join(sigma->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto tuple = type->isa<Tuple>()) {
         if (slotted())
             print(os, "(tuple {})", emit_cons_type(bb, tuple->ops()));
         else
             print(os, "(tuple {})",
-                  fe::join(tuple->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
+                  fe::Join(tuple->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto app = type->isa<App>()) {
         print(os, "(app {} {})", emit_type(bb, app->callee()), emit_type(bb, app->arg()));
     } else if (auto axm = type->isa<Axm>()) {
@@ -576,13 +576,13 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             print(os, "(join {})", emit_cons_type(bb, join->ops()));
         else
             print(os, "(join {})",
-                  fe::join(join->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
+                  fe::Join(join->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto meet = type->isa<Meet>()) {
         if (slotted())
             print(os, "(meet {})", emit_cons_type(bb, meet->ops()));
         else
             print(os, "(meet {})",
-                  fe::join(meet->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
+                  fe::Join(meet->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto bot = type->isa<Bot>()) {
         print(os, "(bot {})", emit_type(bb, bot->type()));
     } else if (auto top = type->isa<Top>()) {
