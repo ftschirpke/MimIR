@@ -9,7 +9,6 @@
 [![Windows](https://img.shields.io/github/actions/workflow/status/mimir/mimir/windows.yml?style=flat-square&label=⊞%20windows&branch=master)](https://github.com/mimir/mimir/actions/workflows/windows.yml?query=branch%3Amaster)
 [![macOS](https://img.shields.io/github/actions/workflow/status/mimir/mimir/macos.yml?style=flat-square&logo=apple&label=macos&branch=master)](https://github.com/mimir/mimir/actions/workflows/macos.yml?query=branch%3Amaster)
 [![Doxygen](https://img.shields.io/github/actions/workflow/status/mimir/mimir/doxygen.yml?style=flat-square&logo=doxygen&logoSize=auto&label=&labelColor=555&branch=master)](https://github.com/mimir/mimir/actions/workflows/doxygen.yml?query=branch%3Amaster)
-https://github.com/mimir/mimir/actions/workflows/doxygen.yml)
 [![Documentation](https://img.shields.io/badge/docs-master-green?style=flat-square&logo=gitbook&logoColor=white)](https://mimir.github.io)
 
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue?style=flat-square&logo=cplusplus)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
