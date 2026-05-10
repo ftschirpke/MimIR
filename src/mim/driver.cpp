@@ -86,7 +86,7 @@ void Driver::load(Sym name) {
         handle.reset(dl::open(name.c_str()));
     if (!handle) {
         for (const auto& path : search_paths()) {
-            auto full_path = path / fmt("libmim_{}.{}", name, dl::extension);
+            auto full_path = path / std::format("libmim_{}.{}", name, dl::extension);
             std::error_code ignore;
             if (bool reg_file = fs::is_regular_file(full_path, ignore); reg_file && !ignore) {
                 auto path_str = full_path.string();

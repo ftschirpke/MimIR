@@ -16,7 +16,6 @@
 #include <mim/plug/vec/vec.h>
 
 #include "mim/be/emitter.h"
-#include "mim/util/print.h"
 
 #include "mim/plug/core/core.h"
 #include "mim/plug/math/autogen.h"
@@ -92,14 +91,16 @@ struct BB {
     std::deque<std::ostringstream>& tail() { return parts[2]; }
 
     template<class... Args>
-    inline std::string assign(std::string_view name, const char* s, Args&&... args) {
-        print(print(body().emplace_back(), "{} = ", name), s, std::forward<Args>(args)...);
+    inline std::string assign(std::string_view name, std::format_string<Args...> s, Args&&... args) {
+        auto& os = body().emplace_back();
+        std::print(os, "{} = ", name);
+        std::print(os, s, std::forward<Args>(args)...);
         return std::string(name);
     }
 
     template<class... Args>
-    inline void tail(const char* s, Args&&... args) {
-        print(tail().emplace_back(), s, std::forward<Args>(args)...);
+    inline void tail(std::format_string<Args...> s, Args&&... args) {
+        std::print(tail().emplace_back(), s, std::forward<Args>(args)...);
     }
 
     friend inline void swap(BB& a, BB& b) noexcept {
@@ -134,9 +135,10 @@ public:
     }
 
     template<class... Args>
-    void declare(const char* s, Args&&... args) {
+    void declare(std::format_string<Args...> s, Args&&... args) {
         std::ostringstream decl;
-        print(decl << "declare ", s, std::forward<Args>(args)...);
+        decl << "declare ";
+        std::print(decl, s, std::forward<Args>(args)...);
         decls_.emplace(decl.str());
     }
 
@@ -352,7 +354,7 @@ inline void Emitter::finalize() {
             ++tab;
             for (const auto& part : bb.parts)
                 for (const auto& line : part)
-                    tab.print(func_impls_, "{}\n", line.str());
+                    std::println(func_impls_, "{}{}", tab, line.str());
             --tab;
             func_impls_ << std::endl;
         }
@@ -513,7 +515,7 @@ inline void Emitter::emit_epilogue(Lam* lam) {
         if (app->args().back()->isa<Bot>()) {
             // TODO: Perhaps it'd be better to simply η-wrap this prior to the BE...
             assert(convert_ret_pi(app->callee_type()->ret_pi()) == "void");
-            bb.tail("call void {}({, })", v_callee, args);
+            bb.tail("call void {}({})", v_callee, fe::Join(args));
             return bb.tail("unreachable");
         }
 
@@ -530,11 +532,11 @@ inline void Emitter::emit_epilogue(Lam* lam) {
         }
 
         if (n == 0) {
-            bb.tail("call void {}({, })", v_callee, args);
+            bb.tail("call void {}({})", v_callee, fe::Join(args));
         } else {
             auto name  = "%" + app->unique_name() + "ret";
             auto t_ret = convert_ret_pi(ret_lam->type());
-            bb.tail("{} = call {} {}({, })", name, t_ret, v_callee, args);
+            bb.tail("{} = call {} {}({})", name, t_ret, v_callee, fe::Join(args));
             auto phi = ret_lam->var();
             lam2bb_[ret_lam].phis[phi].emplace_back(name, id(lam, true));
             locals_[phi] = id(phi);
@@ -773,8 +775,8 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
             case core::bit2::nand: return neg(bb.assign(name, "and {} {}, {}", t, a, b));
             case core::bit2:: nor: return neg(bb.assign(name, "or  {} {}, {}", t, a, b));
             case core::bit2::nxor: return neg(bb.assign(name, "xor {} {}, {}", t, a, b));
-            case core::bit2:: iff: return bb.assign(name, "and {} {}, {}", neg(a), b);
-            case core::bit2::niff: return bb.assign(name, "or  {} {}, {}", neg(a), b);
+            case core::bit2:: iff: return bb.assign(name, "and {} {}, {}", t, neg(a), b);
+            case core::bit2::niff: return bb.assign(name, "or  {} {}, {}", t, neg(a), b);
             // clang-format on
             default: fe::unreachable();
         }
@@ -792,7 +794,7 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
         auto [mode, ab] = wrap->uncurry_args<2>();
         auto [a, b]     = ab->projs<2>([this](auto def) { return emit(def); });
         auto t          = convert(wrap->type());
-        auto lmode      = Lit::as(mode);
+        auto lmode      = static_cast<core::Mode>(Lit::as(mode));
 
         switch (wrap.id()) {
             case core::wrap::add: op = "add"; break;
@@ -801,8 +803,8 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
             case core::wrap::shl: op = "shl"; break;
         }
 
-        if (lmode & core::Mode::nuw) op += " nuw";
-        if (lmode & core::Mode::nsw) op += " nsw";
+        if (fe::has_flag(lmode, core::Mode::nuw)) op += " nuw";
+        if (fe::has_flag(lmode, core::Mode::nsw)) op += " nsw";
 
         return bb.assign(name, "{} {} {}, {}", op, t, a, b);
     } else if (auto div = Axm::isa<core::div>(def)) {
@@ -982,7 +984,7 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
         auto [mode, ab] = arith->uncurry_args<2>();
         auto [a, b]     = ab->projs<2>([this](auto def) { return emit(def); });
         auto t          = convert(arith->type());
-        auto lmode      = Lit::as(mode);
+        auto lmode      = static_cast<math::Mode>(Lit::as(mode));
 
         switch (arith.id()) {
             case math::arith::add: op = "fadd"; break;
@@ -996,13 +998,13 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
             op += " fast";
         else {
             // clang-format off
-            if (lmode & math::Mode::nnan    ) op += " nnan";
-            if (lmode & math::Mode::ninf    ) op += " ninf";
-            if (lmode & math::Mode::nsz     ) op += " nsz";
-            if (lmode & math::Mode::arcp    ) op += " arcp";
-            if (lmode & math::Mode::contract) op += " contract";
-            if (lmode & math::Mode::afn     ) op += " afn";
-            if (lmode & math::Mode::reassoc ) op += " reassoc";
+            if (fe::has_flag(lmode, math::Mode::nnan    )) op += " nnan";
+            if (fe::has_flag(lmode, math::Mode::ninf    )) op += " ninf";
+            if (fe::has_flag(lmode, math::Mode::nsz     )) op += " nsz";
+            if (fe::has_flag(lmode, math::Mode::arcp    )) op += " arcp";
+            if (fe::has_flag(lmode, math::Mode::contract)) op += " contract";
+            if (fe::has_flag(lmode, math::Mode::afn     )) op += " afn";
+            if (fe::has_flag(lmode, math::Mode::reassoc )) op += " reassoc";
             // clang-format on
         }
 
@@ -1020,7 +1022,7 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
         } else {
             if (tri.sub() & sub_t(math::tri::a)) f += "a";
 
-            switch (math::tri((tri.id() & 0x3) | Annex::base<math::tri>())) {
+            switch (math::tri((fe::to_underlying(tri.id()) & 0x3) | Annex::base<math::tri>())) {
                 case math::tri::sin: f += "sin"; break;
                 case math::tri::cos: f += "cos"; break;
                 case math::tri::tan: f += "tan"; break;
@@ -1170,7 +1172,7 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
                 case core::nat::mul: op = "mul nuw nsw"; break;
             }
         } else if (auto arith_op = Axm::isa<math::arith, 1>(f)) {
-            auto lmode = Lit::as(f->as<App>()->arg());
+            auto lmode = static_cast<math::Mode>(Lit::as(f->as<App>()->arg()));
             switch (arith_op.id()) {
                 case math::arith::add: op = "fadd"; break;
                 case math::arith::sub: op = "fsub"; break;
@@ -1182,13 +1184,13 @@ inline std::string Emitter::emit_bb(BB& bb, const Def* def) {
             if (lmode == math::Mode::fast)
                 op += " fast";
             else {
-                if (lmode & math::Mode::nnan) op += " nnan";
-                if (lmode & math::Mode::ninf) op += " ninf";
-                if (lmode & math::Mode::nsz) op += " nsz";
-                if (lmode & math::Mode::arcp) op += " arcp";
-                if (lmode & math::Mode::contract) op += " contract";
-                if (lmode & math::Mode::afn) op += " afn";
-                if (lmode & math::Mode::reassoc) op += " reassoc";
+                if (fe::has_flag(lmode, math::Mode::nnan)) op += " nnan";
+                if (fe::has_flag(lmode, math::Mode::ninf)) op += " ninf";
+                if (fe::has_flag(lmode, math::Mode::nsz)) op += " nsz";
+                if (fe::has_flag(lmode, math::Mode::arcp)) op += " arcp";
+                if (fe::has_flag(lmode, math::Mode::contract)) op += " contract";
+                if (fe::has_flag(lmode, math::Mode::afn)) op += " afn";
+                if (fe::has_flag(lmode, math::Mode::reassoc)) op += " reassoc";
             }
         } else if (auto ncmp_op = Axm::isa<core::ncmp, 1>(f)) {
             op = "icmp ";
