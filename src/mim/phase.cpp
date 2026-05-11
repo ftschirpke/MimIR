@@ -50,7 +50,6 @@ Def* Analysis::rewrite_deps(Def* mut) {
 
 Def* Analysis::rewrite_mut(Def* mut) {
     map(mut, mut);
-    auto _ = enter(mut);
 
     if (auto [lam, var] = mut->isa_binder<Lam>(); lam)
         for (auto v : var->tprojs()) {
@@ -62,10 +61,7 @@ Def* Analysis::rewrite_mut(Def* mut) {
             }
         }
 
-    for (auto d : mut->deps())
-        rewrite(d);
-
-    return mut;
+    return rewrite_deps(mut);
 }
 
 /*

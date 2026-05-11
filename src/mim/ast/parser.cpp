@@ -146,7 +146,7 @@ Ptr<Module> Parser::import(Dbg dbg, std::ostream* md, Tok::Tag tag) {
 Ptr<Module> Parser::import(std::istream& is, Loc loc, const fs::path* path, std::ostream* md) {
     driver().VLOG("📄 reading: {}", path ? path->string() : "<unknown file>"s);
     if (!is) {
-        ast().error(loc, "cannot read file {}", *path);
+        ast().error(loc, "cannot read file {}", path->string());
         return {};
     }
 
