@@ -1,12 +1,10 @@
 from enum import IntEnum
-from mim_py.mim import *
-from mim_py.mim import World, Sym, Def # for explicit use below
-from mim_py.mim_enums.regex_plug import regex as r
-from typing import List
-from mim_py.callable import MimCallable
-from mim_py.jit import JIT
-from mim_py.plugin import MimPlugin
-from mim_py.mim_regex import MimRegex
+
+from ._mim import *
+from ._mim import Def, Sym, World
+from .callable import MimCallable
+from .jit import JIT
+from .plugin import MimPlugin
 
 def call(self, *args) -> Def:
     callee = args[0]
@@ -24,15 +22,14 @@ def call(self, *args) -> Def:
         return args[0]
 
     if len(args) >= 3:
-        if isinstance(args[1], List):
+        if isinstance(args[1], list):
             return self.call(self.implicit_app(callee, args[1]), args[2::])
         else:
             return self.call(self.implicit_app(callee, [args[1]]), args[2::])
     else:
-        if isinstance(args[1], List):
+        if isinstance(args[1], list):
             return self.implicit_app(callee, args[1])
         else:
-            # print(f"first argument: {type(args[1])}")
             if isinstance(args[1], tuple):
                 tmp = list(args[1])
                 return self.implicit_app(callee, tmp[0])
@@ -40,3 +37,7 @@ def call(self, *args) -> Def:
     raise TypeError("The given arguments dont match the expected types")
 
 World.call = call
+
+from . import core, regex
+
+from .regex import MimRegex, RegBuilder

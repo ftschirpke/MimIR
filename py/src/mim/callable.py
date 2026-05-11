@@ -1,4 +1,6 @@
-from typing import List
+from typing import Any
+
+
 class MimCallable:
 
     def __init__(self, name: str, input_types, return_type, function_ptr):

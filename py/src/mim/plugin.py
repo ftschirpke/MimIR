@@ -1,10 +1,8 @@
-from pathlib import Path
-
 from abc import ABC, abstractmethod
 
-from mim_py.jit import JIT
-from mim_py import Driver, Level
-from mim_py.callable import MimCallable
+from .jit import JIT
+from . import Driver, Level
+from .callable import MimCallable
 
 class MimPlugin(ABC):
 

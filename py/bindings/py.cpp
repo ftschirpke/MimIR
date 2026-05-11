@@ -25,7 +25,7 @@ void init_sym(py::module_&);
 void init_sym_pool(py::module_&);
 } // namespace fe
 
-PYBIND11_MODULE(mim, m) {
+PYBIND11_MODULE(_mim, m) {
     // Register foundational types first so World's method signatures resolve
     // to Python class names instead of raw C++ spellings ("mim::Lit" -> "Lit").
     // Please consider The ordering for future added Types.

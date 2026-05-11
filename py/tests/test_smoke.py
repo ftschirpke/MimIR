@@ -1,11 +1,11 @@
-"""Top-level binding registration smoke tests for mim_py.
+"""Top-level binding registration smoke tests for mim.
 
 Catches missing init_*(m) calls in py/bindings/py.cpp and missing
-re-exports in mim_py/__init__.py.
+re-exports in mim/__init__.py.
 """
 from __future__ import annotations
 
-import mim_py as mim
+import mim
 import pytest
 
 EXPECTED_FROM_BINDINGS = [
@@ -15,19 +15,19 @@ EXPECTED_FROM_BINDINGS = [
 ]
 
 EXPECTED_FROM_WRAPPER = [
-    "MimCallable", "MimPlugin", "MimRegex", "JIT", "call", "r",
-    "core_plug", "regex_plug",
+    "MimCallable", "MimPlugin", "MimRegex", "RegBuilder", "JIT", "call",
+    "core", "regex",
 ]
 
 
 @pytest.mark.parametrize("name", EXPECTED_FROM_BINDINGS)
 def test_binding_symbol_present(name):
-    assert hasattr(mim, name), f"mim_py.{name} missing — check init_*() in py.cpp"
+    assert hasattr(mim, name), f"mim.{name} missing — check init_*() in py.cpp"
 
 
 @pytest.mark.parametrize("name", EXPECTED_FROM_WRAPPER)
 def test_wrapper_symbol_present(name):
-    assert hasattr(mim, name), f"mim_py.{name} missing — check mim_py/__init__.py"
+    assert hasattr(mim, name), f"mim.{name} missing — check mim/__init__.py"
 
 
 def test_log_levels_exported():
@@ -58,5 +58,10 @@ def test_mim_error_is_exception():
 
 
 def test_world_call_is_monkey_patched():
-    """mim_py/__init__.py attaches a `call` method to World."""
+    """mim/__init__.py attaches a `call` method to World."""
     assert callable(getattr(mim.World, "call", None))
+
+
+def test_plugin_facades_delegate_to_generated_enums():
+    assert mim.core.bit2.and_ is not None
+    assert mim.regex.lit is not None

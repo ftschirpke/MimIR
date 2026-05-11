@@ -16,6 +16,7 @@
 .vscode
 build*/
 .venv/
+*.egg-info/
 compile_commands.json
 vgcore.*
 assets/*.aux

@@ -1,7 +1,7 @@
 """Tests for py/bindings/world.cpp bindings (no plugins required)."""
 from __future__ import annotations
 
-import mim_py as mim
+import mim
 
 
 def test_lit_i8(world):

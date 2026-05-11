@@ -29,37 +29,52 @@ add_custom_target(mim_py_venv
     VERBATIM
 )
 
-# Generate __init__.pyi for the mim_py package via pybind11-stubgen.
-set(_mim_py_stubs_build "${CMAKE_BINARY_DIR}/mim_py_stubs/mim_py")
+# Generate a stub for the internal pybind11 module.
+set(_mim_py_stubs_build "${CMAKE_BINARY_DIR}/mim_py_stubs")
 add_custom_target(mim_py_stubs
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_mim_py_stubs_build}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${_mim_py_stubs_build}"
-    COMMAND "${CMAKE_COMMAND}" -E env
-            "PYTHONPATH=$<TARGET_FILE_DIR:pymim>"
-            "${MIM_PY_PYTHON}" -m pybind11_stubgen
-                --output-dir "${CMAKE_BINARY_DIR}/mim_py_stubs"
-                mim
-    COMMAND "${CMAKE_COMMAND}" -E rename
-            "${CMAKE_BINARY_DIR}/mim_py_stubs/mim.pyi"
-            "${_mim_py_stubs_build}/__init__.pyi"
     COMMAND "${CMAKE_COMMAND}" -E copy
-            "${_mim_py_stubs_build}/__init__.pyi"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/mim_py/__init__.pyi"
-    COMMENT "mim_py: generating __init__.pyi via pybind11-stubgen"
+            "$<TARGET_FILE:pymim>"
+            "${_mim_py_stubs_build}/$<TARGET_FILE_NAME:pymim>"
+    COMMAND "${CMAKE_COMMAND}" -E env
+            "PYTHONPATH=${_mim_py_stubs_build}"
+            "${MIM_PY_PYTHON}" -m pybind11_stubgen
+                --output-dir "${_mim_py_stubs_build}"
+                _mim
+    COMMENT "mim_py: generating _mim.pyi via pybind11-stubgen"
     VERBATIM
 )
 add_dependencies(mim_py_stubs pymim mim_py_venv)
 
-# Main mim_py package: stage source, drop pymim .so in, build wheel, pip install.
+# Main mim package: stage source, drop _mim.so plus generated enums/stubs in, build wheel, pip install.
 set(_mim_py_main_stage  "${MIM_PY_STAGE}/main")
 set(_mim_py_main_wheels "${MIM_PY_WHEELS}/main")
+set(_mim_py_enum_stage  "${_mim_py_main_stage}/src/mim/_enums")
+set(_mim_py_stage_enum_commands
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_mim_py_enum_stage}"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${_mim_py_enum_stage}/__init__.py"
+)
+foreach(_plugin ${MIM_PLUGIN_LIST})
+    list(APPEND _mim_py_stage_enum_commands
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/mim/${_plugin}.py"
+                "${_mim_py_enum_stage}/${_plugin}.py"
+    )
+endforeach()
 add_custom_target(mim_py_main
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_mim_py_main_stage}" "${_mim_py_main_wheels}"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}" "${_mim_py_main_stage}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf
+            "${_mim_py_main_stage}/src/mim.egg-info"
     COMMAND "${CMAKE_COMMAND}" -E copy
             "$<TARGET_FILE:pymim>"
-            "${_mim_py_main_stage}/src/mim_py/$<TARGET_FILE_NAME:pymim>"
+            "${_mim_py_main_stage}/src/mim/$<TARGET_FILE_NAME:pymim>"
+    COMMAND "${CMAKE_COMMAND}" -E copy
+            "${_mim_py_stubs_build}/_mim.pyi"
+            "${_mim_py_main_stage}/src/mim/_mim.pyi"
+    ${_mim_py_stage_enum_commands}
     COMMAND "${MIM_PY_PYTHON}" -m build --wheel
             --outdir "${_mim_py_main_wheels}" "${_mim_py_main_stage}"
     COMMAND "${CMAKE_COMMAND}"

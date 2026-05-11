@@ -14,5 +14,5 @@ pybind11_add_module(pymim
     error.cpp
 )
 
-set_target_properties(pymim PROPERTIES LIBRARY_OUTPUT_NAME mim)
+set_target_properties(pymim PROPERTIES LIBRARY_OUTPUT_NAME _mim)
 target_link_libraries(pymim PRIVATE libmim)

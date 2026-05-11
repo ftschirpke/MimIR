@@ -4,10 +4,9 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-import mim_py as mim
+import mim
+import mim.regex as regex
 import pytest
-
-from mim_py.mim_regex import RegBuilder
 
 
 def test_regex_plugin_loads(regex_world):
@@ -37,7 +36,7 @@ def test_regbuilder_jit_match(tmp_path, monkeypatch):
     driver = mim.Driver()
     driver.add_search_path(plugin_dir)
 
-    b = RegBuilder(driver, "regex_test", mim.Level.Error)
+    b = regex.RegBuilder(driver, "regex_test", mim.Level.Error)
     pattern = b.lit("a") + b.lit("b") + b.lit("c")
     library = pattern.jit()
 

@@ -1,26 +1,40 @@
+from __future__ import annotations
+
 import ctypes
-from typing import Self, List
-from mim_py.plugin import MimPlugin
-from mim_py.mim_enums.regex_plug import *
-from mim_py.mim_enums.core_plug import *
-from mim_py import Error, Level, Driver, Def, Lit
+from typing import List
+
+from . import Def, Driver, Level
+from ._enums.regex import regex as _regex
+from .core import core
+from .plugin import MimPlugin
+
+regex = _regex
+
+
+def __getattr__(name):
+    return getattr(_regex, name)
+
+
+def __dir__():
+    return sorted(set(globals()) | set(dir(_regex)))
+
 
 class RegBuilder(MimPlugin):
 
-    def __init__(self, driver: Driver, libname: str, log_level=Level.Warn, initialize= True):
-      super().__init__(driver, log_level, libname)
-      self.lvl = log_level
-      self.world = self.driver.world()
-      if (initialize):
-        driver.load_plugins(["core", "compile", "regex", "opt"])
+    def __init__(self, driver: Driver, libname: str, log_level=Level.Warn, initialize=True):
+        super().__init__(driver, log_level, libname)
+        self.lvl = log_level
+        self.world = self.driver.world()
+        if initialize:
+            driver.load_plugins(["core", "compile", "regex", "opt"])
 
     def __char_lit(self, lit) -> Def:
         return self.world.lit_i8(ord(lit))
 
-    def _set_final_def(self,d: Def):
+    def _set_final_def(self, d: Def):
         self.__final_def = d
 
-    def lit(self, lit: str) -> MimRegex:
+    def lit(self, lit: str) -> "MimRegex":
         if len(lit) > 1:
             defs = [MimRegex(self.world.call(regex.lit, self.__char_lit(c)), self) for c in lit]
             acc = defs[0]
@@ -29,17 +43,16 @@ class RegBuilder(MimPlugin):
             return MimRegex(acc.def_, self)
         return MimRegex(self.world.call(regex.lit, self.__char_lit(lit)), self)
 
-    def alnum(self) -> MimRegex:
-        exp = (self.range("a", "z") | self.range("A", "Z") | self.range("0", "9"))
+    def alnum(self) -> "MimRegex":
+        exp = self.range("a", "z") | self.range("A", "Z") | self.range("0", "9")
         return MimRegex(exp.def_, self)
 
     def alpha(self):
-        return MimRegex((self.range('a', 'z') | self.range('A', 'Z')).def_, self )
+        return MimRegex((self.range("a", "z") | self.range("A", "Z")).def_, self)
 
-    def range(self, left, right) -> MimRegex:
+    def range(self, left, right) -> "MimRegex":
         d = self.world.call(regex.range, [self.__char_lit(left), self.__char_lit(right)])
         return MimRegex(d, self)
-
 
     def build(self):
         function_name = "match_func"
@@ -62,89 +75,86 @@ class RegBuilder(MimPlugin):
         self.match_func.externalize()
         mem, to_match, exit = self.match_func.var().projs(3)
 
-
         regex_mem, matched, pos = self.world.implicit_app(
-           self.__final_def,
+            self.__final_def,
             [mem, to_match, self.world.lit(self.world.type_idx(self.world.top_nat()), 0)],
         ).projs(3)
         last_elem_ptr = self.world.call("%mem.lea", [to_match, pos])
-        (final_mem, last_elem) = self.world.call(
-            "%mem.load", [regex_mem, last_elem_ptr]
-        ).projs(2)
+        final_mem, last_elem = self.world.call("%mem.load", [regex_mem, last_elem_ptr]).projs(2)
         eq_zero = self.world.call_by_id(
-            core.icmp.xyglEe,[last_elem, self.world.lit_i8(0)]
+            core.icmp.xyglEe,
+            [last_elem, self.world.lit_i8(0)],
         )
 
         matched_and_end = self.world.call(
-            f"%core.bit2.and_", self.world.lit_nat_0(), [matched, eq_zero]
+            "%core.bit2.and_",
+            self.world.lit_nat_0(),
+            [matched, eq_zero],
         )
         self.match_func.app(False, exit, [final_mem, matched_and_end])
 
         self.register_func(function_name, [ctypes.c_char_p], ctypes.c_bool)
 
-class MimRegex():
+
+class MimRegex:
 
     def __init__(self, def_: Def, builder: RegBuilder):
-      self.def_ = def_
-      self.builder_ = builder
-      self.world = self.builder_.world
+        self.def_ = def_
+        self.builder_ = builder
+        self.world = self.builder_.world
 
-
-    def __conj(self, expr: List[MimRegex]) -> MimRegex:
+    def __conj(self, expr: List["MimRegex"]) -> "MimRegex":
         new_expr = [self.def_]
         new_expr.extend([x.def_ for x in expr])
-        d = self.world.call(regex.conj,new_expr)
+        d = self.world.call(regex.conj, new_expr)
         return MimRegex(d, self.builder_)
 
-    def star(self) -> MimRegex:
+    def star(self) -> "MimRegex":
         d = self.world.call(regex.quant.star, self.def_)
         return MimRegex(d, self.builder_)
 
-    def plus(self) -> MimRegex:
+    def plus(self) -> "MimRegex":
         d = self.world.call(regex.quant.plus, self.def_)
         return MimRegex(d, self.builder_)
 
-
-    def any(self) -> MimRegex:
+    def any(self) -> "MimRegex":
         d = self.world.call(regex.any)
         return MimRegex(d, self.builder_)
 
-    def __invert__(self) -> MimRegex:
+    def __invert__(self) -> "MimRegex":
         d = self.world.call(regex.quant.optional, self.def_)
         return MimRegex(d, self.builder_)
 
-    def __neg__(self) -> MimRegex:
+    def __neg__(self) -> "MimRegex":
         d = self.world.call(regex.not_, self.def_)
         return MimRegex(d, self.builder_)
 
-
-    def disj(self, expr: List[MimRegex]) -> MimRegex:
+    def disj(self, expr: List["MimRegex"]) -> "MimRegex":
         d = self.world.call(regex.disj, [self.def_] + [x.def_ for x in expr])
         return MimRegex(d, self.builder_)
 
-
-    def __or__(self, other: MimRegex) -> MimRegex:
+    def __or__(self, other: "MimRegex") -> "MimRegex":
         d = self.world.call(regex.disj, [self.def_] + [other.def_])
         return MimRegex(d, self.builder_)
 
-    def empty(self) -> MimRegex:
+    def empty(self) -> "MimRegex":
         d = self.world.call(regex.empty)
         return MimRegex(d, self.builder_)
 
-    def __add__(self, other: MimRegex) -> MimRegex:
+    def __add__(self, other: "MimRegex") -> "MimRegex":
         d = self.__conj([other]).def_
         return MimRegex(d, self.builder_)
 
-    def __mul__(self, times: int) -> MimRegex:
+    def __mul__(self, times: int) -> "MimRegex":
         acc = self
         for _ in range(times):
             acc = acc + self
         return MimRegex(acc.def_, self.builder_)
 
-    def __getitem__(self, postfix_operator:str) -> MimRegex:
-        if(len(postfix_operator) != 1):
+    def __getitem__(self, postfix_operator: str) -> "MimRegex":
+        if len(postfix_operator) != 1:
             raise ValueError("only strings of size 1 are valid")
-        if(postfix_operator not in ["*", "+", "?"]):
+        if postfix_operator not in ["*", "+", "?"]:
             raise ValueError("postfix_operator has to match either *, ? or +")
 
         match postfix_operator:

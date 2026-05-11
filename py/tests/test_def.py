@@ -1,7 +1,7 @@
 """Tests for py/bindings/def.cpp bindings."""
 from __future__ import annotations
 
-import mim_py as mim
+import mim
 import pytest
 
 

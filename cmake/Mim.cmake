@@ -71,7 +71,7 @@ function(add_mim_plugin)
     set(OUT_PLUGIN_MIM  ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/mim/${PLUGIN}.mim)
     set(PLUGIN_MD       ${CMAKE_BINARY_DIR}/docs/plug/${PLUGIN}.md)
     set(AUTOGEN_H       ${CMAKE_BINARY_DIR}/include/mim/plug/${PLUGIN}/autogen.h)
-    set(AUTOGEN_PY      ${CMAKE_BINARY_DIR}/include/py/${PLUGIN}_plug.py)
+    set(AUTOGEN_PY      ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/mim/${PLUGIN}.py)
 
     file(READ "${PLUGIN_MIM}" plugin_file_contents)
 
@@ -85,7 +85,7 @@ function(add_mim_plugin)
         MAKE_DIRECTORY
             ${CMAKE_BINARY_DIR}/docs/plug/
             ${CMAKE_BINARY_DIR}/include/mim/plug/${PLUGIN}
-            ${CMAKE_BINARY_DIR}/include/py/
+            ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/mim/
     )
 
     add_custom_command(
