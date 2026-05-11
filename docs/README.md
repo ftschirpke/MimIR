@@ -1,19 +1,18 @@
 # MimIR
 
-[![Forks](https://img.shields.io/github/forks/mimir/mimir)](https://github.com/mimir/mimir/fork)
 [![Stars](https://img.shields.io/github/stars/mimir/mimir)](https://github.com/mimir/mimir/stargazers)
+[![Forks](https://img.shields.io/github/forks/mimir/mimir)](https://github.com/mimir/mimir/fork)
+[![Discord](https://img.shields.io/discord/960975142459179068?style=social&logo=discord&logoColor=black)](https://discord.gg/FPp7hdj3fQ)
 
-[![Documentation](https://img.shields.io/badge/docs-master-green?style=flat-square&logo=gitbook&logoColor=white)](https://mimir.github.io)
-[![Discord](https://img.shields.io/discord/960975142459179068?style=flat-square&color=green&logo=discord&logoColor=white)](https://discord.gg/FPp7hdj3fQ)
-[![License](https://img.shields.io/github/license/mimir/mimir?style=flat-square&color=yellowgreen&logo=opensourceinitiative&logoColor=white)](https://github.com/mimir/mimir/blob/master/LICENSE.TXT)
+[![GitHub Release](https://img.shields.io/github/v/release/mimir/mimir?style=flat-square&logo=starship)](https://github.com/mimir/mimir/releases)
 [![Linux](https://img.shields.io/github/actions/workflow/status/mimir/mimir/linux.yml?style=flat-square&logo=linux&label=linux&logoColor=white&branch=master)](https://github.com/mimir/mimir/actions/workflows/linux.yml)
-[![Windows](https://img.shields.io/github/actions/workflow/status/mimir/mimir/windows.yml?label=⊞%20windows&branch=master)](https://github.com/mimir/mimir/actions/workflows/windows.yml)
+[![Windows](https://img.shields.io/github/actions/workflow/status/mimir/mimir/windows.yml?style=flat-square&label=⊞%20windows&branch=master)](https://github.com/mimir/mimir/actions/workflows/windows.yml)
 [![macOS](https://img.shields.io/github/actions/workflow/status/mimir/mimir/macos.yml?style=flat-square&logo=apple&label=macos&branch=master)](https://github.com/mimir/mimir/actions/workflows/macos.yml)
 [![Doxygen](https://img.shields.io/github/actions/workflow/status/mimir/mimir/doxygen.yml?style=flat-square&logo=gitbook&logoColor=white&label=doxygen&branch=master)](https://github.com/mimir/mimir/actions/workflows/doxygen.yml)
+[![Documentation](https://img.shields.io/badge/docs-master-green?style=flat-square&logo=gitbook&logoColor=white)](https://mimir.github.io)
+
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue?style=flat-square&logo=cplusplus)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
-![GitHub Release](https://img.shields.io/github/v/release/mimir/mimir?style=flat-square&logo=starship)
-
-
+[![License](https://img.shields.io/github/license/mimir/mimir?style=flat-square&color=yellowgreen&logo=opensourceinitiative&logoColor=white)](https://github.com/mimir/mimir/blob/master/LICENSE.TXT)
 
 [TOC]
 
