@@ -443,7 +443,7 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool as_binding) {
             std::print(os, "(root {} {}", ext, id(lam));
             ++tab;
             if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
-            std::print(os, "\n{}(lam");
+            std::print(os, "\n{}(lam", tab);
             toggle_slots();
         }
 
@@ -452,7 +452,7 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool as_binding) {
         ++tab;
         std::print(os, "\n{}{}", tab, id(lam));
         if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
-        std::print(os, "\n{}(lam {} {}", ext, id(lam));
+        std::print(os, "\n{}(lam {} {}", tab, ext, id(lam));
     } else {
         if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
         std::print(os, "(lam {} {}", ext, id(lam));
