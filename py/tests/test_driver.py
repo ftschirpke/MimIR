@@ -29,15 +29,15 @@ def test_add_search_path_accepts_pathlib(tmp_path):
     mim.Driver().add_search_path(tmp_path)
 
 
-def test_load_pluins_core_succeeds(driver):
+def test_load_plugins_core_succeeds(driver):
     driver.add_search_path(_PLUGIN_DIR)
-    driver.load_pluins(["core"])
+    driver.load_plugins(["core"])
 
 
-def test_load_pluins_unknown_raises(driver, tmp_path):
+def test_load_plugins_unknown_raises(driver, tmp_path):
     driver.add_search_path(tmp_path)
     with pytest.raises(Exception):
-        driver.load_pluins(["this_plugin_does_not_exist_xyzzy"])
+        driver.load_plugins(["this_plugin_does_not_exist_xyzzy"])
 
 
 def test_sympool_inheritance():

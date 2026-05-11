@@ -1,18 +1,22 @@
 """Tests for the World.call(...) helper monkey-patched in mim/__init__.py."""
 from __future__ import annotations
+
+from pathlib import Path
+
 import unittest
 import mim
 import mim.plug.core as core
+
+_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "build" / "lib" / "mim"
 
 
 class TestCallFunctions(unittest.TestCase):
 
     def setUp(self):
         self.driver = mim.Driver()
+        self.driver.add_search_path(_PLUGIN_DIR)
         self.world = self.driver.world()
-
-    def load_plugs(self):
-        self.driver.load_pluins(["core"])
+        self.driver.load_plugins(["core"])
 
     def test_call_with_string_resolves_annex(self):
         callee = self.world.call(core.bit2.and_)

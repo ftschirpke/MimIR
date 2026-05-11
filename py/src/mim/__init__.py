@@ -20,7 +20,7 @@ def call(self, *args) -> Def:
             return callee
 
     if len(args) == 1:
-        return args[0]
+        return callee
 
     if len(args) >= 3:
         if isinstance(args[1], list):

@@ -114,3 +114,15 @@ endforeach()
 
 add_custom_target(mim_py ALL)
 add_dependencies(mim_py mim_py_main ${_mim_py_plugin_targets})
+
+add_custom_target(test-py
+    COMMAND "${MIM_PY_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_tests.py"
+    DEPENDS mim_py_main
+    COMMENT "mim_py: running Python tests"
+    USES_TERMINAL
+    VERBATIM
+)
+
+if(TARGET test-all)
+    add_dependencies(test-all test-py)
+endif()

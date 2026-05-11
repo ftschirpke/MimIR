@@ -25,7 +25,6 @@ EXPECTED_FROM_BINDINGS = [
     "MIM_Error",
     "Parser",
     "Pi",
-    "PyParser",
     "Sym",
     "SymPool",
     "Verbose",
