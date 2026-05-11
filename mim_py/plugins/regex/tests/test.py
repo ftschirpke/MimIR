@@ -3,8 +3,14 @@ from pathlib import Path
 
 from mim_py.mim_regex import MimRegex, RegBuilder
 from mim_py.mim_enums.regex_plug import regex
+
+repo_root = Path(__file__).resolve().parents[4]
+plugin_dir = repo_root / "build" / "lib" / "mim"
+if not plugin_dir.is_dir():
+    raise FileNotFoundError(f"expected plugin directory at '{plugin_dir}'")
+
 d = mim.Driver()
-d.add_search_path(Path("../build/lib/mim/"))
+d.add_search_path(plugin_dir)
 b = RegBuilder(d, "regex", mim.Level.Error)
 
 
