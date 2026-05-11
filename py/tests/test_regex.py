@@ -22,7 +22,7 @@ def test_regex_plugin_loads(regex_world):
 def test_regbuilder_jit_match(tmp_path, monkeypatch):
     """End-to-end: build a tiny regex, JIT, run the matcher.
 
-    Uses the canonical RegBuilder pattern from py/plugins/regex/tests/test.py.
+    Uses the public mim.regex API.
     Runs in tmp_path so the generated .ll/.so don't pollute the repo.
     """
     if shutil.which("clang") is None:
