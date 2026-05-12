@@ -1,0 +1,5 @@
+let Test = Nat → Nat → ★;
+let path = 0;
+axm %test.foo: {
+  Test path 0
+} → [];
