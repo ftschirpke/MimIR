@@ -63,11 +63,9 @@ CallArg: TypeAlias = Def | list[Def] | tuple[Def, ...]
 
 def call(self: World, callee: Def | Sym | str | IntEnum, *args: CallArg) -> Def:
     if isinstance(callee, IntEnum):
-        callee = self.annex_by_id(callee.value)
-    elif isinstance(callee, str):
-        callee = self.annex(self.sym(callee))
-    elif isinstance(callee, Sym):
-        callee = self.annex(callee)
+        callee = self.annex(callee.value)
+    else:
+        assert False
 
     for arg in args:
         operands = list(arg) if isinstance(arg, (list, tuple)) else [arg]
@@ -78,5 +76,4 @@ def call(self: World, callee: Def | Sym | str | IntEnum, *args: CallArg) -> Def:
 World.call = call
 
 from . import plug
-
 from .plug.regex import MimRegex, RegBuilder

@@ -17,7 +17,6 @@ namespace mim {
 void init_world(py::module_& m) {
     py::class_<mim::World, std::unique_ptr<mim::World, py::nodelete>>(m, "World")
         .def("write", py::overload_cast<>(&mim::World::write))
-        .def("annex", &mim::World::sym2annex, py::return_value_policy::reference_internal)
         .def("top_nat", &mim::World::top_nat, py::return_value_policy::reference_internal)
         .def("type_bool", &mim::World::type_bool, py::return_value_policy::reference_internal)
         .def("type_i8", &mim::World::type_i8, py::return_value_policy::reference_internal)
@@ -64,6 +63,6 @@ void init_world(py::module_& m) {
         .def("optimize", [](mim::World& w) { mim::optimize(w); })
         .def("dot", static_cast<void (World::*)(const char*, bool, bool) const>(&mim::World::dot))
         .def("mut_con", [](mim::World& w, std::vector<Def*> domains) { return w.mut_con(Defs(domains)); })
-        .def("annex_by_id", [](mim::World& w, uint64_t id) { return w.annex(id); });
+        .def("annex", [](mim::World& w, uint64_t id) { return w.annex(id); });
 }
 } // namespace mim

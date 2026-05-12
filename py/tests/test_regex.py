@@ -1,4 +1,5 @@
 """Regex plugin smoke + end-to-end via RegBuilder.jit()."""
+
 from __future__ import annotations
 
 import shutil
@@ -10,11 +11,7 @@ import mim.plug.regex as regex
 
 
 def test_regex_plugin_loads(regex_world):
-    """The regex plugin loads and its top-level annex symbols resolve."""
-    for sym_name in ("%regex.lit", "%regex.quant.star", "%regex.conj"):
-        s = regex_world.sym(sym_name)
-        assert s.str() == sym_name
-        assert regex_world.annex(s) is not None
+    assert regex_world.annex(regex.lit) is not None
 
 
 @pytest.mark.slow
