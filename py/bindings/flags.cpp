@@ -10,6 +10,6 @@ namespace mim {
 void init_flags(py::module_& m) {
     py::class_<mim::Flags>(m, "Flags")
         .def(py::init<>())
-        .def_readwrite("scalarize_threshhold", &mim::Flags::scalarize_threshold);
+        .def_readwrite("scalarize_threshold", &mim::Flags::scalarize_threshold);
 }
 } // namespace mim
