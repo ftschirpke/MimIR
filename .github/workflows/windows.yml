@@ -41,14 +41,15 @@ jobs:
           set CXX=cl.exe
           python -c "import sys; print(sys.executable)" > tmpPath
           set /p PYTHON_EXE= < tmpPath
-          cmake -B ${{github.workspace}}/build -G Ninja                                                   \
-                -DCMAKE_BUILD_TYPE=${{matrix.build-type}}                                                 \
-                -DBUILD_TESTING=ON -DMIM_BUILD_PYTHON=ON                                                  \
-                -DMIM_BUILD_EXAMPLES=ON                                                                   \
-                -DPython3_EXECUTABLE=%PYTHON_EXE%                                                         \
-                -DPython_EXECUTABLE=%PYTHON_EXE%                                                          \
-                -DPYTHON_EXECUTABLE=%PYTHON_EXE%                                                          \
-                -DMIM_FILECHECK=${{github.workspace}}/bin/FileCheck-x86_64-win.exe -DMIM_LIT_TIMEOUT=300
+          cmake -B ${{github.workspace}}/build -G Ninja   ^
+                -DCMAKE_BUILD_TYPE=${{matrix.build-type}} ^
+                -DBUILD_TESTING=ON -DMIM_BUILD_PYTHON=ON  ^
+                -DMIM_BUILD_EXAMPLES=ON                   ^
+                -DPython3_EXECUTABLE=%PYTHON_EXE%         ^
+                -DPython_EXECUTABLE=%PYTHON_EXE%          ^
+                -DPYTHON_EXECUTABLE=%PYTHON_EXE%          ^
+                -DMIM_LIT_TIMEOUT=300                     ^
+                -DMIM_FILECHECK=${{github.workspace}}/bin/FileCheck-x86_64-win.exe
 
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v2.0.9
