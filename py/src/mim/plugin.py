@@ -15,7 +15,7 @@ class MimPlugin(ABC):
 
     @abstractmethod
     def build(self):
-        raise MemoryError("Needs to be implemented by plugin author")
+        raise NotImplementedError("Needs to be implemented by plugin author")
 
     def register_func(self, name: str, input_types: list, return_type):
         self._registered_functions[name] = (input_types, return_type)

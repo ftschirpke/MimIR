@@ -49,8 +49,8 @@ def test_driver_via_def(driver):
 
 
 @pytest.mark.skip(reason="calling .var() on a projection currently segfaults; "
-                    "see pytest/regex.py:222 — convert to xfail-strict once the "
-                    "binding raises MIM_Error instead of crashing.")
+                    "convert to xfail-strict once the binding raises MIM_Error "
+                    "instead of crashing.")
 def test_var_on_projection_raises(world):
     m = world.mut_con([world.type_bool(), world.type_i8()])
     p = m.var().proj(0)

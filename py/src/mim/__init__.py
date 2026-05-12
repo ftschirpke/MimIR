@@ -58,35 +58,18 @@ def catch_mim_errors(
     return decorator(func)
 
 
-def call(self, *args) -> Def:
-    callee = args[0]
-    if isinstance(args[0], IntEnum):
-        callee = self.annex_by_id(args[0].value)
-    if isinstance(callee, str):
-        callee = self.sym(callee)
+def call(self, callee, *args) -> Def:
+    if isinstance(callee, IntEnum):
+        callee = self.annex_by_id(callee.value)
+    elif isinstance(callee, str):
+        callee = self.annex(self.sym(callee))
+    elif isinstance(callee, Sym):
         callee = self.annex(callee)
-    if isinstance(callee, Sym):
-        callee = self.annex(callee)
-        if len(args) == 1:
-            return callee
 
-    if len(args) == 1:
-        return callee
-
-    if len(args) >= 3:
-        if isinstance(args[1], list):
-            return self.call(self.implicit_app(callee, args[1]), args[2::])
-        else:
-            return self.call(self.implicit_app(callee, [args[1]]), args[2::])
-    else:
-        if isinstance(args[1], list):
-            return self.implicit_app(callee, args[1])
-        else:
-            if isinstance(args[1], tuple):
-                tmp = list(args[1])
-                return self.implicit_app(callee, tmp[0])
-            return self.implicit_app(callee, [args[1]])
-    raise TypeError("The given arguments dont match the expected types")
+    for arg in args:
+        operands = list(arg) if isinstance(arg, (list, tuple)) else [arg]
+        callee = self.implicit_app(callee, operands)
+    return callee
 
 
 World.call = call

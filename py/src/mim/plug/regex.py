@@ -4,13 +4,14 @@ import ctypes
 from typing import List
 
 from .. import Def, Driver, Level
-from .._plugins.regex import regex as _regex
+from .._plugins.regex import regex
 from ..plugin import MimPlugin
-from ._facade import install
 from .core import core
 from .mem import mem
 
-regex = install(globals(), "regex", _regex)
+
+def __getattr__(name):
+    return getattr(regex, name)
 
 
 class RegBuilder(MimPlugin):
@@ -22,20 +23,20 @@ class RegBuilder(MimPlugin):
         if initialize:
             driver.load_plugins(["core", "compile", "regex", "opt"])
 
-    def __char_lit(self, lit) -> Def:
+    def _char_lit(self, lit) -> Def:
         return self.world.lit_i8(ord(lit))
 
     def _set_final_def(self, d: Def):
-        self.__final_def = d
+        self._final_def = d
 
     def lit(self, lit: str) -> "MimRegex":
         if len(lit) > 1:
-            defs = [MimRegex(self.world.call(regex.lit, self.__char_lit(c)), self) for c in lit]
+            defs = [MimRegex(self.world.call(regex.lit, self._char_lit(c)), self) for c in lit]
             acc = defs[0]
             for re in defs[1::]:
                 acc = acc + re
             return MimRegex(acc.def_, self)
-        return MimRegex(self.world.call(regex.lit, self.__char_lit(lit)), self)
+        return MimRegex(self.world.call(regex.lit, self._char_lit(lit)), self)
 
     def alnum(self) -> "MimRegex":
         exp = self.range("a", "z") | self.range("A", "Z") | self.range("0", "9")
@@ -45,7 +46,7 @@ class RegBuilder(MimPlugin):
         return MimRegex((self.range("a", "z") | self.range("A", "Z")).def_, self)
 
     def range(self, left, right) -> "MimRegex":
-        d = self.world.call(regex.range, [self.__char_lit(left), self.__char_lit(right)])
+        d = self.world.call(regex.range, [self._char_lit(left), self._char_lit(right)])
         return MimRegex(d, self)
 
     def build(self):
@@ -66,7 +67,7 @@ class RegBuilder(MimPlugin):
         state_mem, to_match, exit = self.match_func.var().projs(3)
 
         regex_mem, matched, pos = self.world.implicit_app(
-            self.__final_def,
+            self._final_def,
             [state_mem, to_match, self.world.lit(self.world.type_idx(self.world.top_nat()), 0)],
         ).projs(3)
         last_elem_ptr = self.world.call(mem.lea, [to_match, pos])
@@ -90,7 +91,7 @@ class MimRegex:
         self.builder_ = builder
         self.world = self.builder_.world
 
-    def __conj(self, expr: List["MimRegex"]) -> "MimRegex":
+    def _conj(self, expr: List["MimRegex"]) -> "MimRegex":
         new_expr = [self.def_]
         new_expr.extend([x.def_ for x in expr])
         d = self.world.call(regex.conj, new_expr)
@@ -129,7 +130,7 @@ class MimRegex:
         return MimRegex(d, self.builder_)
 
     def __add__(self, other: "MimRegex") -> "MimRegex":
-        d = self.__conj([other]).def_
+        d = self._conj([other]).def_
         return MimRegex(d, self.builder_)
 
     def __mul__(self, times: int) -> "MimRegex":

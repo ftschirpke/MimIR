@@ -1,15 +1,14 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_subdirectory(bindings)
 
-set(MIM_PY_VENV           "${CMAKE_BINARY_DIR}/.venv")
+set(MIM_PY_VENV "${CMAKE_BINARY_DIR}/.venv")
 if(WIN32)
     set(MIM_PY_PYTHON "${MIM_PY_VENV}/Scripts/python.exe")
 else()
     set(MIM_PY_PYTHON "${MIM_PY_VENV}/bin/python")
 endif()
-set(MIM_PY_STAGE          "${CMAKE_BINARY_DIR}/mim_py_stage")
-set(MIM_PY_WHEELS         "${CMAKE_BINARY_DIR}/mim_py_wheels")
-set(MIM_PY_INSTALL_SCRIPT "${PROJECT_SOURCE_DIR}/cmake/MimPyInstallWheel.cmake")
+set(MIM_PY_STAGE "${CMAKE_BINARY_DIR}/mim_py_stage/main")
+
 execute_process(
     COMMAND "${Python3_EXECUTABLE}" -c
             "import os, sys; print(os.path.realpath(getattr(sys, '_base_executable', sys.executable) or sys.executable))"
@@ -22,55 +21,60 @@ if(NOT EXISTS "${MIM_PY_BOOTSTRAP_PYTHON}")
     )
 endif()
 
-# venv: wiped & recreated on every build
-add_custom_target(mim_py_venv
-    COMMAND "${CMAKE_COMMAND}" -E echo "[mim_py] (re)creating venv at ${MIM_PY_VENV}"
+# venv: created once, kept between builds. Stamp gates downstream targets.
+set(MIM_PY_VENV_STAMP "${MIM_PY_VENV}/.mim-stamp")
+add_custom_command(
+    OUTPUT "${MIM_PY_VENV_STAMP}"
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${MIM_PY_VENV}"
     COMMAND "${MIM_PY_BOOTSTRAP_PYTHON}" -m venv "${MIM_PY_VENV}"
-    COMMAND "${MIM_PY_PYTHON}" -m pip install --upgrade pip
-    COMMAND "${MIM_PY_PYTHON}" -m pip install build pybind11-stubgen
-    COMMENT "mim_py: (re)creating ${MIM_PY_VENV}"
+    COMMAND "${MIM_PY_PYTHON}" -m pip install --quiet --upgrade pip setuptools wheel
+    COMMAND "${MIM_PY_PYTHON}" -m pip install --quiet pytest pybind11-stubgen
+    COMMAND "${CMAKE_COMMAND}" -E touch "${MIM_PY_VENV_STAMP}"
+    COMMENT "mim_py: creating venv at ${MIM_PY_VENV}"
     VERBATIM
 )
+add_custom_target(mim_py_venv DEPENDS "${MIM_PY_VENV_STAMP}")
 
 # Generate a stub for the internal pybind11 module.
-set(_mim_py_stubs_build "${CMAKE_BINARY_DIR}/mim_py_stubs")
+set(MIM_PY_STUBS_DIR "${CMAKE_BINARY_DIR}/mim_py_stubs")
+set(MIM_PY_STUB_FILE "${MIM_PY_STUBS_DIR}/_mim.pyi")
 set(_mim_py_stub_runtime_commands)
 if(WIN32)
     set(_mim_py_stub_runtime_commands
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:pymim>
-                "${_mim_py_stubs_build}"
+                "${MIM_PY_STUBS_DIR}"
     )
 endif()
-add_custom_target(mim_py_stubs
-    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_mim_py_stubs_build}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_mim_py_stubs_build}"
+add_custom_command(
+    OUTPUT "${MIM_PY_STUB_FILE}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${MIM_PY_STUBS_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${MIM_PY_STUBS_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy
             "$<TARGET_FILE:pymim>"
-            "${_mim_py_stubs_build}/$<TARGET_FILE_NAME:pymim>"
+            "${MIM_PY_STUBS_DIR}/$<TARGET_FILE_NAME:pymim>"
     ${_mim_py_stub_runtime_commands}
     COMMAND "${CMAKE_COMMAND}" -E env
-            "PYTHONPATH=${_mim_py_stubs_build}"
+            "PYTHONPATH=${MIM_PY_STUBS_DIR}"
             "${MIM_PY_PYTHON}" -m pybind11_stubgen
-                --output-dir "${_mim_py_stubs_build}"
+                --output-dir "${MIM_PY_STUBS_DIR}"
                 _mim
+    DEPENDS pymim "${MIM_PY_VENV_STAMP}"
     COMMENT "mim_py: generating _mim.pyi via pybind11-stubgen"
     COMMAND_EXPAND_LISTS
     VERBATIM
 )
-add_dependencies(mim_py_stubs pymim mim_py_venv)
+add_custom_target(mim_py_stubs DEPENDS "${MIM_PY_STUB_FILE}")
 
-# Main mim package: stage source, drop _mim.so plus generated plugin metadata/stubs in, build wheel, pip install.
-set(_mim_py_main_stage  "${MIM_PY_STAGE}/main")
-set(_mim_py_main_wheels "${MIM_PY_WHEELS}/main")
-set(_mim_py_plugin_stage "${_mim_py_main_stage}/src/mim/_plugins")
+# Stage the package (sources + generated artifacts) and install it editable.
+# Editable install lets later builds refresh staged files without re-running pip.
+set(_mim_py_plugin_stage "${MIM_PY_STAGE}/src/mim/_plugins")
 set(_mim_py_main_runtime_commands)
 if(WIN32)
     set(_mim_py_main_runtime_commands
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:pymim>
-                "${_mim_py_main_stage}/src/mim"
+                "${MIM_PY_STAGE}/src/mim"
     )
 endif()
 set(_mim_py_stage_plugin_commands
@@ -79,38 +83,33 @@ set(_mim_py_stage_plugin_commands
 )
 foreach(_plugin ${MIM_PLUGIN_LIST})
     list(APPEND _mim_py_stage_plugin_commands
-        COMMAND "${CMAKE_COMMAND}" -E copy
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/mim/${_plugin}.py"
                 "${_mim_py_plugin_stage}/${_plugin}.py"
     )
 endforeach()
 add_custom_target(mim_py_main
-    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_mim_py_main_stage}" "${_mim_py_main_wheels}"
+    # Wipe the source side of the stage so deleted py/src files don't linger.
+    # Generated artifacts under src/mim/_plugins are restaged below.
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${MIM_PY_STAGE}/src" "${MIM_PY_STAGE}/tests"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}" "${_mim_py_main_stage}"
-    COMMAND "${CMAKE_COMMAND}" -E rm -rf
-            "${_mim_py_main_stage}/src/mim.egg-info"
-    COMMAND "${CMAKE_COMMAND}" -E copy
+            "${CMAKE_CURRENT_SOURCE_DIR}" "${MIM_PY_STAGE}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "$<TARGET_FILE:pymim>"
-            "${_mim_py_main_stage}/src/mim/$<TARGET_FILE_NAME:pymim>"
+            "${MIM_PY_STAGE}/src/mim/$<TARGET_FILE_NAME:pymim>"
     ${_mim_py_main_runtime_commands}
-    COMMAND "${CMAKE_COMMAND}" -E copy
-            "${_mim_py_stubs_build}/_mim.pyi"
-            "${_mim_py_main_stage}/src/mim/_mim.pyi"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${MIM_PY_STUB_FILE}"
+            "${MIM_PY_STAGE}/src/mim/_mim.pyi"
     ${_mim_py_stage_plugin_commands}
-    COMMAND "${MIM_PY_PYTHON}" -m build --wheel
-            --outdir "${_mim_py_main_wheels}" "${_mim_py_main_stage}"
-    COMMAND "${CMAKE_COMMAND}"
-            "-DPYTHON=${MIM_PY_PYTHON}"
-            "-DWHEEL_DIR=${_mim_py_main_wheels}"
-            -P "${MIM_PY_INSTALL_SCRIPT}"
-    COMMENT "mim_py: building & installing main package"
+    COMMAND "${MIM_PY_PYTHON}" -m pip install --quiet --no-deps -e "${MIM_PY_STAGE}"
+    COMMENT "mim_py: staging & installing mim (editable)"
     COMMAND_EXPAND_LISTS
     VERBATIM
 )
 add_dependencies(mim_py_main pymim mim_all_plugins mim_py_venv mim_py_stubs)
 
-# Plugins: discovered at configure time under py/plugins/*/pyproject.toml.
+# Editable installs for third-party plugins under py/plugins/*/pyproject.toml.
 file(GLOB _mim_py_plugin_tomls CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/plugins/*/pyproject.toml")
 set(_mim_py_plugin_targets)
@@ -118,18 +117,11 @@ foreach(_toml ${_mim_py_plugin_tomls})
     get_filename_component(_plugin_dir  "${_toml}" DIRECTORY)
     get_filename_component(_plugin_name "${_plugin_dir}" NAME)
     set(_target mim_py_plugin_${_plugin_name})
-    set(_stage   "${MIM_PY_STAGE}/plugins/${_plugin_name}")
-    set(_wheels  "${MIM_PY_WHEELS}/plugins/${_plugin_name}")
+    set(_stage "${CMAKE_BINARY_DIR}/mim_py_stage/plugins/${_plugin_name}")
     add_custom_target(${_target}
-        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_stage}" "${_wheels}"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_plugin_dir}" "${_stage}"
-        COMMAND "${MIM_PY_PYTHON}" -m build --wheel
-                --outdir "${_wheels}" "${_stage}"
-        COMMAND "${CMAKE_COMMAND}"
-                "-DPYTHON=${MIM_PY_PYTHON}"
-                "-DWHEEL_DIR=${_wheels}"
-                -P "${MIM_PY_INSTALL_SCRIPT}"
-        COMMENT "mim_py: building & installing ${_target}"
+        COMMAND "${MIM_PY_PYTHON}" -m pip install --quiet --no-deps -e "${_stage}"
+        COMMENT "mim_py: staging & installing ${_target} (editable)"
         VERBATIM
     )
     add_dependencies(${_target} mim_py_main)
@@ -139,15 +131,11 @@ endforeach()
 add_custom_target(mim_py ALL)
 add_dependencies(mim_py mim_py_main ${_mim_py_plugin_targets})
 
-set(_mim_py_test_command
-    COMMAND "${MIM_PY_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_tests.py"
-)
-
 if(WIN32)
     add_custom_target(test-py
         COMMAND "${CMAKE_COMMAND}" -E env
                 "PATH=${CMAKE_RUNTIME_OUTPUT_DIRECTORY};${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/mim;$ENV{PATH}"
-                "${MIM_PY_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_tests.py"
+                "${MIM_PY_PYTHON}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests"
         DEPENDS mim_py_main
         COMMENT "mim_py: running Python tests"
         USES_TERMINAL
@@ -155,10 +143,9 @@ if(WIN32)
     )
 else()
     add_custom_target(test-py
-        ${_mim_py_test_command}
+        COMMAND "${MIM_PY_PYTHON}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests"
         DEPENDS mim_py_main
         COMMENT "mim_py: running Python tests"
-        COMMAND_EXPAND_LISTS
         USES_TERMINAL
         VERBATIM
     )

@@ -7,11 +7,6 @@ namespace py = pybind11;
 
 namespace mim::ast {
 
-void init_ast(py::module_& m) {
-    py::class_<mim::ast::AST>(m, "AST")
-        .def(py::init<>())
-        //.def(py::init<AST&>())
-        .def(py::init<mim::World&>());
-}
+void init_ast(py::module_& m) { py::class_<mim::ast::AST>(m, "AST").def(py::init<>()).def(py::init<mim::World&>()); }
 
 } // namespace mim::ast

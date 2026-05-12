@@ -17,12 +17,14 @@ class JIT(ABC):
         self._so_dir = None
 
     def _get_so_path(self) -> str:
-        if pf.system() == "Windows":
+        system = pf.system()
+        if system == "Windows":
             if self._so_dir is None:
                 self._so_dir = tempfile.mkdtemp(prefix=f"{self.so_name}-")
             return os.path.join(self._so_dir, self.so_name + ".dll")
 
-        return os.path.join(".", self.so_name + ".so")
+        ext = ".dylib" if system == "Darwin" else ".so"
+        return os.path.join(".", self.so_name + ext)
 
     def _compile_so(self):
         so_path = self._get_so_path()

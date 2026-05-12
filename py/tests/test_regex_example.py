@@ -1,14 +1,19 @@
-from pathlib import Path
+"""End-to-end: build an email-matching regex and JIT it."""
+from __future__ import annotations
+
+import shutil
+
+import pytest
 
 import mim
 import mim.plug.regex as regex
 
 
-def test_python_package_works(tmp_path, monkeypatch):
-    repo_root = Path(__file__).resolve().parents[2]
-    plugin_dir = repo_root / "build" / "lib" / "mim"
-    if not plugin_dir.is_dir():
-        raise FileNotFoundError(f"expected plugin directory at '{plugin_dir}'")
+@pytest.mark.slow
+@pytest.mark.needs_clang
+def test_python_package_works(plugin_dir, tmp_path, monkeypatch):
+    if shutil.which("clang") is None:
+        pytest.skip("clang not on PATH")
 
     monkeypatch.chdir(tmp_path)
 

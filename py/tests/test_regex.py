@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
+
+import pytest
 
 import mim
 import mim.plug.regex as regex
-import pytest
 
 
 def test_regex_plugin_loads(regex_world):
@@ -19,7 +19,7 @@ def test_regex_plugin_loads(regex_world):
 
 @pytest.mark.slow
 @pytest.mark.needs_clang
-def test_regbuilder_jit_match(tmp_path, monkeypatch):
+def test_regbuilder_jit_match(plugin_dir, tmp_path, monkeypatch):
     """End-to-end: build a tiny regex, JIT, run the matcher.
 
     Uses the public mim.plug.regex API.
@@ -29,9 +29,6 @@ def test_regbuilder_jit_match(tmp_path, monkeypatch):
         pytest.skip("clang not on PATH")
 
     monkeypatch.chdir(tmp_path)
-
-    repo_root = Path(__file__).resolve().parents[2]
-    plugin_dir = repo_root / "build" / "lib" / "mim"
 
     driver = mim.Driver()
     driver.add_search_path(plugin_dir)

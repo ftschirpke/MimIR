@@ -5,10 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mim"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-mim = ["*.so", "*.pyd", "*.dll", "*.pyi"]
+mim = ["*.so", "*.pyd", "*.dll", "*.pyi", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks slow end-to-end tests",
+    "needs_clang: requires clang on PATH",
+]

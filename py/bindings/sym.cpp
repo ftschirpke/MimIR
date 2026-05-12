@@ -10,10 +10,10 @@ namespace fe {
 void init_sym(py::module_& m) {
     py::class_<fe::Sym, std::unique_ptr<fe::Sym, py::nodelete>>(m, "Sym")
         .def(py::init<>())
-        .def("empty", &fe::Sym::empty, py::return_value_policy::reference)
-        .def("size", &fe::Sym::size, py::return_value_policy::reference)
-        .def("view", &fe::Sym::view, py::return_value_policy::reference)
-        .def("str", &fe::Sym::str, py::return_value_policy::reference);
+        .def("empty", &fe::Sym::empty)
+        .def("size", &fe::Sym::size)
+        .def("view", &fe::Sym::view)
+        .def("str", &fe::Sym::str);
 }
 
 void init_sym_pool(py::module_& m) {
