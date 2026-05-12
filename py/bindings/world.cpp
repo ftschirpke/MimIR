@@ -53,16 +53,10 @@ void init_world(py::module_& m) {
         .def(
             "arr", [](mim::World& w, Def* arity, Def* body) { return w.arr(arity, body); },
             py::return_value_policy::reference_internal)
-        .def(
-            "call_by_id",
-            [](mim::World& w, uint64_t id, std::vector<Def*> args) {
-                if (args.size() < 1) return w.annex(id);
-                return w.call(id, mim::Defs(args));
-            },
-            pybind11::arg("sym"), pybind11::arg("args") = std::vector<mim::Def*>())
         .def("optimize", [](mim::World& w) { mim::optimize(w); })
         .def("dot", static_cast<void (World::*)(const char*, bool, bool) const>(&mim::World::dot))
         .def("mut_con", [](mim::World& w, std::vector<Def*> domains) { return w.mut_con(Defs(domains)); })
         .def("annex", [](mim::World& w, uint64_t id) { return w.annex(id); });
 }
+
 } // namespace mim
