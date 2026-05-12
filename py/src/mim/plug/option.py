@@ -1,11 +1,4 @@
 from .._plugins.option import option as _option
+from ._facade import install
 
-option = _option
-
-
-def __getattr__(name):
-    return getattr(_option, name)
-
-
-def __dir__():
-    return sorted(set(globals()) | set(dir(_option)))
+option = install(globals(), "option", _option)

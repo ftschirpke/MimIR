@@ -1,11 +1,4 @@
 from .._plugins.refly import refly as _refly
+from ._facade import install
 
-refly = _refly
-
-
-def __getattr__(name):
-    return getattr(_refly, name)
-
-
-def __dir__():
-    return sorted(set(globals()) | set(dir(_refly)))
+refly = install(globals(), "refly", _refly)

@@ -5,19 +5,12 @@ from typing import List
 
 from .. import Def, Driver, Level
 from .._plugins.regex import regex as _regex
+from ..plugin import MimPlugin
+from ._facade import install
 from .core import core
 from .mem import mem
-from ..plugin import MimPlugin
 
-regex = _regex
-
-
-def __getattr__(name):
-    return getattr(_regex, name)
-
-
-def __dir__():
-    return sorted(set(globals()) | set(dir(_regex)))
+regex = install(globals(), "regex", _regex)
 
 
 class RegBuilder(MimPlugin):

@@ -1,11 +1,4 @@
 from .._plugins.direct import direct as _direct
+from ._facade import install
 
-direct = _direct
-
-
-def __getattr__(name):
-    return getattr(_direct, name)
-
-
-def __dir__():
-    return sorted(set(globals()) | set(dir(_direct)))
+direct = install(globals(), "direct", _direct)

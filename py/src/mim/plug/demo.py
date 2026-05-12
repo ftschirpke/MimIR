@@ -1,11 +1,4 @@
 from .._plugins.demo import demo as _demo
+from ._facade import install
 
-demo = _demo
-
-
-def __getattr__(name):
-    return getattr(_demo, name)
-
-
-def __dir__():
-    return sorted(set(globals()) | set(dir(_demo)))
+demo = install(globals(), "demo", _demo)

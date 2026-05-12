@@ -1,11 +1,4 @@
 from .._plugins.core import core as _core
+from ._facade import install
 
-core = _core
-
-
-def __getattr__(name):
-    return getattr(_core, name)
-
-
-def __dir__():
-    return sorted(set(globals()) | set(dir(_core)))
+core = install(globals(), "core", _core)
