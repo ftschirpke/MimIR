@@ -214,16 +214,10 @@ public:
         return register_annex(p | (flags_t(t) << 8_u64) | flags_t(s), def);
     }
     const Def* sym2annex(Sym sym) {
-        for (auto [_, def] : flags2annex()) {
-            // auto addr_debug = def->sym();
-            // std::cout << "contained in flags2sym: " << &addr_debug << std::endl;
-            // outln("{}: {}", sym, def->sym());
+        for (auto [_, def] : flags2annex())
             if (def->sym() == sym) return def;
-        }
         error("Annex with name '{}' was not found", sym);
-        // return nullptr;
     }
-
     ///@}
 
     /// @name Externals
