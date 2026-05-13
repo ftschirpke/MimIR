@@ -1,0 +1,2 @@
+lam extern test {n: Nat} {Ts: «n; ★»} [values: «i: n; Ts#i»]
+  = ‹i: n; values#i›;
