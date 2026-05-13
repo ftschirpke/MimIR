@@ -261,7 +261,7 @@ void Emitter::emit_imported(Lam* lam) {
         std::print(func_decls_, "(root {} {}", ext, id(lam));
         ++tab;
         if (typed()) std::print(func_decls_, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
-        std::print(func_decls_, "{}\n(lam", tab);
+        std::print(func_decls_, "\n{}(lam", tab);
         std::print(func_decls_, "{}", emit_var(bb, lam->var(), lam->type()->dom()));
         ++tab;
         std::print(func_decls_, "\n{}(scope nil nil)", tab);
@@ -436,10 +436,10 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool as_binding) {
             // We toggle slot-printing to emit the lam id without a slot prefix '$'
             toggle_slots();
             std::print(os, "(root {} {}", ext, id(lam));
+            toggle_slots();
             ++tab;
             if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
             std::print(os, "\n{}(lam", tab);
-            toggle_slots();
         }
 
     } else if (as_binding) {
@@ -560,7 +560,7 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
                            emit_type(bb, mut_pi->codom()));
             }
         } else {
-            std::print("(pi {} {})", emit_type(bb, pi->dom()), emit_type(bb, pi->codom()));
+            std::print(os, "(pi {} {})", emit_type(bb, pi->dom()), emit_type(bb, pi->codom()));
         }
     } else if (auto sigma = type->isa<Sigma>()) {
         if (slotted()) {
