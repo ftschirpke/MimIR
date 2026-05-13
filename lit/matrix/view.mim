@@ -93,4 +93,7 @@ fun extern test (mem: %mem.M 0, ptr: %mem.Ptr0 «32; I32») =
     let m: «2; %matrix.Layout» = (layout1, layout2);
     let a = %matrix.test m;
     return a;
-    
+
+
+
+
