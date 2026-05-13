@@ -20,4 +20,4 @@ private:
     const Def* rec_broadcast(const Def* s_in, const Def* s_out, const Def* input, u64 r, u64 i);
 };
 
-} // namespace mim::plug::tensor
+} // namespace mim::plug::tensor::phase

@@ -84,6 +84,7 @@ const Def* Lower::lower_set(const App* app) {
         return nullptr;
     }
 
+    // r_nat will never be 0, as we would have normalized this case away already
     auto r_nat = r_lit->get<u64>();
     DefVec arrs_to_insert_into(r_nat);
     arrs_to_insert_into[0] = arr;
@@ -161,6 +162,7 @@ const Def* Lower::lower_broadcast(const App* app) {
         w.WLOG("{} doesn't have a lowering-time known rank: {}", app, r);
         return nullptr;
     }
+    // r_nat will never be 0, as we would have normalized this case away already
     auto r_nat = r_lit->get<u64>();
 
     if (s_in == s_out) return input;
@@ -172,9 +174,6 @@ const Def* Lower::lower_broadcast(const App* app) {
             return w.pack(s_out, input);
         }
     }
-
-    auto s_in_vec  = DefVec(r_nat, [&](size_t i) { return s_in->proj(r_nat, i); });
-    auto s_out_vec = DefVec(r_nat, [&](size_t i) { return s_out->proj(r_nat, i); });
 
     auto result = rec_broadcast(s_in, s_out, input, r_nat, 0);
     w.DLOG("result of rec_broadcast = {} : {}", result, result->type());
@@ -456,8 +455,7 @@ const Def* Lower::lower_map_reduce(const App* app) {
         DefVec output_iterators;
         for (u64 i = 0; i < n_nat; ++i) {
             auto idx = out_indices[i];
-            if (idx != i) w.ELOG("output indices must be consecutive 0..n-1 but {} != {}", idx, i);
-            assert(idx == i && "output indices must be consecutive 0..n-1");
+            if (idx != i) error("output indices must be consecutive 0..n-1 but {} != {}", idx, i);
             if (dims[idx]->isa<Lit>() && dims[idx]->as<Lit>()->get<u64>() == 1) {
                 w.DLOG("dimension {} is 1, no iterator needed", idx);
                 continue;
@@ -469,7 +467,7 @@ const Def* Lower::lower_map_reduce(const App* app) {
         DefVec output_submatrices;
         output_submatrices.reserve(n_oi);
         output_submatrices.push_back(wb_matrix);
-        for (u64 i = 0; i < n_oi - 1; ++i)
+        for (u64 i = 0; i + 1 < n_oi; ++i)
             output_submatrices.push_back(w.extract(output_submatrices[i], output_iterators[i]));
 
         auto written_matrix = element_final;
@@ -550,9 +548,6 @@ const Def* Lower::rewrite_imm_App(const App* app) {
     } else if (auto mr = Axm::isa<tensor::map_reduce>(app)) {
         if (auto res = lower_map_reduce(mr)) return res;
     }
-    app->world().DLOG("no match for app {} ({}) : {}", app->callee(), app->arg(), app->type());
-    std::cout.flush();
-    std::cerr.flush();
     return Rewriter::rewrite_imm_App(app);
 }
 

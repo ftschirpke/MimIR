@@ -132,11 +132,17 @@ const Def* normalize_set(const Def*, const Def* c, const Def* arg) {
         w.DLOG("    i_r = {} : {}", i_r, i_r->type());
         w.DLOG("    i_s = {} : {}", i_s, i_s->type());
 
-        auto new_r     = w.call(core::nat::add, DefVec{r, i_r});
-        auto new_s     = w.call<tuple::cat>(DefVec{s, i_s});
-        auto new_index = w.call<tuple::cat>(DefVec{index, inner_index});
+        if (auto inner_get = Axm::isa<tensor::get>(inner_arr)) {
+            auto [g_arr, g_index] = inner_get->args<2>();
+            if (g_arr == arr && g_index == index) {
+                auto new_r     = w.call(core::nat::add, DefVec{r, i_r});
+                auto new_s     = w.call<tuple::cat>(DefVec{s, i_s});
+                auto new_index = w.call<tuple::cat>(DefVec{index, inner_index});
 
-        return op_set(i_T, new_r, new_s, arr, new_index, inner_x);
+                return op_set(i_T, new_r, new_s, arr, new_index, inner_x);
+            }
+        }
+        w.DLOG("set after set bypass not applicable: inner_arr is not get(arr, index)");
     }
     w.DLOG("no normalization applicable");
     return nullptr;
