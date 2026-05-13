@@ -84,3 +84,13 @@ fun extern tile2 (mem: %mem.M 0, ptr: %mem.Ptr0 «32; I32») =
     // EXPECTATION => lea 19_32
 
     return (mem, A2, B2, C2);
+
+axm %matrix.test: «2; %matrix.Layout» -> Nat;
+
+fun extern test (mem: %mem.M 0, ptr: %mem.Ptr0 «32; I32») =
+    let layout1: %matrix.Layout = %matrix.layout (4, 8) (1, 4);
+    let layout2: %matrix.Layout = %matrix.layout (4, 8) (1, 4);
+    let m: «2; %matrix.Layout» = (layout1, layout2);
+    let a = %matrix.test m;
+    return a;
+    
