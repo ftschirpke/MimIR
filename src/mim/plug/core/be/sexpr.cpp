@@ -530,22 +530,24 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
         else
             std::print(os, "(lit {} {})", lit->get(), emit_type(bb, lit->type()));
     } else if (auto arr = type->isa<Arr>()) {
-        if (auto arity = Lit::isa(arr->arity())) {
-            u64 size = *arity;
-            std::print(os, "(arr (lit {} Nat) {})", size, emit_type(bb, arr->body()));
-        } else if (auto top = arr->arity()->isa<Top>()) {
-            std::print(os, "(arr (top {}) {})", emit_type(bb, top->type()), emit_type(bb, arr->body()));
+        // We disable type annotations and the creation of new bindings
+        // to prevent the array shape term from creating bindings in the lambda body
+        // which it can't access and we also don't want type annotations inside of types.
+        toggle_type_annotations();
+        toggle_bindings();
+        if (slotted()) {
+            if (auto imm_arr = arr->isa_imm<Arr>()) {
+                std::print(os, "(arr $dummy (scope {} {}))", flatten(emit_bb(bb, imm_arr->arity())),
+                           emit_type(bb, imm_arr->body()));
+            } else if (auto mut_arr = arr->isa_mut<Arr>()) {
+                std::print(os, "(arr {} (scope {} {}))", id(mut_arr->var()), flatten(emit_bb(bb, mut_arr->arity())),
+                           emit_type(bb, mut_arr->body()));
+            }
         } else {
-            // We disable type annotations and the creation of new bindings
-            // to prevent the array shape term from creating bindings in the lambda body
-            // which it can't access and we also don't want type annotations inside of types.
-            toggle_type_annotations();
-            toggle_bindings();
             std::print(os, "(arr {} {})", flatten(emit_bb(bb, arr->arity())), emit_type(bb, arr->body()));
-            toggle_type_annotations();
-            toggle_bindings();
-            // TODO: mut arr that binds a variable
         }
+        toggle_type_annotations();
+        toggle_bindings();
     } else if (auto pi = type->isa<Pi>()) {
         if (slotted()) {
             if (auto imm_pi = pi->isa_imm<Pi>()) {
@@ -561,10 +563,12 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             std::print("(pi {} {})", emit_type(bb, pi->dom()), emit_type(bb, pi->codom()));
         }
     } else if (auto sigma = type->isa<Sigma>()) {
-        // TODO: mut sigma that binds a variable
-        if (slotted())
-            std::print(os, "(sigma {})", emit_cons_type(bb, sigma->ops()));
-        else
+        if (slotted()) {
+            if (auto imm_sigma = sigma->isa_imm<Sigma>())
+                std::print(os, "(sigma $dummy (scope {} nil))", emit_cons_type(bb, imm_sigma->ops()));
+            else if (auto mut_sigma = sigma->isa_mut<Sigma>())
+                std::print(os, "(sigma {} (scope {} nil))", id(mut_sigma->var()), emit_cons_type(bb, mut_sigma->ops()));
+        } else
             std::print(os, "(sigma {})",
                        fe::Join(sigma->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto tuple = type->isa<Tuple>()) {
