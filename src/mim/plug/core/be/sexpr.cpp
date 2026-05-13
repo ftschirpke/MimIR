@@ -97,11 +97,11 @@ public:
 
     Emitter(World& world, std::ostream& ostream, bool typed = false, bool slotted = false)
         : Super(world, "sexpr_emitter", ostream) {
-        typed_         = typed;
-        slotted_       = slotted;
-        types_enabled_ = true;
-        slots_enabled_ = true;
-        vars_enabled_  = true;
+        typed_            = typed;
+        slotted_          = slotted;
+        types_enabled_    = true;
+        slots_enabled_    = true;
+        bindings_enabled_ = true;
     }
 
     bool is_valid(std::string_view s) { return !s.empty(); }
@@ -150,13 +150,13 @@ private:
     bool toggle_slots() { return slots_enabled_ = !slots_enabled_; }
     bool slots_enabled_;
 
-    // Temporarily disable the use of variables while emitting.
-    // While vars are disabled every var use will be printed via
-    // the vars' definition instead of its name.
+    // Temporarily disable the creation/use of bindings while emitting.
+    // While bindings are disabled every var use of a binding will be
+    // printed as the bindings' definition instead.
     // This is useful to print a term via emit_bb() with the assumption
     // that no variables have been bound. (i.e. for printing a lambda filter)
-    bool toggle_vars() { return vars_enabled_ = !vars_enabled_; }
-    bool vars_enabled_;
+    bool toggle_bindings() { return bindings_enabled_ = !bindings_enabled_; }
+    bool bindings_enabled_;
 
     std::ostringstream decls_;
     std::ostringstream func_decls_;
@@ -468,9 +468,9 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool as_binding) {
         // start to get bound in the body of the lambda and we therefore
         // disable the use of variables for the duration of emitting the filter
         // in order to print every variable use by its definition instead.
-        toggle_vars();
+        toggle_bindings();
         std::print(os, "{}", emit_bb(bb, lam->filter()));
-        toggle_vars();
+        toggle_bindings();
     } else {
         std::print(os, "{}", emit_bb(bb, lam->filter()));
     }
@@ -534,9 +534,14 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
         } else if (auto top = arr->arity()->isa<Top>()) {
             std::print(os, "(arr (top {}) {})", emit_type(bb, top->type()), emit_type(bb, arr->body()));
         } else {
+            // We disable type annotations and the creation of new bindings
+            // to prevent the array shape term from creating bindings in the lambda body
+            // which it can't access and we also don't want type annotations inside of types.
             toggle_type_annotations();
+            toggle_bindings();
             std::print(os, "(arr {} {})", flatten(emit_bb(bb, arr->arity())), emit_type(bb, arr->body()));
             toggle_type_annotations();
+            toggle_bindings();
         }
     } else if (auto pi = type->isa<Pi>()) {
         if (Pi::isa_cn(pi))
@@ -668,7 +673,7 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
     for (auto op : def->ops())
         if (auto op_val = emit_bb(bb, op); !op_val.empty()) op_vals.push_back(op_val);
 
-    if (!def->sym().empty() && vars_enabled_) {
+    if (!def->sym().empty() && bindings_enabled_) {
         // 1) Emits a let-binding to the lambda body() and then emits the name of the binding in the lambda
         // tail()
 
@@ -783,13 +788,6 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         std::print(os, "{}", emit_node(bb, app, "app"));
 
     } else if (auto axm = def->isa<Axm>()) {
-        // TODO: In rebuild_import.mim with annotations we create two let bindings
-        // that shouldn't be created: $n_23003 and $n_22999 (examples/import.slotted).
-        // $n_23003 is used in the annotation of (and therefore created by) %mem.lea.
-        // The same thing is true for $n_22999 (first used in the type of %mem.lea).
-        // - %mem.lea has a type containing arr which calls on emit_bb to create these bindings
-        // - do we maybe toggle off the creation of new bindings while emitting the type annotations
-        //   of axioms since they contain var uses that will create nonsensical bindings?
         std::print(os, "\n{}{}", tab, id(axm));
         if (!world().flags2annex().contains(axm->flags()))
             std::print(decls_, "(axm {} {})\n\n", id(axm), emit_type(bb, axm->type()));
