@@ -14,10 +14,7 @@ def core_world(driver, plugin_dir):
     return driver.world()
 
 
-def test_call_with_string_resolves_annex(core_world):
+def test(core_world):
     assert isinstance(core_world.call(core.bit2.and_), mim.Def)
-
-
-def test_call_folds_arg_list(core_world):
     nat0 = core_world.lit_nat_0()
     assert isinstance(core_world.call(core.bit2.and_, nat0), mim.Def)

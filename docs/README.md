@@ -60,7 +60,7 @@ cmake --build build -j$(nproc) --target install
 ```
 
 See the full [build options](@ref building) in the docs.
-For the rest of the documentation, start with the [Command-Line Reference](@ref cli), [Developer Guide](@ref dev), [Language Reference](@ref langref), [Plugin Guide](@ref plugins), [Phase Guide](@ref phases), and [Rewriting Guide](@ref rewriting).
+You can find the rest of the documentation [here](file:///home/roland/mimir/mimir/build/html/usergroup0.html)
 
 ## 🔥 Key Innovations
 

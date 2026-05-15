@@ -1,15 +1,16 @@
 nanobind_add_module(pymim
-    driver.cpp
-    world.cpp
-    sym.cpp
-    py.cpp
     ast.cpp
-    log.cpp
+    def.cpp
+    driver.cpp
+    error.cpp
     flags.cpp
     lam.cpp
+    log.cpp
     parser.cpp
-    def.cpp
-    error.cpp
+    py.cpp
+    sym.cpp
+    tuple.cpp
+    world.cpp
 )
 
 set_target_properties(pymim PROPERTIES LIBRARY_OUTPUT_NAME _mim)
