@@ -44,7 +44,6 @@ jobs:
           cmake -B ${{github.workspace}}/build                            \
                 -DCMAKE_BUILD_TYPE=${{matrix.build-type}}                 \
                 -DBUILD_TESTING=ON                                        \
-                -DMIM_BUILD_PYTHON=ON                                     \
                 -DMIM_BUILD_EXAMPLES=ON                                   \
                 -DMIM_FILECHECK=${LLVM_PREFIX}/bin/FileCheck              \
                 -DMIM_LIT_TIMEOUT=300                                     \

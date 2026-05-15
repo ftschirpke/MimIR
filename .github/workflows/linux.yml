@@ -54,7 +54,6 @@ jobs:
           cmake -B ${{github.workspace}}/build            \
                 -DCMAKE_BUILD_TYPE=${{matrix.build-type}} \
                 -DBUILD_TESTING=ON                        \
-                -DMIM_BUILD_PYTHON=ON                     \
                 -DMIM_BUILD_EXAMPLES=ON                   \
                 -DMIM_FILECHECK=/usr/bin/FileCheck-20     \
                 -DMIM_LIT_WITH_VALGRIND=ON                \
