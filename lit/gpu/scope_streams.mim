@@ -26,7 +26,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
 
     ret (m0, m1) = %gpu.with_streams (2, scope)
     where
-        con scope (m0: %mem.M 0, m1: %gpu.GlobalM, (s1 s2: %gpu.Stream), exit: Cn [%mem.M 0, %gpu.GlobalM]) =
+        fun scope (m0: %mem.M 0, m1: %gpu.GlobalM, (s1 s2: %gpu.Stream)) : [%mem.M 0, %gpu.GlobalM] =
             let (m0, m1, d_ptr1) = %gpu.alloc_copy.async (m0, m1, ptr1, s1);
             let (m0, m1, d_ptr2) = %gpu.alloc_copy.async (m0, m1, ptr2, s2);
 
@@ -38,7 +38,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
             let m1 = %gpu.free.async (m1, d_ptr1, s1);
             let m1 = %gpu.free.async (m1, d_ptr2, s2);
 
-            exit (m0, m1);
+            return (m0, m1);
     end
     $ (m0, m1);
 

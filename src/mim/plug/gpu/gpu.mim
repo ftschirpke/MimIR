@@ -114,7 +114,7 @@ axm %gpu.stream_sync: [%mem.M 0, %gpu.GlobalM, %gpu.Stream] → [%mem.M 0, %gpu.
 /// ### %%gpu.with_streams
 ///
 /// Provides a number of streams to execute asynchronous GPU operations with
-fun %gpu.with_streams (n: Nat, func: Cn [%mem.M 0, %gpu.GlobalM, «n; %gpu.Stream», Cn [%mem.M 0, %gpu.GlobalM]])
+fun %gpu.with_streams (n: Nat, func: Fn [%mem.M 0, %gpu.GlobalM, «n; %gpu.Stream»] → [%mem.M 0, %gpu.GlobalM])
                       (m0: %mem.M 0, m1: %gpu.GlobalM)
                     : [%mem.M 0, %gpu.GlobalM] =
     let (m0, streams_ptr) = %mem.alloc («n; %gpu.Stream», 0) m0;
@@ -136,7 +136,8 @@ fun %gpu.with_streams (n: Nat, func: Cn [%mem.M 0, %gpu.GlobalM, «n; %gpu.Strea
             end;
         con run (m0: %mem.M 0, m1: %gpu.GlobalM) =
             let (m0, streams) = %mem.load (m0, streams_ptr);
-            func (m0, m1, streams, deinit);
+            ret (m0, m1) = func $ (m0, m1, streams);
+            deinit (m0, m1);
         con deinit (m0: %mem.M 0, m1: %gpu.GlobalM) =
             let (m0, streams) = %mem.load (m0, streams_ptr);
             loop (m0, m1, 0)
@@ -263,13 +264,13 @@ let %gpu.alloc_copy.async = lm {T: *}
 /// Launches a kernel function on the device with dynamic shared memory and module symbols
 // TODO: refactor to {n m s: Nat, STs: «s; [Nat, *, Nat]»} as soon as bug is fixed
 axm %gpu.launch: {n: Nat, Ts: «n; *»}
-               → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream,
+               → [n_groups: Nat, n_items: Nat, %gpu.Stream,
                   m: Bool, s: Nat, STs: «s; [Nat, *, Nat]», // TODO: these <- should all be implicit
-                  «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
+                  MT: «%core.bitcast Nat m; *»]
                → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                     «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
+                     «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-               → Fn «i: n; Ts#i» → %mem.M 0;
+               → Fn [%mem.M 0, «i: n; Ts#i»] → %mem.M 0;
 ///
 /// #### %%gpu.hier_launch
 ///
