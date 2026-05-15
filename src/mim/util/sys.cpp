@@ -12,12 +12,8 @@
 #    define popen  _popen
 #    define pclose _pclose
 #    define WEXITSTATUS
-#elif defined(__APPLE__)
-#    include <mach-o/dyld.h>
-#    include <unistd.h>
 #else
 #    include <dlfcn.h>
-#    include <unistd.h>
 #endif
 
 using namespace std::string_literals;
