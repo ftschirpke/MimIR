@@ -12,7 +12,7 @@
 #    define popen  _popen
 #    define pclose _pclose
 #    define WEXITSTATUS
-#else
+#elif defined(__APPLE__) || defined(__linux__)
 #    include <dlfcn.h>
 #endif
 
@@ -23,12 +23,25 @@ namespace mim::sys {
 std::optional<fs::path> path_to_curr_libmim() {
 #if defined(_WIN32)
     HMODULE mod = nullptr;
-    auto flags  = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+    DWORD flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+
     if (!GetModuleHandleExW(flags, reinterpret_cast<LPCWSTR>(&path_to_curr_libmim), &mod)) return {};
 
-    wchar_t buf[MAX_PATH];
-    DWORD len = GetModuleFileNameW(mod, buf, MAX_PATH);
-    if (len == 0) return {};
+    std::wstring buf;
+    buf.resize(512);
+
+    while (true) {
+        DWORD len = GetModuleFileNameW(mod, buf.data(), (DWORD)buf.size());
+        if (len == 0) return {};
+
+        if (len < buf.size() - 1) {
+            buf.resize(len);
+            break;
+        }
+
+        // buffer too small
+        buf.resize(buf.size() * 2);
+    }
 
     return fs::weakly_canonical(fs::path(buf));
 #elif defined(__APPLE__) || defined(__linux__)
