@@ -114,6 +114,7 @@ public:
     LamSet next_lams(Lam* lam);
     bool isa_nested_proj(const Extract* extract);
 
+    void emit_decl(BB& bb, const Axm* axm);
     void emit_lam(Lam* lam, LamSet& rec_lams);
     std::string emit_var(BB& bb, const Def* var, const Def* type, bool meta_var = false);
     std::string emit_head(BB& bb, Lam* lam, bool as_binding = false);
@@ -157,6 +158,11 @@ private:
     // that no variables have been bound. (i.e. for printing a lambda filter)
     bool toggle_bindings() { return bindings_enabled_ = !bindings_enabled_; }
     bool bindings_enabled_;
+
+    // Ensures that we don't redeclare things, for example %axm.foo
+    // should only be declared once.
+    std::set<std::string> declared_;
+    bool is_declared(std::string name) { return declared_.contains(name); }
 
     std::ostringstream decls_;
     std::ostringstream func_decls_;
@@ -336,6 +342,16 @@ bool Emitter::isa_nested_proj(const Extract* extract) {
         }
     }
     return isa_nested_proj;
+}
+
+void Emitter::emit_decl(BB& bb, const Axm* axm) {
+    if (!world().flags2annex().contains(axm->flags()) && !is_declared(axm->sym().str())) {
+        if (typed()) std::print(decls_, "(@ {}\n", emit_type(bb, axm->type()));
+        std::print(decls_, "(axm {} {}", id(axm), emit_type(bb, axm->type()));
+        if (typed()) std::print(decls_, ")");
+        std::print(decls_, ")\n\n");
+        declared_.insert(axm->sym().str());
+    }
 }
 
 void Emitter::emit_lam(Lam* lam, LamSet& rec_lams) {
@@ -616,12 +632,7 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
         std::print(os, "(app {} {})", emit_type(bb, app->callee()), emit_type(bb, app->arg()));
     } else if (auto axm = type->isa<Axm>()) {
         std::print(os, "{}", id(axm));
-        if (!world().flags2annex().contains(axm->flags())) {
-            if (typed()) std::print(decls_, "(@ {}\n", emit_type(bb, axm->type()));
-            std::print(decls_, "(axm {} {}", id(axm), emit_type(bb, axm->type()));
-            if (typed()) std::print(decls_, ")");
-            std::print(decls_, ")\n\n");
-        }
+        emit_decl(bb, axm);
     } else if (auto var = type->isa<Var>()) {
         std::print(os, "{}", id(var, true));
     } else if (auto hole = type->isa<Hole>()) {
@@ -814,12 +825,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
 
     } else if (auto axm = def->isa<Axm>()) {
         std::print(os, "\n{}{}", tab, id(axm));
-        if (!world().flags2annex().contains(axm->flags())) {
-            if (typed()) std::print(decls_, "(@ {}\n", emit_type(bb, axm->type()));
-            std::print(decls_, "(axm {} {}", id(axm), emit_type(bb, axm->type()));
-            if (typed()) std::print(decls_, ")");
-            std::print(decls_, ")\n\n");
-        }
+        emit_decl(bb, axm);
 
     } else if (auto bot = def->isa<Bot>()) {
         if (bot->sym().empty())
