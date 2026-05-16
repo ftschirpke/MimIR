@@ -72,13 +72,11 @@ So the Python surface follows the same “named IR handle” model as the C++ AP
 ## Loading Plugins
 
 Runtime plugins are still discovered the same way as in C++.
-If you work from a build tree, add the generated plugin directory first:
+`Driver()` usually picks up the in-tree plugin build directory automatically, including from the editable Python package.
+Use `add_search_path(...)` only when you want to load plugins from an extra directory:
 
 ```python
-from pathlib import Path
 import mim
-
-build_dir = Path("build")
 
 driver = mim.Driver()
 driver.load_plugins(["core"])

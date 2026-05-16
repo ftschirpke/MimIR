@@ -60,12 +60,8 @@ Driver::Driver()
             add_search_path(sub_path);
     }
 
-    // add <path/to/libmim.so>/mim
-    if (auto path = sys::path_to_libmim()) {
-        auto p = path->parent_path() / "mim";
-        std::println("pathXXX: {}", p.string());
-        add_search_path(p);
-    }
+    // add <path/to/libmim>/mim
+    if (auto path = sys::path_to_libmim()) add_search_path(path->parent_path() / "mim");
 
     // add install path if different from above
     if (auto install_path = fs::path{MIM_INSTALL_PREFIX} / MIM_LIBDIR / "mim"; fs::exists(install_path)) {
