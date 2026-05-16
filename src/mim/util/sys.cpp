@@ -27,7 +27,7 @@ std::optional<fs::path> path_to_libmim() {
 #if defined(_WIN32)
     HMODULE mod = nullptr;
     auto flags  = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
-    if (!GetModuleHandleExW(, flags reinterpret_cast<LPCWSTR>(&mim_lib_anchor), &mod)) return {};
+    if (!GetModuleHandleExW(flags, reinterpret_cast<LPCWSTR>(&mim_lib_anchor), &mod)) return {};
 
     std::wstring buf;
     buf.resize(512);
