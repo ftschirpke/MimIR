@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 
 namespace sys {
 
-std::optional<fs::path> path_to_curr_libmim(); ///< Yields `std::nullopt` if an error occurred.
+std::optional<fs::path> path_to_libmim(); ///< Yields `std::nullopt` if an error occurred.
 
 /// Executes command @p cmd.
 /// @returns the output as string.

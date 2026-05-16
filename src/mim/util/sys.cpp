@@ -3,7 +3,8 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
-#include <vector>
+
+#include "mim/config.h"
 
 #include "mim/util/dbg.h"
 
@@ -18,18 +19,18 @@
 
 using namespace std::string_literals;
 
+extern "C" MIM_EXPORT void mim_lib_anchor() {}
+
 namespace mim::sys {
 
-std::optional<fs::path> path_to_curr_libmim() {
+std::optional<fs::path> path_to_libmim() {
 #if defined(_WIN32)
     HMODULE mod = nullptr;
-    DWORD flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
-
-    if (!GetModuleHandleExW(flags, reinterpret_cast<LPCWSTR>(&path_to_curr_libmim), &mod)) return {};
+    auto flags  = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+    if (!GetModuleHandleExW(, flags reinterpret_cast<LPCWSTR>(&mim_lib_anchor), &mod)) return {};
 
     std::wstring buf;
     buf.resize(512);
-
     while (true) {
         DWORD len = GetModuleFileNameW(mod, buf.data(), (DWORD)buf.size());
         if (len == 0) return {};
@@ -39,18 +40,14 @@ std::optional<fs::path> path_to_curr_libmim() {
             break;
         }
 
-        // buffer too small
-        buf.resize(buf.size() * 2);
+        buf.resize(buf.size() * 2); // buffer too small
     }
 
     return fs::weakly_canonical(fs::path(buf));
 #elif defined(__APPLE__) || defined(__linux__)
     Dl_info info;
-    if (dladdr(reinterpret_cast<void*>(&path_to_curr_libmim), &info) == 0) return {};
-
-    if (!info.dli_fname) return {};
-
-    return fs::weakly_canonical(fs::path(info.dli_fname));
+    if (dladdr((void*)&mim_lib_anchor, &info) == 0) return {};
+    return fs::weakly_canonical(info.dli_fname);
 #else
     return {};
 #endif
