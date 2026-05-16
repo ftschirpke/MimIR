@@ -63,7 +63,7 @@ Driver::Driver()
     // add <path/to/libmim.so>/mim
     if (auto path = sys::path_to_curr_libmim()) {
         auto p = path->parent_path() / "mim";
-        std::println("pathXXX: {}", p->string());
+        std::println("pathXXX: {}", p.string());
         add_search_path(p);
     }
 
