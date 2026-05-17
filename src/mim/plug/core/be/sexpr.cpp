@@ -176,7 +176,7 @@ std::string Emitter::id(const Def* def, bool is_var_use) const {
     // In slotted-egraphs variable-uses need to be explicitly wrapped in a var node i.e. in λx.x (lam $x (var
     // $x))
     auto var_wrap
-        = [&](std::string id) { return slotted() && is_var_use && id.starts_with('$') ? "(var " + id + ")" : id; };
+        = [&](std::string id) { return slotted() && is_var_use && id.starts_with(prefix) ? "(var " + id + ")" : id; };
 
     // Axioms, rules, unset lambdas(imports) and externals need to be emitted without a uid
     if (def->isa<Axm>())
@@ -261,7 +261,8 @@ void Emitter::start() {
 void Emitter::emit_imported(Lam* lam) {
     auto bb = BB();
 
-    const std::string ext = lam->is_external() ? "extern" : "intern";
+    const std::string lam_kind = Lam::isa_returning(lam) ? "fun" : Lam::isa_cn(lam) ? "con" : "lam";
+    const std::string ext      = lam->is_external() ? "extern" : "intern";
 
     if (slotted()) {
         std::print(func_decls_, "(root {} {}", ext, id(lam));
@@ -270,7 +271,11 @@ void Emitter::emit_imported(Lam* lam) {
         std::print(func_decls_, "\n{}(lam", tab);
         std::print(func_decls_, "{}", emit_var(bb, lam->var(), lam->type()->dom()));
         ++tab;
-        std::print(func_decls_, "\n{}(scope nil nil)", tab);
+        // Since alpha-equivalent lambdas are all represented in the same eclass in slotted, we need
+        // to somehow make these imports  not alpha-equivalent because our type-analysis stores
+        // types on eclasses and we would otherwise be overwriting the types of other imports if we have
+        // multiple. We solve this issue by putting these filler symbols "<foo-filter>" ... into the bodies.
+        std::print(func_decls_, "\n{}(scope <{}-filter> <{}-body>)", tab, id(lam), id(lam));
         --tab;
         if (typed()) std::print(func_decls_, ")");
         std::print(func_decls_, "))\n\n");
