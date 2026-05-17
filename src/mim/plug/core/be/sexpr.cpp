@@ -421,7 +421,6 @@ std::string Emitter::emit_var(BB& bb, const Def* var, const Def* type, bool meta
     std::ostringstream os;
 
     ++tab;
-
     if (slotted()) {
         // We assume that the depth of projections for rule meta vars is at most one so
         // (a: Nat, b: Bool) is okay but (a: [b: Nat]) is not.
@@ -457,6 +456,11 @@ std::string Emitter::emit_var(BB& bb, const Def* var, const Def* type, bool meta
     }
 
     else {
+        if (!var) {
+            std::print(os, "\n{}(var nil nil)", tab);
+            return os.str();
+        }
+
         auto projs = var->projs();
         if (projs.size() == 1 || std::ranges::all_of(projs, [](auto proj) { return proj->sym().empty(); }))
             std::print(os, "\n{}(var {} {})", tab, id(var), emit_type(bb, type));
