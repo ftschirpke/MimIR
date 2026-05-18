@@ -166,74 +166,12 @@ const Def* normalize_broadcast(const Def*, const Def* c, const Def* arg) {
     auto r_lit = r->isa<Lit>();
     if (!r_lit) return nullptr;
     auto r_nat = r_lit->get<u64>();
-    if(r_nat == 0) return input;
-    
+    if (r_nat == 0) return input;
+
     return nullptr;
 }
 
-const Def* normalize_broadcast_in_dim(const Def*, const Def* c, const Def* arg) {
-    auto& w = c->world();
-
-    auto [s_in, s_out, input, index] = arg->projs<4>();
-    auto callee                      = c->as<App>();
-    auto [T, r_in, r_out]            = callee->args<3>();
-    w.DLOG("normalize_broadcast_in_dim");
-    w.DLOG("    s_out = {} : {}", s_out, s_out->type());
-    w.DLOG("    input = {} : {}", input, input->type());
-    w.DLOG("    index = {} : {}", index, index->type());
-    w.DLOG("    T = {} : {}", T, T->type());
-    w.DLOG("    r_in = {} : {}", r_in, r_in->type());
-    w.DLOG("    r_out = {} : {}", r_out, r_out->type());
-    w.DLOG("    s_in = {} : {}", s_in, s_in->type());
-
-    auto r_in_lit = r_in->isa<Lit>();
-    if (!r_in_lit) return nullptr;
-    auto r_in_nat  = r_in_lit->get<u64>();
-    auto r_out_lit = r_out->isa<Lit>();
-    if (!r_out_lit) return nullptr;
-    auto r_out_nat = r_out_lit->get<u64>();
-
-    auto s_tr_vec = DefVec(r_out_nat, [&](size_t i) {
-        if (i < r_in_nat) return s_in->proj(r_in_nat, i);
-        return w.lit_nat_1()->as<Def>();
-    });
-    auto s_tr     = w.tuple(s_tr_vec);
-
-    std::set<u64> set_perm;
-    std::map<u64, u64> map_perm;
-    for (u64 i = 0; i < r_out_nat; ++i)
-        set_perm.insert(i);
-    for (u64 i = 0; i < r_in_nat; ++i) {
-        auto idx     = index->proj(r_in_nat, i);
-        auto idx_lit = Lit::isa(idx);
-        if (!idx_lit) return nullptr;
-        u64 idx_nat = *idx_lit;
-
-        map_perm[idx_nat] = i;
-
-        set_perm.erase(idx_nat);
-    }
-    u64 j = r_in_nat;
-    for (auto i = set_perm.begin(); i != set_perm.end(); i++) {
-        map_perm[*i] = j;
-        j++;
-    }
-    auto permutation_vec = DefVec(r_out_nat, [&](size_t i) { return w.lit_idx(r_out_nat, map_perm[i]); });
-    auto permutation     = w.tuple(permutation_vec);
-
-    auto tr = w.annex<tensor::transpose>();
-    tr      = w.app(tr, {T, r_out, s_tr});
-    tr      = w.app(tr, {input, permutation});
-
-    auto s_bc_vec = DefVec(r_out_nat, [&](size_t i) { return s_tr->proj(r_out_nat, map_perm.at(i)); });
-    auto s_bc     = w.tuple(s_bc_vec);
-
-    auto bc = w.annex<tensor::broadcast>();
-    bc      = w.app(bc, {T, r_out});
-    bc      = w.app(bc, {s_bc, s_out, tr});
-
-    return bc;
-}
+const Def* normalize_broadcast_in_dim(const Def*, const Def*, const Def*) { return nullptr; }
 
 const Def* normalize_map_reduce(const Def*, const Def*, const Def*) {
     // TODO: is there anything we can normalize here?
