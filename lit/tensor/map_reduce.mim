@@ -9,7 +9,7 @@ let m0 = ((1, 2), (3, 4));
 
 let R: Ring = (Nat, 0, %core.nat.add, %core.nat.mul);
 
-let f        = dot_general_fun R;
+let f = dot_general_fun R;
 
 let dot = %tensor.map_reduce ‹2; 2› @(‹2; Nat›, ‹2; 2›, ‹2; ‹2; 2››) (f, 0) ((0, 2), (2, 1)) (m0, m0);
 let dotd = %tensor.dot_product R @(2, 2) (1_2, 0_2, (), ()) (m0, m0);

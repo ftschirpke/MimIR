@@ -231,3 +231,4 @@ lam %tensor.select {T: *} {r: Nat, s: «r; Nat»} (is: [«s; Bool», «s; T», �
 /// ## Phases
 ///
 axm %tensor.lower_tensor: %compile.Phase;
+axm %tensor.fuse_tensor: %compile.Phase;

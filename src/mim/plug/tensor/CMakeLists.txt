@@ -3,5 +3,6 @@ add_mim_plugin(tensor
         tensor.cpp
         normalizers.cpp
         phase/lower.cpp
+        phase/fuse.cpp
     INSTALL
 )
