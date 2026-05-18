@@ -27,7 +27,7 @@ void SplitOffKernels::analyze(const Def* def) {
     if (auto [_, ins] = analyzed_.emplace(def); !ins) return;
 
     if (auto launch = Axm::isa<gpu::launch>(def)) {
-        auto kernel = launch->decurry()->arg();
+        auto kernel = launch->decurry()->decurry()->arg();
         if (auto lam = kernel->isa_mut<Lam>()) kernels_.emplace(lam);
     }
 

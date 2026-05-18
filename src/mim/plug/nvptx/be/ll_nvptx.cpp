@@ -93,7 +93,7 @@ void HostEmitter::find_kernels(const Def* def) {
         find_kernels(d);
 
     if (auto launch = Axm::isa<gpu::launch>(def)) {
-        auto kernel     = launch->decurry()->arg();
+        auto kernel     = launch->decurry()->decurry()->arg();
         auto kernel_lam = kernel->isa_mut<Lam>();
         assert(kernel_lam && "Expect kernel passed to %gpu.launch to be a mutable lambda");
         if (kernel_ids_.contains(kernel_lam)) return;
@@ -414,7 +414,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         else
             declare("i32 @{}(i64, ptr, i64)", CU_MEMCPY_HTOD);
 
-        auto [type, a, id] = symbol_copy_to_device->decurry()->args<3>();
+        auto [id, type, a] = symbol_copy_to_device->decurry()->args<3>();
         World& w           = type->world();
         auto type_size     = w.call(core::trait::size, type);
 
@@ -464,7 +464,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         else
             declare("i32 @{}(ptr, i64, i64)", CU_MEMCPY_DTOH);
 
-        auto [type, a, id] = symbol_copy_to_host->decurry()->args<3>();
+        auto [id, type, a] = symbol_copy_to_host->decurry()->args<3>();
         World& w           = type->world();
         auto type_size     = w.call(core::trait::size, type);
 
@@ -571,12 +571,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         // TODO: rewrite to use modern cuLaunchKernelEx instead
         declare("i32 @{}(ptr, i32, i32, i32, i32, i32, i32, i32, ptr, ptr, ptr)", CU_LAUNCH_KERNEL);
 
-        auto [implicits, launch_config, kernel_def, call_args] = launch->uncurry_args<4>();
-
-        // auto [_, __, m, T, ___] = implicits->projs<5>();
-        // auto [mem, n_groups_def, n_items_def, stream_def, _, MTs] = launch_config->projs<6>();
-        auto [mem, n_groups_def, n_items_def, stream_def, m, _, __, ___, MT] = launch_config->projs<9>();
-        auto [arg_def, ret_lam_def]                                          = call_args->projs<2>();
+        auto [implicits, launch_config, kernel_def, arg_def, func_args] = launch->uncurry_args<5>();
+        auto [n_groups_def, n_items_def, stream_def, m, _, __, ___, MT] = launch_config->projs<8>();
+        auto [mem, ret_lam_def]                                         = func_args->projs<2>();
 
         Lam* lam = kernel_def->isa_mut<Lam>();
         if (!lam) error("kernel is not a lamda {}", kernel_def);

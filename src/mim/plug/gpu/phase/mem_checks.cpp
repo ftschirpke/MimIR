@@ -36,8 +36,8 @@ MemFinder::IsaMem MemFinder::next_mem() {
 
 const Def* MemChecks::rewrite_imm_App(const App* app) {
     if (auto launch = Axm::isa<gpu::launch>(app)) {
-        auto kernel        = launch->decurry()->arg();
-        auto kernel_args   = launch->arg();
+        auto kernel        = launch->decurry()->decurry()->arg();
+        auto kernel_args   = launch->decurry()->arg();
         auto kernel_args_t = kernel_args->type();
 
         MemFinder mem_finder(kernel_args_t);

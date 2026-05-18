@@ -52,19 +52,18 @@ axm %gpu.default_stream: %gpu.Stream;
 ///
 /// ### Grid
 ///
-axm %gpu.WorkItem: *;
-axm %gpu.WorkGroup: Nat → *;
-axm %gpu.Grid: [Nat, Nat] → *;
-
-axm %gpu.for_each_group: {n_groups n_items n_in n_out: Nat, T: *, InTs: «n_in; *», OutTs: «n_out; *»}
-                       → %gpu.Grid (n_groups, n_items)
-                       → [Fn [Idx n_groups, %gpu.WorkGroup n_items, InTs] → OutTs]
-                       → Fn InTs → [%gpu.Grid (n_groups, n_items), OutTs];
-axm %gpu.for_each_item: {n_items n_in n_out: Nat, T: *, InTs: «n_in; *», OutTs: «n_out; *»}
-                      → %gpu.WorkGroup n_items
-                      → [Fn [Idx n_items, %gpu.WorkGroup n_items, InTs] → OutTs]
-                      → Fn InTs → [%gpu.WorkGroup n_items, OutTs];
-
+// axm %gpu.WorkItem: *;
+// axm %gpu.WorkGroup: Nat → *;
+// axm %gpu.Grid: [Nat, Nat] → *;
+//
+// axm %gpu.for_each_group: {n_groups n_items n_in n_out: Nat, T: *, InTs: «n_in; *», OutTs: «n_out; *»}
+//                        → %gpu.Grid (n_groups, n_items)
+//                        → [Fn [Idx n_groups, %gpu.WorkGroup n_items, InTs] → OutTs]
+//                        → Fn InTs → [%gpu.Grid (n_groups, n_items), OutTs];
+// axm %gpu.for_each_item: {n_items n_in n_out: Nat, T: *, InTs: «n_in; *», OutTs: «n_out; *»}
+//                       → %gpu.WorkGroup n_items
+//                       → [Fn [Idx n_items, %gpu.WorkGroup n_items, InTs] → OutTs]
+//                       → Fn InTs → [%gpu.WorkGroup n_items, OutTs];
 ///
 /// ## Operations
 ///
@@ -170,14 +169,14 @@ axm %gpu.free(block): {T: *} → [%gpu.GlobalM, %gpu.GlobalPtr T] → %gpu.Globa
 /// #### %%gpu.symbol_copy_to_device(block)
 ///
 /// Copies data from host memory to a device symbol
-axm %gpu.symbol_copy_to_device(block): {T: *, a: Nat, id: Nat}
+axm %gpu.symbol_copy_to_device(block): {id: Nat, T: *, a: Nat}
                                      → [%mem.M 0, %mem.M a, %mem.Ptr0 T, %gpu.SymPtr (id, T, a)]
                                      → [%mem.M 0, %mem.M a];
 ///
 /// #### %%gpu.symbol_copy_to_host(block)
 ///
 /// Copies data from a device symbol to host memory
-axm %gpu.symbol_copy_to_host(block): {T: *, a: Nat, id: Nat}
+axm %gpu.symbol_copy_to_host(block): {id: Nat, T: *, a: Nat}
                                    → [%mem.M 0, %mem.M a, %gpu.SymPtr (id, T, a), %mem.Ptr0 T]
                                    → [%mem.M 0, %mem.M a];
 ///
@@ -221,14 +220,14 @@ axm %gpu.free(async): {T: *} → [%gpu.GlobalM, %gpu.GlobalPtr T, %gpu.Stream] �
 /// #### %%gpu.symbol_copy_to_device(async)
 ///
 /// Copies data from host memory to a device symbol
-axm %gpu.symbol_copy_to_device(async): {T: *, a: Nat, id: Nat}
+axm %gpu.symbol_copy_to_device(async): {id: Nat, T: *, a: Nat}
                                      → [%mem.M 0, %mem.M a, %mem.Ptr0 T, %gpu.SymPtr (id, T, a), %gpu.Stream]
                                      → [%mem.M 0, %mem.M a];
 ///
 /// #### %%gpu.symbol_copy_to_host(async)
 ///
 /// Copies data from a device symbol to host memory
-axm %gpu.symbol_copy_to_host(async): {T: *, a: Nat, id: Nat}
+axm %gpu.symbol_copy_to_host(async): {id: Nat, T: *, a: Nat}
                                    → [%mem.M 0, %mem.M a, %gpu.SymPtr (id, T, a), %mem.Ptr0 T, %gpu.Stream]
                                    → [%mem.M 0, %mem.M a];
 ///
@@ -266,23 +265,24 @@ let %gpu.alloc_copy.async = lm {T: *}
 axm %gpu.launch: {n: Nat, Ts: «n; *»}
                → [n_groups: Nat, n_items: Nat, %gpu.Stream,
                   m: Bool, s: Nat, STs: «s; [Nat, *, Nat]», // TODO: these <- should all be implicit
-                  MT: «%core.bitcast Nat m; *»]
+                  «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
                → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                     «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
+                     «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-               → Fn [%mem.M 0, «i: n; Ts#i»] → %mem.M 0;
+               → «i: n; Ts#i»
+               → Fn [%mem.M 0] → %mem.M 0;
 ///
 /// #### %%gpu.hier_launch
 ///
 /// Launches a kernel function on the device with a hierarchical programming model
-axm %gpu.hier_launch: {n: Nat, Ts: «n; *»}
-               → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream,
-                  m: Bool, s: Nat, STs: «s; [Nat, *, Nat]», // <- should all be implicit
-                  «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
-               → Cn [%gpu.Grid (n_groups, n_items), %gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM,
-                     «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
-                     Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
-               → Fn «i: n; Ts#i» → %mem.M 0;
+// axm %gpu.hier_launch: {n: Nat, Ts: «n; *»}
+//                → [%mem.M 0, n_groups: Nat, n_items: Nat, %gpu.Stream,
+//                   m: Bool, s: Nat, STs: «s; [Nat, *, Nat]», // <- should all be implicit
+//                   «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
+//                → Cn [%gpu.Grid (n_groups, n_items), %gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM,
+//                      «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
+//                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
+//                → Fn «i: n; Ts#i» → %mem.M 0;
 ///
 /// ### Work-Item Synchronization
 ///
