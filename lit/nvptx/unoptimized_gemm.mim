@@ -1,0 +1,166 @@
+// RUN: rm -f %t.ll
+// RUN: %mim %s --output-ll %t.ll --device-target nvptx -o -
+// RUN: rm -f %t
+// RUN: clang %t.ll -o %t -lcuda -Wno-override-module
+
+import gpu;
+import nvptx;
+import core;
+import libc;
+import math;
+import mem;
+import print;
+
+let n = 32768;
+let size = %core.nat.mul (n, n);
+let n_i32 = %core.bitcast I32 n;
+
+let numBlocks = 1048576;
+let numThreads = 1024;
+
+let fp_1 = 0x3f800000:%math.F32;
+let fp_0_25 = 0x3e800000:%math.F32;
+let fp_0_375 = 0x3ec00000:%math.F32;
+let fp_25 = 0x41c80000:%math.F32;
+let fp_m2 = 0xc0000000:%math.F32;
+let fp_0_33 = 0x3eaaaaab:%math.F32;
+let fp_pi = 0x40490fdb:%math.F32;
+
+// GEMM of matrix dimensions:  nxn * nxn -> nxn
+con gemm_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM,
+                 group_id: Idx numBlocks, item_id: Idx numThreads, (), (),
+                 (out: %gpu.GlobalPtr «size; %math.F32»,
+                 in1: %gpu.GlobalPtr «size; %math.F32», in2: %gpu.GlobalPtr «size; %math.F32»),
+                 return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
+    let rid = %core.bitcast I32 group_id;
+    let cid = %core.bitcast I32 item_id;
+
+    let id = %core.bitcast I32 (
+        %core.wrap.add 0 (%core.wrap.mul 0 (rid, n_i32), cid)
+    );
+
+    let row_oob = %core.icmp.sge (rid, n_i32);
+    let col_oob = %core.icmp.sge (cid, n_i32);
+    let tot_oob = %core.icmp.sge (id, %core.bitcast I32 (size));
+
+    let is_idle_thread = %core.bit2.or_ 0 (%core.bit2.or_ 0 (row_oob, col_oob), tot_oob);
+    (continue, return)#is_idle_thread (m1, m3, m4, m5)
+    where
+        con continue (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM) =
+            let id = %core.bitcast (Idx size) id;
+
+            let fp_zero = %math.conv.s2f %math.f32 0I32;
+            wrapped_loop (m1, 0I32, fp_zero)
+            where
+                con wrapped_loop (m1: %gpu.GlobalM, i: I32, acc: %math.F32) =
+                    let cond = %core.icmp.sl (i, n_i32);
+                    let next_i = %core.wrap.add 0 (i, 1I32);
+                    (write_and_exit, body)#cond m1
+                    where
+                        con body (m1: %gpu.GlobalM) =
+                            let in1_idx = %core.bitcast (Idx size) (
+                                %core.wrap.add 0 (%core.wrap.mul 0 (rid, n_i32), i)
+                            );
+                            let in2_idx = %core.bitcast (Idx size) (
+                                %core.wrap.add 0 (%core.wrap.mul 0 (i, n_i32), cid)
+                            );
+                            let in1_addr = %mem.lea (in1, in1_idx);
+                            let in2_addr = %mem.lea (in2, in2_idx);
+                            let (m1, in1_val) = %mem.load (m1, in1_addr);
+                            let (m1, in2_val) = %mem.load (m1, in2_addr);
+                            let prod = %math.arith.mul 0 (in1_val, in2_val);
+                            let new_acc = %math.arith.add 0 (acc, prod);
+                            wrapped_loop (m1, next_i, new_acc);
+                        con write_and_exit (m1: %gpu.GlobalM) =
+                            let out_addr = %mem.lea (out, id);
+                            let m1 = %mem.store (m1, out_addr, acc);
+                            return (m1, m3, m4, m5);
+                    end;
+            end;
+    end;
+
+fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr («⊤:Nat; I8», 0)», 0)) =
+    let (m0, h_in1) = %mem.alloc («size; %math.F32», 0) m0;
+    let (m0, h_in2) = %mem.alloc («size; %math.F32», 0) m0;
+    let (m0, h_out) = %mem.alloc («size; %math.F32», 0) m0;
+
+    // generate ints in [0, cutoff), convert them to floats in [a, b), and fill h_in1 and h_in2 with these values
+    let seed = 42I32;
+    let m0 = %libc.srand (m0, seed);
+    let cutoff = 1000000I32;
+    let a = %math.minus 0 (%math.conv.s2f %math.f32 50I32);
+    let b = %math.conv.s2f %math.f32 50I32;
+    let div = %math.arith.div 0 (%math.conv.s2f %math.f32 cutoff, %math.arith.sub 0 (b, a));
+
+    fun loop_in1 (m0: %mem.M 0) : %mem.M 0 =
+        wrapped_loop (m0, 0I32, return)
+        where
+            con wrapped_loop (m0: %mem.M 0, i: I32, exit: Cn [%mem.M 0]) =
+                let cond = %core.icmp.sl (i, %core.bitcast I32 size);
+                let next_i = %core.wrap.add 0 (i, 1I32);
+                (exit, body)#cond m0
+                where
+                    con body (m0: %mem.M 0) =
+                        let idx = %core.bitcast (Idx size) i;
+                        let addr = %mem.lea (h_in1, idx);
+                        let (m0, value_i32) = %libc.rand m0;
+                        let (m0, value_i32) = %core.div.srem (m0, (value_i32, cutoff));
+                        let value = %math.conv.s2f %math.f32 value_i32;
+                        let value = %math.arith.div 0 (value, div);
+                        let value = %math.arith.add 0 (value, a);
+                        let m0 = %mem.store (m0, addr, value);
+                        wrapped_loop (m0, next_i, exit);
+                end;
+        end;
+    ret m0 = loop_in1 $ m0;
+
+    fun loop_in2 (m0: %mem.M 0) : %mem.M 0 =
+        wrapped_loop (m0, 0I32, return)
+        where
+            con wrapped_loop (m0: %mem.M 0, i: I32, exit: Cn [%mem.M 0]) =
+                let cond = %core.icmp.sl (i, %core.bitcast I32 size);
+                let next_i = %core.wrap.add 0 (i, 1I32);
+                (exit, body)#cond m0
+                where
+                    con body (m0: %mem.M 0) =
+                        let idx = %core.bitcast (Idx size) i;
+                        let addr = %mem.lea (h_in2, idx);
+                        let (m0, value_i32) = %libc.rand m0;
+                        let (m0, value_i32) = %core.div.srem (m0, (value_i32, cutoff));
+                        let value = %math.conv.s2f %math.f32 value_i32;
+                        let value = %math.arith.div 0 (value, div);
+                        let value = %math.arith.add 0 (value, a);
+                        let m0 = %mem.store (m0, addr, value);
+                        wrapped_loop (m0, next_i, exit);
+                end;
+        end;
+    ret m0 = loop_in2 $ m0;
+
+
+    let (m0, m1, m4, _, _) = %gpu.init (0, 0, m0, (), ());
+
+    let (m0, m1, d_in1) = %gpu.alloc_copy.block (m0, m1, h_in1);
+    let (m0, m1, d_in2) = %gpu.alloc_copy.block (m0, m1, h_in2);
+    let (m1, d_out) = %mem.alloc («size; %math.F32», %gpu.addr_space_global) m1;
+
+    ret m0 = %gpu.launch (numBlocks, numThreads, %gpu.default_stream, ff, 0, (), (), ())
+             gemm_kernel (d_in2, d_in1, d_in1) $ m0;
+    ret m0 = %gpu.launch (numBlocks, numThreads, %gpu.default_stream, ff, 0, (), (), ())
+             gemm_kernel (d_in1, d_in2, d_in2) $ m0;
+    ret m0 = %gpu.launch (numBlocks, numThreads, %gpu.default_stream, ff, 0, (), (), ())
+             gemm_kernel (d_out, d_in1, d_in2) $ m0;
+
+    let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_out, h_out);
+    let m1 = %gpu.free.block (m1, d_in1);
+    let m1 = %gpu.free.block (m1, d_in2);
+    let m1 = %gpu.free.block (m1, d_out);
+
+    let m0 = %gpu.deinit (m0, m1, m4);
+
+    ret m0 = %print.arr_f32 $ (m0, size, h_out, 10I32);
+
+    let m0 = %mem.free (m0, h_in1);
+    let m0 = %mem.free (m0, h_in2);
+    let m0 = %mem.free (m0, h_out);
+
+    return m0;

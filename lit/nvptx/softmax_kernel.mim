@@ -192,8 +192,8 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m0, n) = %core.div.sdiv (m0, (%core.bitcast I32 gridSize, 32I32));
     let c = %core.bitcast I32 blockSize;
 
-    ret m0 = %gpu.launch (m0, gridSize, blockSize, %gpu.default_stream, ff, 0, (), (), ())
-             softmax_kernel $ (d_out, d_in, n, c);
+    ret m0 = %gpu.launch (gridSize, blockSize, %gpu.default_stream, ff, 0, (), (), ())
+             softmax_kernel (d_out, d_in, n, c) $ m0;
 
     let (m0, m1) = %gpu.copy_to_host.block (m0, m1, d_out, h_out);
     let m1 = %gpu.free.block (m1, d_in);
@@ -202,5 +202,8 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let m0 = %gpu.deinit (m0, m1, m4);
 
     ret m0 = %print.arr_f32 $ (m0, size, h_out, 10I32);
+
+    let m0 = %mem.free (m0, h_in);
+    let m0 = %mem.free (m0, h_out);
 
     return m0;

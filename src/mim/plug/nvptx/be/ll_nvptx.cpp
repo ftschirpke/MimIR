@@ -366,9 +366,10 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
             declare("i32 @{}(ptr, i64)", CU_MEM_ALLOC);
 
         emit_unsafe(alloc->arg(0));
-        auto type      = alloc->decurry()->arg();
-        World& w       = type->world();
-        auto type_size = w.call(core::trait::size, type);
+        auto alloc_t    = alloc->decurry()->arg();
+        World& w        = alloc_t->world();
+        auto type_size  = w.call(core::trait::size, alloc_t);
+        auto alloc_size = emit(type_size);
 
         auto ptr_t = convert(Axm::as<mem::Ptr>(def->proj(1)->type()));
 
@@ -377,9 +378,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         if (is_async) {
             auto stream = emit(alloc->arg(1));
             alloc_res   = bb.assign(name + "res", "call i32 @{}(ptr {}, i64 {}, ptr {})", CU_MEM_ALLOC_ASYNC, alloc_ptr,
-                                    type_size, stream);
+                                    alloc_size, stream);
         } else
-            alloc_res = bb.assign(name + "res", "call i32 @{}(ptr {}, i64 {})", CU_MEM_ALLOC, alloc_ptr, type_size);
+            alloc_res = bb.assign(name + "res", "call i32 @{}(ptr {}, i64 {})", CU_MEM_ALLOC, alloc_ptr, alloc_size);
 
         emit_cu_error_handling(bb, alloc_res);
         return bb.assign(name, "load {}, {} addrspace(0)* {}", ptr_t, ptr_t, alloc_ptr);
