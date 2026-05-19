@@ -15,8 +15,8 @@ template<class Id, Id id, nat_t w>
 Res fold(u64 a, u64 b, [[maybe_unused]] bool nsw, [[maybe_unused]] bool nuw) {
     using ST = w2s<w>;
     using UT = w2u<w>;
-    auto s = mim::bitcast<ST>(a), t = mim::bitcast<ST>(b);
-    auto u = mim::bitcast<UT>(a), v = mim::bitcast<UT>(b);
+    auto s = mim::bitcast_resize<ST>(a), t = mim::bitcast_resize<ST>(b);
+    auto u = mim::bitcast_resize<UT>(a), v = mim::bitcast_resize<UT>(b);
 
     if constexpr (std::is_same_v<Id, wrap>) {
         if constexpr (id == wrap::add) {
@@ -121,7 +121,7 @@ const Def* fold(World& world, const Def* type, const Def*& a, const Def*& b, con
 template<class Id, nat_t w>
 Res fold(u64 a, [[maybe_unused]] bool nsw, [[maybe_unused]] bool nuw) {
     using ST = w2s<w>;
-    auto s   = mim::bitcast<ST>(a);
+    auto s   = mim::bitcast_resize<ST>(a);
 
     if constexpr (std::is_same_v<Id, abs>)
         return std::abs(s);
@@ -610,7 +610,7 @@ const Def* normalize_conv(const Def* dst_t, const Def*, const Def* x) {
         // clang-format off
         if (false) {}
 #define M(S, D) \
-        else if (S == sw && D == dw) return world.lit(d_t, w2s<D>(mim::bitcast<w2s<S>>(*l)));
+        else if (S == sw && D == dw) return world.lit(d_t, w2s<D>(mim::bitcast_resize<w2s<S>>(*l)));
         M( 1,  8) M( 1, 16) M( 1, 32) M( 1, 64)
                   M( 8, 16) M( 8, 32) M( 8, 64)
                             M(16, 32) M(16, 64)

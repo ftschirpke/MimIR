@@ -10,7 +10,7 @@ namespace {
 template<class Id, Id id, nat_t w>
 Res fold(u64 a) {
     using T = w2f<w>;
-    auto x = bitcast<T>(a);
+    auto x = bitcast_resize<T>(a);
     if constexpr (std::is_same_v<Id, tri>) {
         if constexpr (false) {}
         else if constexpr (id == tri:: sin ) return  sin (x);
@@ -65,7 +65,7 @@ Res fold(u64 a) {
 template<class Id, nat_t w>
 Res fold(u64 a) {
     using T = w2f<w>;
-    auto x = bitcast<T>(a);
+    auto x = bitcast_resize<T>(a);
     if constexpr (std::is_same_v<Id, abs>)
         return std::abs(x);
     else
@@ -97,7 +97,7 @@ const Def* fold(World& world, const Def* type, const Def* a) {
 template<class Id, Id id, nat_t w>
 Res fold(u64 a, u64 b) {
     using T = w2f<w>;
-    auto x = bitcast<T>(a), y = bitcast<T>(b);
+    auto x = bitcast_resize<T>(a), y = bitcast_resize<T>(b);
     if constexpr (std::is_same_v<Id, arith>) {
         if constexpr (false) {}
         else if constexpr (id == arith::add) return     x + y;
@@ -233,7 +233,7 @@ Res fold(u64 a) {
     if constexpr (std::is_void_v<S> || std::is_void_v<D>)
         return {};
     else
-        return D(bitcast<S>(a));
+        return D(bitcast_resize<S>(a));
 }
 
 } // namespace

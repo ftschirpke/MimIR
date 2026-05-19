@@ -11,7 +11,7 @@ public:
         : data_{} {}
     template<class T>
     Res(T val)
-        : data_(mim::bitcast<u64>(val)) {}
+        : data_(mim::bitcast_resize<u64>(val)) {}
 
     constexpr const u64& operator*() const& { return *data_; }
     constexpr u64& operator*() & { return *data_; }
