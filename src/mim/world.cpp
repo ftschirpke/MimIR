@@ -390,11 +390,16 @@ const Def* World::extract(const Def* d, const Def* index) {
         }
     }
 
-    if (auto pack = d->isa_imm<Pack>()) return pack->body();
-
     if (size && !Checker::alpha<Checker::Check>(type->arity(), size))
         error(index->loc(), "index '{}' does not fit within arity '{}'", index, type->arity());
     // TODO if we have indices we need to check as well that this is compatible with `d`
+
+    if (auto pack = d->isa<Pack>()) {
+        if (pack->has_var())
+            return pack->reduce(index);
+        else
+            return pack->body();
+    }
 
     // extract(insert(x, index, val), index) -> val
     if (auto insert = d->isa<Insert>()) {
