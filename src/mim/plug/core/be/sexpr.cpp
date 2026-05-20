@@ -103,6 +103,7 @@ public:
         bindings_enabled_ = true;
     }
 
+    bool direct_style() override { return true; }
     bool is_valid(std::string_view s) { return !s.empty(); }
     void start() override;
     void emit_imported(Lam*);
@@ -307,7 +308,7 @@ void Emitter::finalize() {
     // via emit_bb() but we don't want to emit the lambda itself.
     // We can't do this with Axm::isa because 'eqsat' is an out-of-tree plugin
     // that isn't guaranteed to have been cloned so we can't include its header file.
-    else if (root()->ret_dom()->sym().str() == "%eqsat.Rules")
+    else if (root()->ret_var() && root()->ret_dom()->sym().str() == "%eqsat.Rules")
         return;
 
     LamSet rec_lams;

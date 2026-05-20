@@ -28,6 +28,8 @@ protected:
         : NestPhase(world, std::move(name), false)
         , ostream_(ostream) {}
 
+    virtual bool direct_style() { return false; }
+
     std::ostream& ostream() const { return ostream_; }
 
     /// Recursively emits code.
@@ -61,7 +63,7 @@ protected:
             if (auto lam = mut->isa<Lam>()) lam2bb_.try_emplace(lam, BB());
         auto old_size = lam2bb_.size();
 
-        assert(root()->ret_var());
+        if (!child().direct_style()) assert(root()->ret_var());
 
         auto fct = child().prepare();
 
@@ -71,7 +73,7 @@ protected:
         for (auto mut : muts) {
             if (auto lam = mut->isa<Lam>()) {
                 curr_lam_ = lam;
-                assert(lam == root() || Lam::isa_basicblock(lam));
+                if (!child().direct_style()) assert(lam == root() || Lam::isa_basicblock(lam));
                 child().emit_epilogue(lam);
             }
         }
