@@ -26,7 +26,7 @@ set(MIM_PY_VENV_STAMP "${MIM_PY_VENV}/.mim-stamp")
 add_custom_command(
     OUTPUT "${MIM_PY_VENV_STAMP}"
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${MIM_PY_VENV}"
-    COMMAND $<$<PLATFORM_ID:Windows>:"${MIM_PY_BOOTSTRAP_PYTHON}"> $<$<PLATFORM_ID:Windows>:-m> $<$<PLATFORM_ID:Windows>:ensurepip> $<$<PLATFORM_ID:Windows>:--upgrade>
+    COMMAND $<$<PLATFORM_ID:Windows>:${MIM_PY_BOOTSTRAP_PYTHON}> -m ensurepip --upgrade
     COMMAND "${MIM_PY_BOOTSTRAP_PYTHON}" -m venv "${MIM_PY_VENV}"
     COMMAND "${MIM_PY_PYTHON}" -m pip install --upgrade pip setuptools wheel
     COMMAND "${MIM_PY_PYTHON}" -m pip install pytest
