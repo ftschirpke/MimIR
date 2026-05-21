@@ -9,6 +9,367 @@ namespace mim::plug::core {
 
 namespace {
 
+constexpr bool idx_is_word_domain(u64 size) { return size == 0 || (size > 1 && std::has_single_bit(size)); }
+
+constexpr std::optional<nat_t> idx_word_width(u64 size) {
+    if (size == 0) return 64;
+    if (size <= 1 || !std::has_single_bit(size)) return {};
+    return Idx::size2bitwidth(size);
+}
+
+constexpr bool idx_sign(u64 size, u64 x) {
+    // Pre: x is already in range.
+    if (size == 0) {
+        // Idx 0 encodes 2^64.
+        return (x >> 63) != 0;
+    }
+
+    // signed representatives in [-floor(size/2), ceil(size/2)-1]
+    return x > (size - 1) / 2;
+}
+
+constexpr s64 idx_sext(u64 size, u64 x) {
+    // Pre: x is already in range.
+    if (size == 0) return static_cast<s64>(x);
+
+    const u64 max_pos = (size - 1) / 2;
+    if (x <= max_pos) return static_cast<s64>(x);
+
+    // Negative representative is -(size - x).
+    return -static_cast<s64>(size - x);
+}
+
+constexpr u64 idx_from_signed(u64 size, s64 x) {
+    if (size == 0) return static_cast<u64>(x);
+    return x >= 0 ? static_cast<u64>(x) : size - static_cast<u64>(-x);
+}
+
+constexpr bool idx_add_nuw(u64 size, u64 a, u64 b) {
+    if (size == 0) return a + b < a;
+    return a > size - 1 - b;
+}
+
+constexpr bool idx_sub_nuw(u64, u64 a, u64 b) { return a < b; }
+
+constexpr bool idx_mul_nuw(u64 size, u64 a, u64 b) {
+    if (a == 0 || b == 0) return false;
+
+    if (size == 0) return b > std::numeric_limits<u64>::max() / a;
+    return b > (size - 1) / a;
+}
+
+constexpr u64 idx_add(u64 size, u64 a, u64 b) {
+    if (size == 0) return a + b;
+    return (a + b) % size;
+}
+
+constexpr u64 idx_sub(u64 size, u64 a, u64 b) {
+    if (size == 0) return a - b;
+    return (a >= b) ? (a - b) : (size - (b - a));
+}
+
+constexpr u64 idx_mul(u64 size, u64 a, u64 b) {
+    if (size == 0) return a * b;
+
+    // Safe double-and-add modulo size, avoids overflow.
+    u64 r = 0;
+    while (b) {
+        if (b & 1) r = idx_add(size, r, a);
+        b >>= 1;
+        if (b) a = idx_add(size, a, a);
+    }
+    return r;
+}
+
+constexpr bool idx_add_nsw(u64 size, u64 a, u64 b) {
+    const bool sa = idx_sign(size, a);
+    const bool sb = idx_sign(size, b);
+    const u64 r   = idx_add(size, a, b);
+    const bool sr = idx_sign(size, r);
+    return (sa == sb) && (sr != sa);
+}
+
+constexpr bool idx_sub_nsw(u64 size, u64 a, u64 b) {
+    const bool sa = idx_sign(size, a);
+    const bool sb = idx_sign(size, b);
+    const u64 r   = idx_sub(size, a, b);
+    const bool sr = idx_sign(size, r);
+    return (sa != sb) && (sr != sa);
+}
+
+constexpr bool idx_mul_nsw(u64 size, u64 a, u64 b) {
+    const s64 x = idx_sext(size, a);
+    const s64 y = idx_sext(size, b);
+
+    if (x == 0 || y == 0) return false;
+
+    const s64 min_val = [&] {
+        if (size == 0) return std::numeric_limits<s64>::min();
+        return -static_cast<s64>(size / 2);
+    }();
+
+    const s64 max_val = [&] {
+        if (size == 0) return std::numeric_limits<s64>::max();
+        return static_cast<s64>((size - 1) / 2);
+    }();
+
+    if (x == -1) return y == min_val;
+    if (y == -1) return x == min_val;
+
+    if (x > 0)
+        if (y > 0)
+            return x > max_val / y;
+        else
+            return y < min_val / x;
+    else if (y > 0)
+        return x < min_val / y;
+    else
+        return x < max_val / y;
+}
+
+constexpr std::optional<u64> idx_udiv([[maybe_unused]] u64 size, u64 a, u64 b) {
+    if (b == 0) return {};
+    return a / b;
+}
+
+constexpr std::optional<u64> idx_urem([[maybe_unused]] u64 size, u64 a, u64 b) {
+    if (b == 0) return {};
+    return a % b;
+}
+
+constexpr bool idx_slt(u64 size, u64 a, u64 b) {
+    const bool sa = idx_sign(size, a);
+    const bool sb = idx_sign(size, b);
+
+    if (a == b) return false;
+    if (!sa && sb) return false;
+    if (sa && !sb) return true;
+    return a < b;
+}
+
+constexpr bool idx_sgt(u64 size, u64 a, u64 b) { return idx_slt(size, b, a); }
+
+constexpr bool idx_sdivrem_ub(u64 size, u64 a, u64 b) {
+    const s64 x = idx_sext(size, a);
+    const s64 y = idx_sext(size, b);
+
+    if (y == 0) return true;
+
+    const s64 min_val = [&] {
+        if (size == 0) return std::numeric_limits<s64>::min();
+        return -static_cast<s64>(size / 2);
+    }();
+
+    return x == min_val && y == -1;
+}
+
+constexpr u64 idx_sdiv(u64 size, u64 a, u64 b) {
+    const s64 x = idx_sext(size, a);
+    const s64 y = idx_sext(size, b);
+    return idx_from_signed(size, x / y);
+}
+
+constexpr u64 idx_srem(u64 size, u64 a, u64 b) {
+    const s64 x = idx_sext(size, a);
+    const s64 y = idx_sext(size, b);
+    return idx_from_signed(size, x % y);
+}
+
+constexpr bool idx_shl_nuw(u64 size, u64 a, unsigned k) {
+    auto w = idx_word_width(size);
+    if (!w) return true; // invalid domain for shift => treat as bad
+
+    if (k == 0) return false;
+    if (k >= *w) return a != 0;
+
+    return (a >> (*w - k)) != 0;
+}
+
+constexpr bool idx_shl_nsw(u64 size, u64 a, unsigned k) {
+    auto w = idx_word_width(size);
+    if (!w) return true;
+
+    if (k == 0) return false;
+
+    const s64 x = idx_sext(size, a);
+
+    if (k >= *w) return x != 0;
+
+    const u64 shift = *w - 1 - k;
+    const s64 top   = x >> shift;
+    return top != 0 && top != -1;
+}
+
+constexpr std::optional<u64> idx_shl(u64 size, u64 a, u64 b, bool nsw, bool nuw) {
+    auto w = idx_word_width(size);
+    if (!w) return {};
+
+    if (b >= *w) return {};
+    const unsigned k = static_cast<unsigned>(b);
+
+    if (nuw && idx_shl_nuw(size, a, k)) return {};
+    if (nsw && idx_shl_nsw(size, a, k)) return {};
+
+    if (size == 0) return a << k;
+    return (a << k) % size;
+}
+
+constexpr std::optional<u64> idx_lshr(u64 size, u64 a, u64 b) {
+    auto w = idx_word_width(size);
+    if (!w) return {};
+
+    if (b >= *w) return {};
+    const unsigned k = static_cast<unsigned>(b);
+
+    if (size == 0) return a >> k;
+    return a >> k;
+}
+
+constexpr std::optional<u64> idx_ashr(u64 size, u64 a, u64 b) {
+    auto w = idx_word_width(size);
+    if (!w) return {};
+
+    if (b >= *w) return {};
+    const unsigned k = static_cast<unsigned>(b);
+
+    return idx_from_signed(size, idx_sext(size, a) >> k);
+}
+
+template<icmp id>
+constexpr bool fold_icmp_idx(u64 size, u64 a, u64 b) {
+    const bool su = idx_sign(size, a);
+    const bool sv = idx_sign(size, b);
+
+    flags_t rel = 0;
+    if (false) {
+    } else if (a == b)
+        rel = icmp_mask & flags_t(icmp::xyglE);
+    else if (!su && sv)
+        rel = icmp_mask & flags_t(icmp::Xygle);
+    else if (su && !sv)
+        rel = icmp_mask & flags_t(icmp::xYgle);
+    else if (a > b)
+        rel = icmp_mask & flags_t(icmp::xyGle);
+    else
+        rel = icmp_mask & flags_t(icmp::xygLe);
+
+    return (flags_t(id) & rel) != 0;
+}
+
+template<class Id, Id id>
+std::optional<u64> fold_idx(u64 size, u64 a, u64 b, [[maybe_unused]] bool nsw, [[maybe_unused]] bool nuw) {
+    // Pre: a, b already in range for Idx size.
+
+    if constexpr (std::is_same_v<Id, wrap>) {
+        if constexpr (id == wrap::add) {
+            if (nuw && idx_add_nuw(size, a, b)) return {};
+            if (nsw && idx_add_nsw(size, a, b)) return {};
+            return idx_add(size, a, b);
+
+        } else if constexpr (id == wrap::sub) {
+            if (nuw && idx_sub_nuw(size, a, b)) return {};
+            if (nsw && idx_sub_nsw(size, a, b)) return {};
+            return idx_sub(size, a, b);
+
+        } else if constexpr (id == wrap::mul) {
+            if (nuw && idx_mul_nuw(size, a, b)) return {};
+            if (nsw && idx_mul_nsw(size, a, b)) return {};
+            return idx_mul(size, a, b);
+
+        } else if constexpr (id == wrap::shl) {
+            return idx_shl(size, a, b, nsw, nuw);
+
+        } else {
+            static_assert(false, "missing wrap subtag");
+        }
+
+    } else if constexpr (std::is_same_v<Id, shr>) {
+        if constexpr (id == shr::a)
+            return idx_ashr(size, a, b);
+        else if constexpr (id == shr::l)
+            return idx_lshr(size, a, b);
+        else
+            static_assert(false, "missing shr subtag");
+
+    } else if constexpr (std::is_same_v<Id, div>) {
+        if constexpr (id == div::udiv) {
+            return idx_udiv(size, a, b);
+
+        } else if constexpr (id == div::urem) {
+            return idx_urem(size, a, b);
+
+        } else if constexpr (id == div::sdiv) {
+            if (idx_sdivrem_ub(size, a, b)) return {};
+            return idx_sdiv(size, a, b);
+
+        } else if constexpr (id == div::srem) {
+            if (idx_sdivrem_ub(size, a, b)) return {};
+            return idx_srem(size, a, b);
+
+        } else {
+            static_assert(false, "missing div subtag");
+        }
+
+    } else if constexpr (std::is_same_v<Id, icmp>) {
+        return u64(fold_icmp_idx<id>(size, a, b));
+
+    } else if constexpr (std::is_same_v<Id, extrema>) {
+        if constexpr (id == extrema::sm)
+            return std::min(a, b);
+
+        else if constexpr (id == extrema::sM)
+            return std::max(a, b);
+
+        else if constexpr (id == extrema::Sm)
+            return idx_slt(size, a, b) ? a : b;
+
+        else if constexpr (id == extrema::SM)
+            return idx_sgt(size, a, b) ? a : b;
+
+        else
+            static_assert(false, "missing extrema subtag");
+
+    } else {
+        static_assert(false, "missing tag");
+    }
+}
+
+template<class Id, Id id>
+const Def* fold(World& world, const Def* type, const Def*& a, const Def*& b, const Def* mode = {}) {
+    if (a->isa<Bot>() || b->isa<Bot>()) return world.bot(type);
+
+    if (auto la = Lit::isa(a)) {
+        if (auto lb = Lit::isa(b)) {
+            assert(a->type() == b->type());
+
+            auto size = Lit::as(Idx::isa(a->type()));
+
+            bool nsw = false, nuw = false;
+            if constexpr (std::is_same_v<Id, wrap>) {
+                auto m = mode ? static_cast<Mode>(Lit::as(mode)) : Mode::none;
+                nsw    = fe::has_flag(m, Mode::nsw);
+                nuw    = fe::has_flag(m, Mode::nuw);
+            }
+
+            if (size == 1) {
+                if constexpr (std::is_same_v<Id, div>) {
+                    if (*lb == 0) return world.bot(type);
+                }
+                if constexpr (std::is_same_v<Id, icmp>)
+                    return world.lit(type, u64(fold_icmp_idx<id>(1, 0, 0)));
+                else
+                    return world.lit(type, 0);
+            }
+
+            auto res = fold_idx<Id, id>(size, *la, *lb, nsw, nuw);
+            return res ? world.lit(type, *res) : world.bot(type);
+        }
+    }
+
+    if (::mim::is_commutative(id) && Def::greater(a, b)) std::swap(a, b);
+    return nullptr;
+}
+
 template<nat_t w>
 constexpr u64 mask() {
     static_assert(w >= 1 && w <= 64);
@@ -37,336 +398,6 @@ constexpr s64 sext(u64 x) {
         return static_cast<s64>(x);
     else
         return sign<w>(x) ? static_cast<s64>(x | ~mask<w>()) : static_cast<s64>(x);
-}
-
-template<nat_t w>
-constexpr bool add_nuw(u64 u, u64 v) {
-    static_assert(w >= 1 && w <= 64);
-    u = trunc<w>(u);
-    v = trunc<w>(v);
-    return trunc<w>(u + v) < u;
-}
-
-template<nat_t w>
-constexpr bool add_nsw(u64 u, u64 v) {
-    static_assert(w >= 1 && w <= 64);
-    u       = trunc<w>(u);
-    v       = trunc<w>(v);
-    u64 r   = trunc<w>(u + v);
-    bool su = sign<w>(u);
-    bool sv = sign<w>(v);
-    bool sr = sign<w>(r);
-    return (su == sv) && (sr != su);
-}
-
-template<nat_t w>
-constexpr bool sub_nuw(u64 u, u64 v) {
-    static_assert(w >= 1 && w <= 64);
-    u = trunc<w>(u);
-    v = trunc<w>(v);
-    return u < v;
-}
-
-template<nat_t w>
-constexpr bool sub_nsw(u64 u, u64 v) {
-    static_assert(w >= 1 && w <= 64);
-    u       = trunc<w>(u);
-    v       = trunc<w>(v);
-    u64 r   = trunc<w>(u - v);
-    bool su = sign<w>(u);
-    bool sv = sign<w>(v);
-    bool sr = sign<w>(r);
-    return (su != sv) && (sr != su);
-}
-
-template<nat_t w>
-constexpr bool mul_nuw(u64 u, u64 v) {
-    static_assert(w >= 1 && w <= 64);
-    u = trunc<w>(u);
-    v = trunc<w>(v);
-
-    if (u == 0 || v == 0) return false;
-
-    if constexpr (w == 64) {
-        return v > std::numeric_limits<u64>::max() / u;
-    } else {
-        constexpr u64 max_val = (u64(1) << w) - 1;
-        return v > max_val / u;
-    }
-}
-
-template<nat_t w>
-constexpr bool mul_nsw(u64 u, u64 v) {
-    static_assert(w >= 1 && w <= 64);
-    u = trunc<w>(u);
-    v = trunc<w>(v);
-
-    const s64 a = sext<w>(u);
-    const s64 b = sext<w>(v);
-
-    if (a == 0 || b == 0) return false;
-
-    const s64 min_val = w == 64 ? std::numeric_limits<s64>::min() : -(s64(1) << (w - 1));
-    const s64 max_val = w == 64 ? std::numeric_limits<s64>::max() : (s64(1) << (w - 1)) - 1;
-
-    // Special cases to avoid UB in division, especially involving min / -1.
-    if (a == -1) return b == min_val;
-    if (b == -1) return a == min_val;
-
-    if (a > 0)
-        if (b > 0)
-            return a > max_val / b;
-        else
-            return b < min_val / a;
-    else if (b > 0)
-        return a < min_val / b;
-    else
-        return a < max_val / b; // b < 0, safe because b != -1 here
-}
-
-template<nat_t w>
-constexpr bool shl_nuw(u64 u, unsigned k) {
-    static_assert(w >= 1 && w <= 64);
-    u = trunc<w>(u);
-    if (k == 0) return false;
-    if (k >= w) return u != 0;
-    return (u >> (w - k)) != 0;
-}
-
-template<nat_t w>
-constexpr bool shl_nsw(u64 u, unsigned k) {
-    static_assert(w >= 1 && w <= 64);
-    u = trunc<w>(u);
-    if (k == 0) return false;
-    if (k >= w) return sext<w>(u) != 0;
-    s64 a     = sext<w>(u);
-    u64 shift = w - 1 - k;
-    s64 top   = a >> shift;
-    return top != 0 && top != -1;
-}
-
-template<nat_t w>
-constexpr bool sdivrem(u64 u, u64 v) {
-    static_assert(w >= 1 && w <= 64);
-    s64 a = sext<w>(u);
-    s64 b = sext<w>(v);
-    if (b == 0) return true;
-
-    if constexpr (w == 64) {
-        return a == std::numeric_limits<s64>::min() && b == -1;
-    } else {
-        s64 smin = -(s64(1) << (w - 1));
-        return a == smin && b == -1;
-    }
-}
-
-template<nat_t w, icmp id>
-constexpr bool fold_icmp(u64 a, u64 b) {
-    static_assert(w >= 1 && w <= 64);
-
-    const u64 u   = trunc<w>(a);
-    const u64 v   = trunc<w>(b);
-    const bool su = sign<w>(u);
-    const bool sv = sign<w>(v);
-
-    flags_t rel = 0;
-    // clang-format off
-    if (false) {}
-    else if (u == v)     rel = icmp_mask & flags_t(icmp::xyglE);
-    else if (!su &&  sv) rel = icmp_mask & flags_t(icmp::Xygle);
-    else if ( su && !sv) rel = icmp_mask & flags_t(icmp::xYgle);
-    else if (u > v)      rel = icmp_mask & flags_t(icmp::xyGle);
-    else                 rel = icmp_mask & flags_t(icmp::xygLe);
-    // clang-format on
-
-    return (flags_t(id) & rel) != 0;
-}
-
-// clang-format off
-static_assert(trunc<8>(0x123) == 0x23);
-static_assert( sign<8>(0x80));
-static_assert(!sign<8>(0x7f));
-static_assert(sext<8>(0x80) == -128);
-static_assert(sext<8>(0xff) == -1);
-static_assert(sext<8>(0x7f) == 127);
-
-static_assert (add_nuw<8>(255, 1));
-static_assert (add_nsw<8>(127, 1));
-static_assert(!add_nsw<8>(  1, 2));
-
-static_assert(sub_nuw<8>(0, 1));
-static_assert(sub_nsw<8>(0x80, 1)); // -128 - 1
-
-static_assert( mul_nuw<8>(16, 16));
-static_assert( mul_nsw<8>(20, 20));
-static_assert( mul_nsw<8>(0x80, 0xff)); // -128 * -1 overflows
-static_assert(!mul_nsw<8>(0x80, 1));   // -128 * 1 ok
-static_assert(!mul_nsw<8>(0xff, 0xff)); // -1 * -1 ok
-static_assert(!mul_nsw<64>(u64(0), u64(123)));
-static_assert(!mul_nsw<64>(u64(1), u64(1)));
-static_assert(!mul_nsw<64>(u64(-1), u64(1)));
-static_assert( mul_nsw<64>(0x8000000000000000ull, 0xffffffffffffffffull)); // INT64_MIN * -1
-
-static_assert(!shl_nuw<8>(1, 7));
-static_assert( shl_nuw<8>(0x80, 1));
-static_assert( shl_nsw<8>(0x40, 1));
-static_assert(!shl_nuw<8>(0, 8));
-static_assert( shl_nuw<8>(1, 8));
-static_assert( shl_nsw<8>(1, 8));
-static_assert(!shl_nsw<8>(0, 8));
-
-static_assert( fold_icmp<3, icmp::e >(0b010, 0b010));
-static_assert( fold_icmp<3, icmp::ne>(0b010, 0b011));
-static_assert( fold_icmp<3, icmp::sg>(0b011, 0b100)); //  3 > -4
-static_assert( fold_icmp<3, icmp::ul>(0b011, 0b100)); //  3 <  4
-static_assert( fold_icmp<3, icmp::sl>(0b100, 0b011)); // -4 <  3
-static_assert( fold_icmp<3, icmp::t >(0b001, 0b111));
-static_assert(!fold_icmp<3, icmp::f >(0b001, 0b111));
-
-static_assert(!sdivrem<64>(0xffffffffffffffffull, 1)); // -1 / 1 ok
-static_assert( sdivrem<64>(0x8000000000000000ull, 0xffffffffffffffffull)); // INT64_MIN / -1 bad
-// clang-format on
-
-template<class Id, Id id, nat_t w>
-std::optional<u64> fold(u64 a, u64 b, [[maybe_unused]] bool nsw, [[maybe_unused]] bool nuw) {
-    static_assert(w >= 1 && w <= 64);
-
-    using ST = w2s<w>;
-    using UT = w2u<w>;
-
-    const u64 u = trunc<w>(a);
-    const u64 v = trunc<w>(b);
-
-    if constexpr (std::is_same_v<Id, wrap>) {
-        if constexpr (id == wrap::add) {
-            if constexpr (w == 1) {
-                return u64(bool(u ^ v));
-            } else {
-                if (nuw && add_nuw<w>(u, v)) return {};
-                if (nsw && add_nsw<w>(u, v)) return {};
-                return trunc<w>(u + v);
-            }
-        } else if constexpr (id == wrap::sub) {
-            if constexpr (w == 1) {
-                return u64(bool(u ^ v));
-            } else {
-                if (nuw && sub_nuw<w>(u, v)) return {};
-                if (nsw && sub_nsw<w>(u, v)) return {};
-                return trunc<w>(u - v);
-            }
-        } else if constexpr (id == wrap::mul) {
-            if constexpr (w == 1) {
-                return u64(bool(u & v));
-            } else {
-                if (nuw && mul_nuw<w>(u, v)) return {};
-                if (nsw && mul_nsw<w>(u, v)) return {};
-                return trunc<w>(u * v);
-            }
-        } else if constexpr (id == wrap::shl) {
-            if (b >= w) return {};
-            const unsigned k = static_cast<unsigned>(b);
-
-            if constexpr (w == 1) {
-                if (k != 0) return {};
-                return u64(bool(u));
-            } else {
-                if (nuw && shl_nuw<w>(u, k)) return {};
-                if (nsw && shl_nsw<w>(u, k)) return {};
-                return trunc<w>(u << k);
-            }
-        } else {
-            static_assert(false, "missing wrap subtag");
-        }
-    } else if constexpr (std::is_same_v<Id, shr>) {
-        if (b >= w) return {};
-        const unsigned k = static_cast<unsigned>(b);
-
-        if constexpr (id == shr::a)
-            if constexpr (w == 1)
-                return u64(bool(u));
-            else
-                return trunc<w>(static_cast<u64>(static_cast<ST>(sext<w>(u) >> k)));
-        else if constexpr (id == shr::l)
-            return trunc<w>(u >> k);
-        else
-            static_assert(false, "missing shr subtag");
-    } else if constexpr (std::is_same_v<Id, div>) {
-        if (v == 0) return {};
-
-        if constexpr (id == div::udiv) {
-            return trunc<w>(u / v);
-        } else if constexpr (id == div::urem) {
-            return trunc<w>(u % v);
-        } else if constexpr (id == div::sdiv) {
-            if (sdivrem<w>(u, v)) return {};
-            return trunc<w>(static_cast<u64>(static_cast<ST>(sext<w>(u) / sext<w>(v))));
-        } else if constexpr (id == div::srem) {
-            if (sdivrem<w>(u, v)) return {};
-            return trunc<w>(static_cast<u64>(static_cast<ST>(sext<w>(u) % sext<w>(v))));
-        } else {
-            static_assert(false, "missing div subtag");
-        }
-    } else if constexpr (std::is_same_v<Id, icmp>) {
-        return u64(fold_icmp<w, id>(u, v));
-    } else if constexpr (std::is_same_v<Id, extrema>) {
-        if constexpr (id == extrema::sm) {
-            UT uu = static_cast<UT>(u);
-            UT vv = static_cast<UT>(v);
-            return trunc<w>(static_cast<u64>(std::min(uu, vv)));
-        } else if constexpr (id == extrema::sM) {
-            UT uu = static_cast<UT>(u);
-            UT vv = static_cast<UT>(v);
-            return trunc<w>(static_cast<u64>(std::max(uu, vv)));
-        } else if constexpr (id == extrema::Sm) {
-            ST ss = static_cast<ST>(sext<w>(u));
-            ST tt = static_cast<ST>(sext<w>(v));
-            return trunc<w>(static_cast<u64>(std::min(ss, tt)));
-        } else if constexpr (id == extrema::SM) {
-            ST ss = static_cast<ST>(sext<w>(u));
-            ST tt = static_cast<ST>(sext<w>(v));
-            return trunc<w>(static_cast<u64>(std::max(ss, tt)));
-        } else {
-            static_assert(false, "missing extrema subtag");
-        }
-    } else {
-        static_assert(false, "missing tag");
-    }
-}
-
-// Note that @p a and @p b are passed by reference as fold also commutes if possible.
-template<class Id, Id id>
-const Def* fold(World& world, const Def* type, const Def*& a, const Def*& b, const Def* mode = {}) {
-    if (a->isa<Bot>() || b->isa<Bot>()) return world.bot(type);
-
-    if (auto la = Lit::isa(a)) {
-        if (auto lb = Lit::isa(b)) {
-            auto size  = Lit::as(Idx::isa(a->type()));
-            auto width = Idx::size2bitwidth(size);
-            bool nsw = false, nuw = false;
-            if constexpr (std::is_same_v<Id, wrap>) {
-                auto m = mode ? static_cast<Mode>(Lit::as(mode)) : Mode::none;
-                nsw    = fe::has_flag(m, Mode::nsw);
-                nuw    = fe::has_flag(m, Mode::nuw);
-            }
-
-            std::optional<u64> res;
-            switch (width) {
-#define CODE(i) \
-    case i: res = fold<Id, id, i>(*la, *lb, nsw, nuw); break;
-                MIM_1_8_16_32_64(CODE)
-#undef CODE
-                default:
-                    // TODO this is super rough but at least better than just bailing out
-                    res = fold<Id, id, 64>(*la, *lb, false, false);
-                    if (res && !std::is_same_v<Id, icmp>) *res %= size;
-            }
-
-            return res ? world.lit(type, *res) : world.bot(type);
-        }
-    }
-
-    if (::mim::is_commutative(id) && Def::greater(a, b)) std::swap(a, b);
-    return nullptr;
 }
 
 template<class Id, nat_t w>
@@ -765,7 +796,7 @@ const Def* normalize_wrap(const Def* type, const Def* c, const Def* arg) {
     auto s      = Idx::isa(a->type());
     auto ls     = Lit::isa(s);
 
-    if (auto result = fold<wrap, id>(world, type, a, b)) return result;
+    if (auto result = fold<wrap, id>(world, type, a, b, mode)) return result;
 
     // clang-format off
     if (auto la = Lit::isa(a)) {

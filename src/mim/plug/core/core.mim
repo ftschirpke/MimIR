@@ -45,6 +45,14 @@ axm %core.ncmp(gle = f, glE =  e, gLe =  l, gLE = le,
 /// This is per se neither signed nor unsigned.
 /// Instead, the operations themselves exhibit signed or unsigned behavior.
 ///
+/// For `Idx s`, **unsigned** interpretation is the canonical carrier order on the finite set / \f$ \{ 0, \dots, s-1 \} \f$.
+/// **Signed** interpretation is defined by choosing, for each residue class modulo \f$s\f$, / its canonical signed representative.
+/// Concretely, a value \f$x : \mathrm{Idx}\;s\f$ is considered non-negative iff / \f$ x \le \lfloor (s-1)/2 \rfloor \f$, and negative otherwise.
+/// Hence the signed range is
+/// \f$ \big[ -\lfloor s/2 \rfloor,\; \lceil s/2 \rceil - 1 \big] \f$.
+/// For powers of two, i.e. \f$ s = 2^w \f$, this coincides exactly with the usual
+/// \f$w\f$-bit two's-complement interpretation.
+///
 /// ### Mode
 ///
 /// A common problem when dealing with integer operations is [overflow](https://en.wikipedia.org/wiki/Integer_overflow).
@@ -78,6 +86,7 @@ axm %core.idx_unsafe: Nat → Idx ⊤:Nat, normalize_idx_unsafe;
 /// | neg    | o | x | negate                       |
 /// | id     | x | o | identity                     |
 /// | t      | x | x | always true                  |
+/// @todo Add ype constraint that bit1 is only allowed for powers of two.
 ///
 axm %core.bit1(f, neg, id, t): {s: Nat} → [m: Nat] → Idx s → Idx s, normalize_bit1;
 ///
@@ -103,6 +112,7 @@ axm %core.bit1(f, neg, id, t): {s: Nat} → [m: Nat] → Idx s → Idx s, normal
 /// | ciff   |  x |  x |  o |  x | converse implication         |
 /// | or_    |  x |  x |  x |  o | or                           |
 /// | t      |  x |  x |  x |  x | always true                  |
+/// @todo Add ype constraint that bit2 is only allowed for powers of two.
 ///
 axm %core.bit2( f,      nor, nciff, nfst, niff, nsnd, xor_, nand,
                 and_,  nxor,   snd,  iff,  fst, ciff,  or_,    t):
@@ -113,6 +123,7 @@ axm %core.bit2( f,      nor, nciff, nfst, niff, nsnd, xor_, nand,
 /// Shift right:
 ///     * [`a`rithmetic shift right](https://en.wikipedia.org/wiki/Arithmetic_shift)
 ///     * [`l`ogical shift right](https://en.wikipedia.org/wiki/Logical_shift)
+/// @todo Add ype constraint that shr is only allowed for powers of two.
 ///
 axm %core.shr(a, l): {s: Nat} → «2; Idx s» → Idx s, normalize_shr;
 ///
@@ -120,7 +131,7 @@ axm %core.shr(a, l): {s: Nat} → «2; Idx s» → Idx s, normalize_shr;
 ///
 /// Integer operations that may overflow.
 /// You can specify the desired behavior in the case of an overflow with the curried argument just in front of the actual argument by providing a mim::plug::core::Mode as `Nat`.
-///
+/// @todo Add ype constraint that shl is only allowed for powers of two.
 axm %core.wrap(add, sub, mul, shl): {s: Nat} → [m: Nat] → «2; Idx s» → Idx s, normalize_wrap;
 
 lam %core.minus {s: Nat} (m: Nat) (a: Idx s): Idx s = %core.wrap.sub m (0:(Idx s), a);
