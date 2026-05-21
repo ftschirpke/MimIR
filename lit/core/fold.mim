@@ -2,18 +2,18 @@
 plugin core;
 plugin refly;
 
-// word-domain wrap.add
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (250I8, 10I8), 4I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (0I8, 0I8), 0I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (255I8, 1I8), 0I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (127I8, 1I8), 128I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (128I8, 128I8), 0I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (1I8, 2I8), 3I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (255I8, 255I8), 254I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (0I1, 0I1), 0I1);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (0I1, 1I1), 1I1);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (1I1, 1I1), 0I1);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (18446744073709551615I64, 1I64), 0I64);
+ // word-domain wrap.add
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (250I8, 10I8), 4I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (0I8, 0I8), 0I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (255I8, 1I8), 0I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (127I8, 1I8), 128I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (128I8, 128I8), 0I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (1I8, 2I8), 3I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (255I8, 255I8), 254I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (0I1, 0I1), 0I1);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (0I1, 1I1), 1I1);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (1I1, 1I1), 0I1);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (18446744073709551615I64, 1I64), 0I64);
 
 // word-domain wrap.add with overflow modes
 let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.nuw (1I8, 2I8), 3I8);
@@ -27,13 +27,13 @@ let _ = %refly.check_bot (%core.wrap.add %core.mode.nsuw (255I8, 1I8));
 let _ = %refly.check_bot (%core.wrap.add %core.mode.nsuw (127I8, 1I8));
 
 // word-domain wrap.sub
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (7I8, 3I8), 4I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (0I8, 1I8), 255I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (0I8, 0I8), 0I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (128I8, 1I8), 127I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (1I1, 1I1), 0I1);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (0I1, 1I1), 1I1);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (0I64, 1I64), 18446744073709551615I64);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (7I8, 3I8), 4I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (0I8, 1I8), 255I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (0I8, 0I8), 0I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (128I8, 1I8), 127I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (1I1, 1I1), 0I1);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (0I1, 1I1), 1I1);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (0I64, 1I64), 18446744073709551615I64);
 
 // word-domain wrap.sub with overflow modes
 let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.nuw (7I8, 3I8), 4I8);
@@ -43,14 +43,14 @@ let _ = %refly.check_bot (%core.wrap.sub %core.mode.nuw (0I8, 1I8));
 let _ = %refly.check_bot (%core.wrap.sub %core.mode.nsw (128I8, 1I8));
 
 // word-domain wrap.mul
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (0I8, 123I8), 0I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (1I8, 123I8), 123I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (16I8, 16I8), 0I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (255I8, 255I8), 1I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (128I8, 2I8), 0I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (1I1, 1I1), 1I1);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (0I1, 1I1), 0I1);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (18446744073709551615I64, 2I64), 18446744073709551614I64);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (0I8, 123I8), 0I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (1I8, 123I8), 123I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (16I8, 16I8), 0I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (255I8, 255I8), 1I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (128I8, 2I8), 0I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (1I1, 1I1), 1I1);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (0I1, 1I1), 0I1);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (18446744073709551615I64, 2I64), 18446744073709551614I64);
 
 // word-domain wrap.mul with overflow modes
 let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.nuw (3I8, 5I8), 15I8);
@@ -62,14 +62,14 @@ let _ = %refly.check_bot (%core.wrap.mul %core.mode.nsw (20I8, 20I8));
 let _ = %refly.check_bot (%core.wrap.mul %core.mode.nsw (128I8, 255I8));
 
 // word-domain wrap.shl
-let _ = %refly.equiv.struc_eq (%core.wrap.shl %core.mode.us (1I8, 0I8), 1I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.shl %core.mode.us (1I8, 1I8), 2I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.shl %core.mode.us (1I8, 7I8), 128I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.shl %core.mode.us (128I8, 1I8), 0I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.shl %core.mode.us (255I8, 1I8), 254I8);
-let _ = %refly.equiv.struc_eq (%core.wrap.shl %core.mode.us (1I1, 0I1), 1I1);
+let _ = %refly.equiv.struc_eq (%core.wrap.shl 0 (1I8, 0I8), 1I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.shl 0 (1I8, 1I8), 2I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.shl 0 (1I8, 7I8), 128I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.shl 0 (128I8, 1I8), 0I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.shl 0 (255I8, 1I8), 254I8);
+let _ = %refly.equiv.struc_eq (%core.wrap.shl 0 (1I1, 0I1), 1I1);
 let _ = %refly.equiv.struc_eq (%core.wrap.shl %core.mode.nsw (255I8, 1I8), 254I8);
-let _ = %refly.check_bot (%core.wrap.shl %core.mode.us (1I8, 8I8));
+let _ = %refly.check_bot (%core.wrap.shl 0 (1I8, 8I8));
 let _ = %refly.check_bot (%core.wrap.shl %core.mode.nuw (128I8, 1I8));
 let _ = %refly.check_bot (%core.wrap.shl %core.mode.nsw (64I8, 1I8));
 let _ = %refly.check_bot (%core.wrap.shl %core.mode.nsw (64I8, 1I8));   // 64 -> 128 overflows signed
@@ -89,34 +89,6 @@ let _ = %refly.equiv.struc_eq (%core.shr.a (128I8, 1I8), 192I8);
 let _ = %refly.equiv.struc_eq (%core.shr.a (127I8, 1I8), 63I8);
 let _ = %refly.equiv.struc_eq (%core.shr.a (1I8, 1I8), 0I8);
 let _ = %refly.check_bot (%core.shr.a (1I8, 8I8));
-
-//lam foo (m: %mem.M 0): %mem.M 0 =
-//    /// word-domain div.udiv
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.udiv (m, (7I8, 2I8)), (m, 3I8));
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.udiv (m, (255I8, 2I8)), (m, 127I8));
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.udiv (m, (0I8, 7I8)), (m, 0I8));
-//    let (m, _) = %refly.check_bot (%core.div.udiv (m, (7I8, 0I8)));
-//
-//    /// word-domain div.urem
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.urem (m, (7I8, 2I8)), (m, 1I8));
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.urem (m, (255I8, 2I8)), (m, 1I8));
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.urem (m, (8I8, 2I8)), (m, 0I8));
-//    let (m, _) = %refly.check_bot (%core.div.urem (m, (7I8, 0I8)));
-//
-//    /// word-domain div.sdiv
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.sdiv (m, (254I8, 2I8)), (m, 255I8));
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.sdiv (m, (255I8, 2I8)), (m, 0I8));
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.sdiv (m, (127I8, 255I8)), (m, 129I8));
-//    let (m, _) = %refly.check_bot (%core.div.sdiv (m, (7I8, 0I8)));
-//    let (m, _) = %refly.check_bot (%core.div.sdiv (m, (128I8, 255I8)));
-//
-//    /// word-domain div.srem
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.srem (m, (254I8, 2I8)), (m, 0I8));
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.srem (m, (255I8, 2I8)), (m, 255I8));
-//    let (m, _) = %refly.equiv.struc_eq (%core.div.srem (m, (127I8, 255I8)), (m, 0I8));
-//    let (m, _) = %refly.check_bot (%core.div.srem (m, (7I8, 0I8)));
-//    let (m, _) = %refly.check_bot (%core.div.srem (m, (128I8, 255I8)));
-//    m;
 
 /// word-domain icmp basic
 let _ = %refly.equiv.struc_eq (%core.icmp.e  (42I8, 42I8), tt);
@@ -178,41 +150,33 @@ let _ = %refly.equiv.struc_eq (%core.extrema.smin (254I8, 255I8), 254I8);
 let _ = %refly.equiv.struc_eq (%core.extrema.smax (254I8, 255I8), 255I8);
 
 /// singleton Idx 1
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (0_1, 0_1), 0_1);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (0_1, 0_1), 0_1);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (0_1, 0_1), 0_1);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (0_1, 0_1), 0_1);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (0_1, 0_1), 0_1);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (0_1, 0_1), 0_1);
 let _ = %refly.equiv.struc_eq (%core.extrema.umin (0_1, 0_1), 0_1);
 let _ = %refly.equiv.struc_eq (%core.extrema.umax (0_1, 0_1), 0_1);
 let _ = %refly.equiv.struc_eq (%core.icmp.e  (0_1, 0_1), tt);
 let _ = %refly.equiv.struc_eq (%core.icmp.ne (0_1, 0_1), ff);
 let _ = %refly.equiv.struc_eq (%core.icmp.t  (0_1, 0_1), tt);
 let _ = %refly.equiv.struc_eq (%core.icmp.f  (0_1, 0_1), ff);
-//let _ = %refly.check_bot (%core.div.udiv (%mem.M 0, (0_1, 0_1)));
-//let _ = %refly.check_bot (%core.div.urem (%mem.M 0, (0_1, 0_1)));
-//let _ = %refly.check_bot (%core.div.sdiv (%mem.M 0, (0_1, 0_1)));
-//let _ = %refly.check_bot (%core.div.srem (%mem.M 0, (0_1, 0_1)));
 
 /// 64-bit signed overflow corner cases
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (9223372036854775807I64, 1I64), 9223372036854775808I64);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (9223372036854775807I64, 1I64), 9223372036854775808I64);
 let _ = %refly.check_bot (%core.wrap.add %core.mode.nsw (9223372036854775807I64, 1I64));
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (0I64, 1I64), 18446744073709551615I64);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (0I64, 1I64), 18446744073709551615I64);
 let _ = %refly.check_bot (%core.wrap.sub %core.mode.nsw (9223372036854775808I64, 1I64));
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (18446744073709551615I64, 18446744073709551615I64), 1I64);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (18446744073709551615I64, 18446744073709551615I64), 1I64);
 let _ = %refly.check_bot (%core.wrap.mul %core.mode.nsw (9223372036854775808I64, 18446744073709551615I64));
-//let _ = %refly.check_bot (%core.div.sdiv (%mem.M 0, (9223372036854775808I64, 18446744073709551615I64)));
-//let _ = %refly.check_bot (%core.div.srem (%mem.M 0, (9223372036854775808I64, 18446744073709551615I64)));
 
 /// non-power-of-two wrap arithmetic on Idx 5
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (4_5, 1_5), 0_5);
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (3_5, 4_5), 2_5);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (0_5, 1_5), 4_5);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (2_5, 4_5), 3_5);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (3_5, 4_5), 2_5);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (4_5, 1_5), 0_5);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (3_5, 4_5), 2_5);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (0_5, 1_5), 4_5);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (2_5, 4_5), 3_5);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (3_5, 4_5), 2_5);
 let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.nuw (1_5, 2_5), 3_5);
 let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.nuw (4_5, 2_5), 2_5);
 let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.nuw (2_5, 2_5), 4_5);
-//let _ = %refly.equiv.struc_eq (%core.div.udiv (%mem.M 0, (4_5, 2_5)), (%mem.M 0, 2_5));
-//let _ = %refly.equiv.struc_eq (%core.div.urem (%mem.M 0, (4_5, 3_5)), (%mem.M 0, 1_5));
 let _ = %refly.check_bot (%core.wrap.add %core.mode.nuw (4_5, 1_5));
 let _ = %refly.check_bot (%core.wrap.sub %core.mode.nuw (0_5, 1_5));
 let _ = %refly.check_bot (%core.wrap.mul %core.mode.nuw (3_5, 4_5));
@@ -221,9 +185,9 @@ let _ = %refly.check_bot (%core.wrap.mul %core.mode.nuw (3_5, 4_5));
 //let _ = %refly.check_bot (%core.wrap.mul %core.mode.nsw (1_5, 1_5));
 
 /// non-power-of-two arithmetic on Idx 10
-let _ = %refly.equiv.struc_eq (%core.wrap.add %core.mode.us (9_10, 1_10), 0_10);
-let _ = %refly.equiv.struc_eq (%core.wrap.sub %core.mode.us (0_10, 1_10), 9_10);
-let _ = %refly.equiv.struc_eq (%core.wrap.mul %core.mode.us (7_10, 8_10), 6_10);
+let _ = %refly.equiv.struc_eq (%core.wrap.add 0 (9_10, 1_10), 0_10);
+let _ = %refly.equiv.struc_eq (%core.wrap.sub 0 (0_10, 1_10), 9_10);
+let _ = %refly.equiv.struc_eq (%core.wrap.mul 0 (7_10, 8_10), 6_10);
 //let _ = %refly.equiv.struc_eq (%core.div.udiv (%mem.M 0, (9_10, 2_10)), (%mem.M 0, 4_10));
 //let _ = %refly.equiv.struc_eq (%core.div.urem (%mem.M 0, (9_10, 2_10)), (%mem.M 0, 1_10));
 
@@ -242,8 +206,61 @@ let _ = %refly.equiv.struc_eq (%core.icmp.ule (5_9, 8_9), tt);
 let _ = %refly.equiv.struc_eq (%core.icmp.uge (8_9, 5_9), tt);
 
 /// non-power-of-two unsupported signed/div/shift cases should bottom
-let _ = %refly.check_bot (%core.wrap.shl %core.mode.us (1_5, 1_5));
+let _ = %refly.check_bot (%core.wrap.shl 0 (1_5, 1_5));
 let _ = %refly.check_bot (%core.shr.l (4_5, 1_5));
 let _ = %refly.check_bot (%core.shr.a (4_5, 1_5));
-//let _ = %refly.check_bot (%core.div.sdiv (%mem.M 0, (4_5, 1_5)));
-//let _ = %refly.check_bot (%core.div.srem (%mem.M 0, (4_5, 1_5)));
+
+lam div_rem (m: %mem.M 0): %mem.M 0 =
+    /// word-domain div.udiv
+    let (m, _) = %refly.equiv.struc_eq (%core.div.udiv (m, (7I8, 2I8)), (m, 3I8));
+    let (m, _) = %refly.equiv.struc_eq (%core.div.udiv (m, (255I8, 2I8)), (m, 127I8));
+    let (m, _) = %refly.equiv.struc_eq (%core.div.udiv (m, (0I8, 7I8)), (m, 0I8));
+    let (m, r) = %core.div.udiv (m, (7I8, 0I8));
+    let _= %refly.check_bot r;
+
+    /// word-domain div.urem
+    let (m, _) = %refly.equiv.struc_eq (%core.div.urem (m, (7I8, 2I8)), (m, 1I8));
+    let (m, _) = %refly.equiv.struc_eq (%core.div.urem (m, (255I8, 2I8)), (m, 1I8));
+    let (m, _) = %refly.equiv.struc_eq (%core.div.urem (m, (8I8, 2I8)), (m, 0I8));
+    let (m, r) = %core.div.urem (m, (7I8, 0I8));
+    let _ = %refly.check_bot r;
+
+    /// word-domain div.sdiv
+    let (m, _) = %refly.equiv.struc_eq (%core.div.sdiv (m, (254I8, 2I8)), (m, 255I8));
+    let (m, _) = %refly.equiv.struc_eq (%core.div.sdiv (m, (255I8, 2I8)), (m, 0I8));
+    let (m, _) = %refly.equiv.struc_eq (%core.div.sdiv (m, (127I8, 255I8)), (m, 129I8));
+    let (m, r) = %core.div.sdiv (m, (7I8, 0I8));
+    let (m, s) = %core.div.sdiv (m, (128I8, 255I8));
+    let _ = %refly.check_bot r;
+    let _ = %refly.check_bot s;
+
+    /// word-domain div.srem
+    let (m, _) = %refly.equiv.struc_eq (%core.div.srem (m, (254I8, 2I8)), (m, 0I8));
+    let (m, _) = %refly.equiv.struc_eq (%core.div.srem (m, (255I8, 2I8)), (m, 255I8));
+    let (m, _) = %refly.equiv.struc_eq (%core.div.srem (m, (127I8, 255I8)), (m, 0I8));
+    let (m, r) = %core.div.srem (m, (7I8, 0I8));
+    let (m, s) = %core.div.srem (m, (128I8, 255I8));
+    let _ = %refly.check_bot r;
+    let _ = %refly.check_bot s;
+
+    // non-power-of-two indices
+    let _ = %refly.equiv.struc_eq (%core.div.udiv (m, (4_5, 2_5)), (m, 2_5));
+    let _ = %refly.equiv.struc_eq (%core.div.urem (m, (4_5, 3_5)), (m, 1_5));
+
+    // Idx 1
+    let (m, r) = %core.div.udiv (m, (0_1, 0_1));
+    let (m, s) = %core.div.urem (m, (0_1, 0_1));
+    let (m, t) = %core.div.sdiv (m, (0_1, 0_1));
+    let (m, u) = %core.div.srem (m, (0_1, 0_1));
+    let _ = %refly.check_bot r;
+    let _ = %refly.check_bot s;
+    let _ = %refly.check_bot t;
+    let _ = %refly.check_bot u;
+
+    // I64 edge case
+    let (m, r) = %core.div.sdiv (m, (9223372036854775808I64, 18446744073709551615I64));
+    let (m, s) = %core.div.srem (m, (9223372036854775808I64, 18446744073709551615I64));
+    let _ = %refly.check_bot r;
+    let _ = %refly.check_bot s;
+
+    m;
