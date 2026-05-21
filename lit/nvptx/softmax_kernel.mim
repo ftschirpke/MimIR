@@ -11,9 +11,12 @@ import math;
 import mem;
 import print;
 
-let blockSize = 512;
-let gridSize = 8192;
-let size = %core.nat.mul (gridSize, blockSize);
+let size = 1073741824;  // 2^30
+let blockSize = 1024;   // 2^10
+let gridSize = 128;     // 2^7
+
+let n = 4096;           // 2^12
+let c = 262144;         // 2^18
 
 let fp_1 = 0x3f800000:%math.F32;
 let fp_0_25 = 0x3e800000:%math.F32;
@@ -189,8 +192,8 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
     let (m0, m1, d_in) = %gpu.alloc_copy.block (m0, m1, h_in);
     let (m0, m1, d_out) = %gpu.alloc_copy.block (m0, m1, h_out);
 
-    let (m0, n) = %core.div.sdiv (m0, (%core.bitcast I32 gridSize, 32I32));
-    let c = %core.bitcast I32 blockSize;
+    let n = %core.bitcast I32 n;
+    let c = %core.bitcast I32 c;
 
     ret m0 = %gpu.launch (gridSize, blockSize, %gpu.default_stream, ff, 0, (), (), ())
              softmax_kernel (d_out, d_in, n, c) $ m0;

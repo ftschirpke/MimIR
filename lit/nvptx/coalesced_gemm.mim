@@ -24,8 +24,8 @@ con gemm_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.L
                  (out: %gpu.GlobalPtr «size; %math.F32»,
                  in1: %gpu.GlobalPtr «size; %math.F32», in2: %gpu.GlobalPtr «size; %math.F32»),
                  return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
-    let cid = %core.bitcast I32 group_id;
-    let rid = %core.bitcast I32 item_id;
+    let rid = %core.bitcast I32 group_id;
+    let cid = %core.bitcast I32 item_id;
 
     let id = %core.bitcast I32 (
         %core.wrap.add 0 (%core.wrap.mul 0 (rid, n_i32), cid)
