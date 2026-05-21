@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
             | lyra::opt(flags.force_load                   )      ["--force-load"           ]("Load plugins even on version mismatch.")
             | lyra::opt(flags.ascii                        )["-a"]["--ascii"                ]("Use ASCII alternatives in output instead of UTF-8.")
             | lyra::opt(flags.bootstrap                    )      ["--bootstrap"            ]("Puts mim into \"bootstrap mode\". This means a 'plugin' directive has the same effect as an 'import' and will not load a library. In addition, no standard plugins will be loaded.")
-            | lyra::opt(sexpr_include_types                )      ["--sexpr-include-types"  ]("Wraps every symbolic expression term in a type annotation")
+            | lyra::opt(sexpr_include_types                )      ["--sexpr-include-types"  ]("Wraps symbolic expression terms in a type annotation. Types will not be wrapped in type annotations.")
             | lyra::opt(dot_follow_types                   )      ["--dot-follow-types"     ]("Follow type dependencies in DOT output.")
             | lyra::opt(dot_all_annexes                    )      ["--dot-all-annexes"      ]("Output all annexes - even if unused - in DOT output.")
             | lyra::opt(flags.dump_recursive               )      ["--dump-recursive"       ]("Dumps Mim program with a simple recursive algorithm that is not readable again from Mim but is less fragile and also works for broken Mim programs.")

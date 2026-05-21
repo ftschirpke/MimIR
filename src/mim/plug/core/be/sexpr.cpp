@@ -403,7 +403,7 @@ void Emitter::emit_lam(Lam* lam, LamSet& rec_lams) {
     --tab;
 
     // Close type annotation '@'
-    if (typed()) print(func_impls_, ")");
+    if (typed()) std::print(func_impls_, ")");
 
     if (slotted()) {
         --tab;
@@ -899,7 +899,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         fe::unreachable();
     }
 
-    if (typed()) print(os, ")");
+    if (typed()) std::print(os, ")");
     --tab;
 
     return os.str();

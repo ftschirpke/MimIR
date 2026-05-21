@@ -387,6 +387,8 @@ public:
     /// @name Sigma
     ///@{
     Sigma* mut_sigma(const Def* type, size_t size) {
+        // Ensures that the corresponding @p size literal exists in the world
+        // and may be accessed even if the world is in a frozen state.
         lit_nat(size);
         return insert<Sigma>(type, size);
     }
