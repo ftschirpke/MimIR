@@ -607,7 +607,7 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             auto var_val = slotted() ? id(var) : "(var " + id(var) + " nil)";
             std::print(os, "(arr {} {})", var_val, scope_wrap(arr_val));
         } else {
-            auto dummy_var = slotted() ? "$dummy" : "(var dummy nil)";
+            auto dummy_var = slotted() ? "$dummy" : "(var dummy)";
             std::print(os, "(arr {} {})", dummy_var, scope_wrap(arr_val));
         }
 
@@ -618,7 +618,7 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             auto var_val = slotted() ? id(var) : "(var " + id(var) + " nil)";
             std::print(os, "(pi {} {})", var_val, scope_wrap(doms));
         } else {
-            auto dummy_var = slotted() ? "$dummy" : "(var dummy nil)";
+            auto dummy_var = slotted() ? "$dummy" : "(var dummy)";
             std::print(os, "(pi {} {})", dummy_var, scope_wrap(doms));
         }
 
@@ -632,7 +632,7 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             auto var_val = slotted() ? id(var) : "(var " + id(var) + " nil)";
             std::print(os, "(sigma {} {})", var_val, scope_wrap(op_vals.str()));
         } else {
-            auto dummy_var = slotted() ? "$dummy" : "(var dummy nil)";
+            auto dummy_var = slotted() ? "$dummy" : "(var dummy)";
             std::print(os, "(sigma {} {})", dummy_var, scope_wrap(op_vals.str()));
         }
 
@@ -732,7 +732,7 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
                 = std::format("\n{}{}", tab, (slotted() ? id(var) + " (scope" : "(var " + id(var) + " nil)"));
             op_vals.push_back(var_val);
         } else {
-            std::string var_val = std::format("\n{}{}", tab, (slotted() ? "$dummy (scope" : "(var dummy nil)"));
+            std::string var_val = std::format("\n{}{}", tab, (slotted() ? "$dummy (scope" : "(var dummy)"));
             op_vals.push_back(var_val);
         }
         --tab;
