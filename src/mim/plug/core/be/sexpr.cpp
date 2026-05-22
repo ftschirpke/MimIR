@@ -126,6 +126,10 @@ public:
     std::string emit_bb(BB& bb, const Def* def);
 
 private:
+    // A Def that has a name can be considered to be bound to a variable.
+    // Defs that are unbound will be printed inline (by definition)
+    bool is_bound(const Def* def) const { return !def->sym().empty(); }
+
     std::string id(const Def*, bool is_var_use = false) const;
     std::string indent(size_t tabs, std::string term);
     std::string flatten(std::string term);
@@ -300,7 +304,7 @@ std::string Emitter::prepare() { return root()->unique_name(); }
 
 void Emitter::emit_epilogue(Lam* lam) {
     auto& bb = lam2bb_[lam];
-    if (!lam->sym().empty()) bb.tail("{}", emit(lam->body()));
+    if (is_bound(lam)) bb.tail("{}", emit(lam->body()));
 }
 
 void Emitter::finalize() {
@@ -315,7 +319,7 @@ void Emitter::finalize() {
 
     LamSet rec_lams;
     auto root_lam = nest().root()->mut()->as_mut<Lam>();
-    if (!root_lam->sym().empty()) emit_lam(root_lam, rec_lams);
+    if (is_bound(root_lam)) emit_lam(root_lam, rec_lams);
 }
 
 std::set<Lam*> Emitter::next_lams(Lam* lam) {
@@ -324,7 +328,7 @@ std::set<Lam*> Emitter::next_lams(Lam* lam) {
         for (auto mut : op->local_muts())
             if (auto next = nest()[mut]) {
                 // Unnamed lams will be printed inline
-                if (auto next_lam = next->mut()->isa<Lam>(); !next_lam->sym().empty()) next_lams.insert(next_lam);
+                if (auto next_lam = next->mut()->isa<Lam>(); is_bound(next_lam)) next_lams.insert(next_lam);
             }
     }
     return next_lams;
@@ -753,7 +757,7 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
     for (auto op : def->ops())
         if (auto op_val = emit_bb(bb, op); !op_val.empty()) op_vals.push_back(op_val);
 
-    if (!def->sym().empty() && bindings_enabled()) {
+    if (is_bound(def) && bindings_enabled()) {
         bb.assign(tab, slotted(), id(def), [&](fe::Tab tab, auto& os) {
             ++tab;
             if (typed()) std::print(os, "\n{}(@ {}", tab, type_val);
@@ -810,7 +814,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
     if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, def->type()));
 
     if (auto lam = def->isa<Lam>()) {
-        if (!lam->sym().empty())
+        if (is_bound(lam))
             std::print(os, "\n{}{}", tab, id(lam, true));
         else {
             auto lam_kind = Lam::isa_returning(lam) ? "fun" : Lam::isa_cn(lam) ? "con" : "lam";
@@ -866,7 +870,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         emit_decl(bb, axm);
 
     } else if (auto bot = def->isa<Bot>()) {
-        if (bot->sym().empty())
+        if (!is_bound(bot))
             std::print(os, "\n{}(bot {})", tab, emit_type(bb, bot->type()));
         else {
             bb.assign(tab, slotted(), id(bot), "(bot {})", emit_type(bb, bot->type()));
@@ -874,7 +878,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         }
 
     } else if (auto top = def->isa<Top>()) {
-        if (top->sym().empty())
+        if (!is_bound(top))
             std::print(os, "\n{}(top {})", tab, emit_type(bb, top->type()));
         else {
             bb.assign(tab, slotted(), id(top), "(top {})", emit_type(bb, top->type()));
