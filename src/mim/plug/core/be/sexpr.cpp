@@ -384,7 +384,7 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
 
     // Lambdas that are not bound to a variable will be printed inline.
     // I.e. their definition will simply be emitted in place as in (app (lm x.x) 2)
-    // Those that are bound to a variable will be emitted here.
+    // Only the lambdas that are bound to a variable will be emitted here.
     const bool EMIT = is_bound(curr) && !parent_bb.is_assigned(id(curr));
     // A lambda nested inside of a top-level lambda will be wrapped with a let-binding
     // as in (root (lam x (let child (lam y y) (app child x))))
@@ -396,21 +396,19 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
     }
 
     ++tab;
-    // Keeps count of parentheses opened by let-bindings that need to be closed later on
-    int unclosed_parens = 0;
     for (auto next_lam : next_lams(curr)) {
         if (!rec_lams.contains(next_lam)) {
-            // The parent of the next lam shall be the parent of the current lam
+            // The parent of the next lam will be the parent of the current lam
             // if the current lam doesn't get emitted (is inline). This way we maintain
             // a correct child-parent relation between actually emitted lambdas.
             auto next_parent = EMIT ? curr : parent;
             emit_lam(next_parent, next_lam, rec_lams);
-            // A lambda-binding in slotted opens two parentheses, one for the 'let' and one for the let 'scope'
-            unclosed_parens += slotted() ? 2 : 1;
         }
     }
 
     if (EMIT) {
+        int unclosed_parens = 0;
+
         for (auto& term : bb.body()) {
             auto opened = std::ranges::count(term.str(), '(');
             auto closed = std::ranges::count(term.str(), ')');
@@ -420,10 +418,10 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
 
         for (auto& term : bb.tail())
             std::print(func_impls_, "{}", indent(tab.indent(), term.str()));
-    }
 
-    std::string closing_parens(unclosed_parens, ')');
-    std::print(func_impls_, "{}", closing_parens);
+        std::string closing_parens(unclosed_parens, ')');
+        std::print(func_impls_, "{}", closing_parens);
+    }
     --tab;
 
     if (EMIT) {
@@ -437,6 +435,8 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
                 --tab;
                 // Close 'lam' and lam var 'scope'
                 std::print(func_impls_, "))");
+                // Close the 'let' and let 'scope' at the end of the parent lambdas' definition.
+                parent_bb.tail("))");
             } else {
                 // Close 'root', 'lam' and lam var 'scope'
                 std::print(func_impls_, ")))\n\n");
@@ -444,8 +444,12 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
 
         } else if (NESTED) {
             --tab;
+            // Close 'lam'
             std::print(func_impls_, ")");
+            // Close the 'let' at the end of the parent lambdas' definition.
+            parent_bb.tail(")");
         } else {
+            // Close 'lam'
             std::print(func_impls_, ")\n\n");
         }
     }
