@@ -33,8 +33,8 @@ struct BB {
 
     template<class... Args>
     std::string assign(fe::Tab tab, bool slotted, std::string name, std::format_string<Args...> s, Args&&... args) {
-        if (!assigned.contains(name)) {
-            assigned.insert(name);
+        if (!is_assigned(name)) {
+            assign(name);
             auto& os = body().emplace_back();
             if (slotted) {
                 std::print(os, "\n{}(let", tab);
@@ -60,8 +60,8 @@ struct BB {
 
     template<class Fn>
     std::string assign(fe::Tab tab, bool slotted, std::string name, Fn&& print_term) {
-        if (!assigned.contains(name)) {
-            assigned.insert(name);
+        if (!is_assigned(name)) {
+            assign(name);
             auto& os = body().emplace_back();
             if (slotted) {
                 std::print(os, "\n{}(let", tab);
@@ -85,6 +85,9 @@ struct BB {
         using std::swap;
         swap(a.parts, b.parts);
     }
+
+    bool is_assigned(std::string name) const { return assigned.contains(name); }
+    void assign(std::string name) { assigned.insert(name); }
 
     std::array<std::deque<std::ostringstream>, 3> parts;
     std::set<std::string> assigned;
@@ -376,17 +379,21 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
     auto lam_node = nest()[curr];
     if (lam_node->is_directly_recursive() || lam_node->is_mutually_recursive()) rec_lams.emplace(curr);
     assert(lam2bb_.contains(curr));
-    auto& bb = lam2bb_[curr];
+    auto& bb        = lam2bb_[curr];
+    auto& parent_bb = lam2bb_[parent];
 
     // Lambdas that are not bound to a variable will be printed inline.
     // I.e. their definition will simply be emitted in place as in (app (lm x.x) 2)
     // Those that are bound to a variable will be emitted here.
-    const bool EMIT = is_bound(curr);
+    const bool EMIT = is_bound(curr) && !parent_bb.is_assigned(id(curr));
     // A lambda nested inside of a top-level lambda will be wrapped with a let-binding
     // as in (root (lam x (let child (lam y y) (app child x))))
     const bool NESTED = curr != root();
 
-    if (EMIT) std::print(func_impls_, "{}", emit_head(bb, curr, NESTED));
+    if (EMIT) {
+        parent_bb.assign(id(curr));
+        std::print(func_impls_, "{}", emit_head(bb, curr, NESTED));
+    }
 
     ++tab;
     // Keeps count of parentheses opened by let-bindings that need to be closed later on
