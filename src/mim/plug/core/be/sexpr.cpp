@@ -834,7 +834,6 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
 
     if (def->isa_imm<Lam>()) {
         assert("false" && "TODO immutable lam inline");
-
     } else if (auto lam = def->isa_mut<Lam>()) {
         if (is_bound(lam))
             std::print(os, "\n{}{}", tab, id(lam, true));
@@ -842,8 +841,8 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
             auto lam_kind = Lam::isa_returning(lam) ? "fun" : Lam::isa_cn(lam) ? "con" : "lam";
             if (slotted()) {
                 std::print(os, "\n{}({}", tab, lam_kind);
+                std::print(os, "{}", emit_var(bb, lam->var(), lam->var()->type()));
                 ++tab;
-                std::print(os, "\n{}{}", tab, emit_var(bb, lam->var(), lam->var()->type()));
                 std::print(os, "\n{}(scope", tab);
                 std::print(os, "{}", emit_bb(bb, lam->filter()));
                 std::print(os, "{}", emit_bb(bb, lam->body()));
@@ -862,7 +861,6 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
                 std::print(os, ")");
             }
         }
-
     } else if (auto lit = def->isa<Lit>()) {
         if (lit->type()->isa<Nat>())
             std::print(os, "\n{}(lit {} Nat)", tab, lit);
@@ -873,32 +871,45 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
                 std::print(os, "\n{}(lit {} {})", tab, lit->get(), emit_type(bb, lit->type()));
         else
             std::print(os, "\n{}(lit {} {})", tab, lit->get(), emit_type(bb, lit->type()));
-
     } else if (auto tuple = def->isa<Tuple>()) {
         std::print(os, "{}", emit_node(bb, tuple, "tuple", true));
-
     } else if (auto pack = def->isa<Pack>()) {
         std::print(os, "{}", emit_node(bb, pack, "pack"));
-
     } else if (auto extract = def->isa<Extract>()) {
         if (!slotted() && ((Lit::isa(extract->index()) && extract->tuple()->isa<Var>()) || isa_nested_proj(extract)))
             std::print(os, "\n{}{}", tab, id(extract));
         else
             std::print(os, "{}", emit_node(bb, extract, "extract"));
-
     } else if (auto insert = def->isa<Insert>()) {
         std::print(os, "{}", emit_node(bb, insert, "insert"));
-
     } else if (auto var = def->isa<Var>()) {
         std::print(os, "\n{}{}", tab, id(var, true));
 
     } else if (auto app = def->isa<App>()) {
-        std::print(os, "{}", emit_node(bb, app, "app"));
+        // auto [callee, args] = app->uncurry();
 
+        // std::vector<size_t> implicit_idxs;
+        // auto arg_idx = 0;
+        // auto curr_pi = callee->type();
+        // while (curr_pi->isa<Pi>()) {
+        //     if (Pi::isa_implicit(curr_pi)) implicit_idxs.push_back(arg_idx);
+        //     arg_idx++;
+        //     curr_pi = curr_pi->as<Pi>()->codom();
+        // }
+
+        // std::print(os, "\n{}(app", tab);
+        // ++tab;
+        // std::print(os, "\n{}{}", tab, callee);
+        // for (auto& arg : args) {
+        //     std::print(os, "\n{}{}", tab, emit_bb(bb, arg));
+        //     if (&arg != &args.back()) std::print(os, "\n{}(app", tab);
+        // }
+        // --tab;
+
+        std::print(os, "{}", emit_node(bb, app, "app"));
     } else if (auto axm = def->isa<Axm>()) {
         std::print(os, "\n{}{}", tab, id(axm));
         emit_decl(bb, axm);
-
     } else if (auto bot = def->isa<Bot>()) {
         if (!is_bound(bot))
             std::print(os, "\n{}(bot {})", tab, emit_type(bb, bot->type()));
@@ -906,7 +917,6 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
             bb.assign(tab, slotted(), id(bot), "(bot {})", emit_type(bb, bot->type()));
             std::print(os, "\n{}{}", tab, id(bot, true));
         }
-
     } else if (auto top = def->isa<Top>()) {
         if (!is_bound(top))
             std::print(os, "\n{}(top {})", tab, emit_type(bb, top->type()));
@@ -914,10 +924,8 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
             bb.assign(tab, slotted(), id(top), "(top {})", emit_type(bb, top->type()));
             std::print(os, "\n{}{}", tab, id(top, true));
         }
-
     } else if (def->isa_imm<Rule>()) {
         assert("false" && "TODO no vars in immutable Rule");
-
     } else if (auto rule = def->isa_mut<Rule>()) {
         // Rules should not have type annotations anywhere and just toggling annotations
         // won't be enough to ensure that because they might be toggled on again via arr in emit_type
@@ -934,16 +942,12 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         std::print(os, "\n{}{}", tab, id(rule, true));
         std::print(decls_, "(rule {} {} {} {} {})\n\n", indent(1, id(rule)), indent(1, meta_var_val),
                    indent(1, lhs_val), indent(1, rhs_val), indent(1, guard_val));
-
     } else if (auto inj = def->isa<Inj>()) {
         std::print(os, "{}", emit_node(bb, inj, "inj", false, true));
-
     } else if (auto merge = def->isa<Merge>()) {
         std::print(os, "{}", emit_node(bb, merge, "merge", true, true));
-
     } else if (auto match = def->isa<Match>()) {
         std::print(os, "{}", emit_node(bb, match, "match", true));
-
     } else if (auto proxy = def->isa<Proxy>()) {
         std::print(os, "{}", emit_node(bb, proxy, "proxy", true, true));
     } else {
