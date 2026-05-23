@@ -395,7 +395,6 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
         std::print(func_impls_, "{}", emit_head(bb, curr, NESTED));
     }
 
-    ++tab;
     for (auto next_lam : next_lams(curr)) {
         if (!rec_lams.contains(next_lam)) {
             // The parent of the next lam will be the parent of the current lam
@@ -409,6 +408,7 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
     if (EMIT) {
         int unclosed_parens = 0;
 
+        ++tab;
         for (auto& term : bb.body()) {
             auto opened = std::ranges::count(term.str(), '(');
             auto closed = std::ranges::count(term.str(), ')');
@@ -418,13 +418,11 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
 
         for (auto& term : bb.tail())
             std::print(func_impls_, "{}", indent(tab.indent(), term.str()));
+        --tab;
 
         std::string closing_parens(unclosed_parens, ')');
         std::print(func_impls_, "{}", closing_parens);
-    }
-    --tab;
 
-    if (EMIT) {
         // Close type annotation '@'
         if (typed()) std::print(func_impls_, ")");
 
