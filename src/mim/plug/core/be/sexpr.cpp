@@ -673,7 +673,10 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             std::print(os, "(tuple {})",
                        fe::Join(tuple->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto app = type->isa<App>()) {
-        std::print(os, "(app {} {})", emit_type(bb, app->callee()), emit_type(bb, app->arg()));
+        if (Pi::isa_implicit(app->callee()->type()))
+            std::print(os, "{}", emit_type(bb, app->callee()));
+        else
+            std::print(os, "(app {} {})", emit_type(bb, app->callee()), emit_type(bb, app->arg()));
     } else if (auto axm = type->isa<Axm>()) {
         std::print(os, "{}", id(axm));
         emit_decl(bb, axm);
