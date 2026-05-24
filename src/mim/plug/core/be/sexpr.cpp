@@ -642,14 +642,15 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
         }
 
     } else if (auto pi = type->isa<Pi>()) {
-        std::string doms = emit_type(bb, pi->dom()) + " " + emit_type(bb, pi->codom());
+        std::string pi_kind = Pi::isa_implicit(pi) ? "pi*" : "pi";
+        std::string doms    = emit_type(bb, pi->dom()) + " " + emit_type(bb, pi->codom());
 
         if (auto var = pi->has_var()) {
             auto var_val = slotted() ? id(var) : "(var " + id(var) + " nil)";
-            std::print(os, "(pi {} {})", var_val, scope_wrap(doms));
+            std::print(os, "({} {} {})", pi_kind, var_val, scope_wrap(doms));
         } else {
             auto dummy_var = slotted() ? "$dummy" : "(var dummy)";
-            std::print(os, "(pi {} {})", dummy_var, scope_wrap(doms));
+            std::print(os, "({} {} {})", pi_kind, dummy_var, scope_wrap(doms));
         }
 
     } else if (auto sigma = type->isa<Sigma>()) {
