@@ -98,15 +98,8 @@ constexpr bool idx_mul_nsw(u64 size, u64 a, u64 b) {
 
     if (x == 0 || y == 0) return false;
 
-    const s64 min_val = [&] {
-        if (size == 0) return std::numeric_limits<s64>::min();
-        return -static_cast<s64>(size / 2);
-    }();
-
-    const s64 max_val = [&] {
-        if (size == 0) return std::numeric_limits<s64>::max();
-        return static_cast<s64>((size - 1) / 2);
-    }();
+    const s64 min_val = size == 0 ? std::numeric_limits<s64>::min() : -static_cast<s64>(size / 2);
+    const s64 max_val = size == 0 ? std::numeric_limits<s64>::max() : static_cast<s64>((size - 1) / 2);
 
     if (x == -1) return y == min_val;
     if (y == -1) return x == min_val;
@@ -236,17 +229,14 @@ constexpr bool fold_icmp_idx(u64 size, u64 a, u64 b) {
     const bool sv = idx_sign(size, b);
 
     flags_t rel = 0;
-    if (false) {
-    } else if (a == b)
-        rel = icmp_mask & flags_t(icmp::xyglE);
-    else if (!su && sv)
-        rel = icmp_mask & flags_t(icmp::Xygle);
-    else if (su && !sv)
-        rel = icmp_mask & flags_t(icmp::xYgle);
-    else if (a > b)
-        rel = icmp_mask & flags_t(icmp::xyGle);
-    else
-        rel = icmp_mask & flags_t(icmp::xygLe);
+    // clang-format off
+    if (false) {}
+    else if (a == b)     rel = icmp_mask & flags_t(icmp::xyglE); // equal
+    else if (!su &&  sv) rel = icmp_mask & flags_t(icmp::Xygle); // plus, minus
+    else if ( su && !sv) rel = icmp_mask & flags_t(icmp::xYgle); // minus, plus
+    else if (a > b)      rel = icmp_mask & flags_t(icmp::xyGle); // greater (same sign)
+    else rel = icmp_mask & flags_t(icmp::xygLe);                 // less (same sign)
+    // clang-format on
 
     return (flags_t(id) & rel) != 0;
 }
