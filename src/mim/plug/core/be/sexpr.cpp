@@ -308,12 +308,13 @@ void Emitter::emit_imported(Lam* lam) {
 std::string Emitter::prepare() { return root()->unique_name(); }
 
 void Emitter::emit_epilogue(Lam* lam) {
+    if (root()->sym().str().starts_with("internal_")) return;
     auto& bb = lam2bb_[lam];
     if (is_bound(lam)) bb.tail("{}", emit(lam->body()));
 }
 
 void Emitter::finalize() {
-    if (root()->sym().str() == "_fallback_compile") return;
+    if (root()->sym().str().starts_with("internal_")) return;
     // We don't want to emit config lams that define which rules should be emitted.
     // The rules in the body of such a lambda will be emitted into decls_
     // via emit_bb() but we don't want to emit the lambda itself.
@@ -689,7 +690,7 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
     } else if (auto var = type->isa<Var>()) {
         std::print(os, "{}", id(var, true));
     } else if (auto hole = type->isa<Hole>()) {
-        std::print(os, "(hole {})", id(hole));
+        std::print(os, "(hole {})", emit_type(bb, hole->type()));
     } else if (auto extract = type->isa<Extract>()) {
         std::print(os, "(extract {} {})", emit_type(bb, extract->tuple()), emit_type(bb, extract->index()));
     } else if (auto mType = type->isa<Type>()) {
