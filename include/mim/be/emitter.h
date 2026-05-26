@@ -7,8 +7,8 @@
 
 namespace mim {
 
-template<class Value, class Type, class BB, class Child>
-class Emitter : public NestPhase<Lam> {
+template<class Value, class Type, class BB, class Child, bool ScheduleRoots = false>
+class Emitter : public NestPhase<Lam, ScheduleRoots> {
 private:
     constexpr const Child& child() const { return *static_cast<const Child*>(this); }
     constexpr Child& child() { return *static_cast<Child*>(this); }
@@ -25,8 +25,10 @@ public:
 
 protected:
     Emitter(World& world, std::string name, std::ostream& ostream)
-        : NestPhase(world, std::move(name), false)
+        : NestPhase<Lam, ScheduleRoots>(world, std::move(name), false)
         , ostream_(ostream) {}
+
+    using NestPhase<Lam, ScheduleRoots>::root;
 
     virtual bool direct_style() { return false; }
 

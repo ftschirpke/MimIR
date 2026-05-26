@@ -383,8 +383,9 @@ private:
 /// Transitively visits all *reachable*, [*closed*](@ref Def::is_closed) mutables in the World.
 /// * Select with `elide_empty` whether you want to visit trivial mutables without body.
 /// * If you are only interested in specific mutables, you can pass this to @p M.
+/// * If the mutables should be scheduled first to ensure a correct order of dependencies, pass @p Schedule.
 /// @see @ref phases_closed_mut_phase
-template<class M = Def>
+template<class M = Def, bool Schedule = false>
 class ClosedMutPhase : public Phase {
 public:
     ClosedMutPhase(World& world, std::string name, bool elide_empty)
@@ -398,7 +399,7 @@ public:
 
 protected:
     void start() override {
-        world().template for_each<M>(elide_empty(), [this](M* mut) { root_ = mut, visit(mut); });
+        world().template for_each<M, Schedule>(elide_empty(), [this](M* mut) { root_ = mut, visit(mut); });
     }
     virtual void visit(M*) = 0;
     M* root() const { return root_; }
@@ -410,13 +411,13 @@ private:
 
 /// Like ClosedMutPhase but computes a Nest for each NestPhase::visit.
 /// @see @ref phases_nest_phase
-template<class M = Def>
-class NestPhase : public ClosedMutPhase<M> {
+template<class M = Def, bool Schedule = false>
+class NestPhase : public ClosedMutPhase<M, Schedule> {
 public:
     NestPhase(World& world, std::string name, bool elide_empty)
-        : ClosedMutPhase<M>(world, std::move(name), elide_empty) {}
+        : ClosedMutPhase<M, Schedule>(world, std::move(name), elide_empty) {}
     NestPhase(World& world, flags_t annex, bool elide_empty)
-        : ClosedMutPhase<M>(world, annex, elide_empty) {}
+        : ClosedMutPhase<M, Schedule>(world, annex, elide_empty) {}
 
     const Nest& nest() const { return *nest_; }
     virtual void visit(const Nest&) = 0;

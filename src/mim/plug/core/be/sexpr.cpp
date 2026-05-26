@@ -94,9 +94,9 @@ struct BB {
     std::set<std::string> assigned;
 };
 
-class Emitter : public mim::Emitter<std::string, std::string, BB, Emitter> {
+class Emitter : public mim::Emitter<std::string, std::string, BB, Emitter, true> {
 public:
-    using Super = mim::Emitter<std::string, std::string, BB, Emitter>;
+    using Super = mim::Emitter<std::string, std::string, BB, Emitter, true>;
 
     Emitter(World& world, std::ostream& ostream, bool typed = false, bool slotted = false)
         : Super(world, "sexpr_emitter", ostream) {
@@ -126,7 +126,6 @@ public:
     std::string emit_cons_type(BB& bb, View<const Def*> ops);
     std::string emit_type(BB& bb, const Def* type);
     std::string emit_cons(std::vector<std::string> op_vals);
-    std::string emit_explicit_app(BB& bb, const App* app);
     std::string emit_node(BB& bb, const Def* def, std::string node_name, bool variadic = false, bool with_type = false);
     std::string emit_bb(BB& bb, const Def* def);
 

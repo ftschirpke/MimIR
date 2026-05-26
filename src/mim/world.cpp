@@ -4,6 +4,7 @@
 #include "mim/def.h"
 #include "mim/driver.h"
 #include "mim/rewrite.h"
+#include "mim/schedule.h"
 #include "mim/tuple.h"
 
 #include "mim/util/util.h"
@@ -691,18 +692,33 @@ Defs World::reduce(const Var* var, const Def* arg) {
     return reduct->defs();
 }
 
+template<bool Schedule>
 void World::for_each(bool elide_empty, std::function<void(Def*)> f) {
     unique_queue<MutSet> queue;
     for (auto mut : externals().muts())
         queue.push(mut);
 
+    std::vector<Def*> muts;
     while (!queue.empty()) {
         auto mut = queue.pop();
-        if (mut && mut->is_closed() && (!elide_empty || mut->is_set())) f(mut);
+        if (mut && mut->is_closed() && (!elide_empty || mut->is_set())) muts.push_back(mut);
 
         for (auto op : mut->deps())
             for (auto mut : op->local_muts())
                 queue.push(mut);
+    }
+
+    // Schedules the mutables in post-order to ensure that they
+    // are emitted in the correct order of dependencies.
+    if constexpr (Schedule) {
+        const auto mut_nest = Nest(muts);
+        auto schedule       = Scheduler::schedule(mut_nest);
+        std::ranges::reverse(schedule);
+        for (auto* mut : schedule)
+            f(mut);
+    } else {
+        for (auto* mut : muts)
+            f(mut);
     }
 }
 
@@ -744,6 +760,8 @@ template const Def* World::app<true>(const Def*, const Def*);
 template const Def* World::app<false>(const Def*, const Def*);
 template const Def* World::implicit_app<true>(const Def*, const Def*);
 template const Def* World::implicit_app<false>(const Def*, const Def*);
+template void World::for_each<true>(bool elide_empty, std::function<void(Def*)> f);
+template void World::for_each<false>(bool elide_empty, std::function<void(Def*)> f);
 #endif
 
 } // namespace mim
