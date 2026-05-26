@@ -809,7 +809,23 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
 
         uses_libdevice |= true;
         declare("{} @{}({})", t, f, t);
-        return bb.assign(name, "tail call {} @{}({} {})", t, f, t, a);
+        return bb.assign(name, "call {} @{}({} {})", t, f, t, a);
+    } else if (auto fmaf = Axm::isa<nvptx::fmaf>(def)) {
+        const char* f;
+        switch (fmaf.id()) {
+            case nvptx::fmaf::rd: f = "__nv_fmaf_rd"; break;
+            case nvptx::fmaf::rn: f = "__nv_fmaf_rn"; break;
+            case nvptx::fmaf::ru: f = "__nv_fmaf_ru"; break;
+            case nvptx::fmaf::rz: f = "__nv_fmaf_rz"; break;
+        }
+
+        auto x = emit(fmaf->arg(0));
+        auto y = emit(fmaf->arg(1));
+        auto z = emit(fmaf->arg(2));
+
+        uses_libdevice |= true;
+        declare("float @{}(float, float, float)", f);
+        return bb.assign(name, "call float @{}(float {}, float {}, float {})", f, x, y, z);
     }
     return std::nullopt;
 }

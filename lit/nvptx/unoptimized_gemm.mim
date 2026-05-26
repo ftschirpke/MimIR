@@ -60,8 +60,7 @@ con gemm_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.L
                             let in2_addr = %mem.lea (in2, in2_idx);
                             let (m1, in1_val) = %mem.load (m1, in1_addr);
                             let (m1, in2_val) = %mem.load (m1, in2_addr);
-                            let prod = %math.arith.mul 0 (in1_val, in2_val);
-                            let new_acc = %math.arith.add 0 (acc, prod);
+                            let new_acc = %nvptx.fmaf.rn (in1_val, in2_val, acc);
                             wrapped_loop (m1, next_i, new_acc);
                         con write_and_exit (m1: %gpu.GlobalM) =
                             let out_addr = %mem.lea (out, id);

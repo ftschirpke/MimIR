@@ -8,9 +8,10 @@
 ///
 /// ## Dependencies
 ///
+plugin gpu;
 import compile;
 import core;
-plugin gpu;
+import math;
 import mem;
 import refly;
 ///
@@ -46,6 +47,15 @@ axm %nvptx.shfl_sync(up, down, bfly, idx):
     → [%gpu.LocalM, T];
 // TODO: ensure T is 32-bit type and add return predicate boolean
 // NOTE: may want to consider to make clamp (4th argument) implicit, like in CUDA
+///
+/// ### Arithmetic Functions
+///
+/// #### %%nvptx.fmaf(rd, rn, ru, rz)
+///
+/// Computes x*y+z, i.e. fused-multiply-add, with a rounding mode (corresponding to CUDA's __fmaf_[rd|rn|ru|rz])
+axm %nvptx.fmaf(rd, rn, ru, rz): [%math.F32, %math.F32, %math.F32] → %math.F32;
+///
+///
 /// ## Stages
 ///
 /// ### Repls
