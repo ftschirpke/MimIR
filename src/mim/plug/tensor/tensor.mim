@@ -48,7 +48,7 @@ axm %tensor.set: {T: *, r: Nat, s: «r; Nat»} → [arr: «s; T», index: «i: r
 /// * `init` : accumulator to start `f` with
 /// * `subs` : for each input, for each dimension, an index to compute the output in Einstein notation
 /// * `is` : the inputs
-/// 
+///
 /// Returns a tensor obtained by folding `f` following the indexes in `subs`
 ///
 /// `nis`, `Ro`, `Ris` and `subs` must be literals, before entering the `tensor::Lower` phase, for the lowering to succeed.
@@ -66,16 +66,25 @@ axm %tensor.map_reduce: {nis: Nat}
 ///
 /// Variant of %tensor.map_reduce that takes a pure function as input.
 ///
-lam %tensor.map_reduce_pure {nis: Nat}
-                            {To: *, Ro: Nat}
-                            (So: «Ro; Nat»)
-                            {Tis: «nis; *», Ris: «i: nis; Nat», Sis: «i:nis; «Ris#i; Nat»»}
-                            (f: [To, «i: nis; Tis#i»] → [To], init: To)
-                            (subs: «i: nis; « Ris#i; Nat»»)
-                            (is: «i: nis; «Sis#i; Tis#i» »)
-                            : «So; To»
-                            = fun f_ (x: To, y: «i: nis; Tis#i»)@tt = return (f (x, y));
-                              %tensor.map_reduce @nis @(To, Ro) So @(Tis, Ris, Sis) (f_, init) subs is;
+axm %tensor.map_reduce_pure: {nis: Nat}
+                           → {To: *, Ro: Nat}
+                           → [So: «Ro; Nat»]
+                           → {Tis: «nis; *», Ris: «i: nis; Nat», Sis: «i:nis; «Ris#i; Nat»»}
+                           → [f: [To, «i: nis; Tis#i»] → [To], init: To]
+                           → [subs: «i: nis; « Ris#i; Nat»»]
+                           → [is: «i: nis; «Sis#i; Tis#i» »]
+                           → «So; To»;
+
+lam %tensor.map_reduce_pure_impl {nis: Nat}
+                                 {To: *, Ro: Nat}
+                                 (So: «Ro; Nat»)
+                                 {Tis: «nis; *», Ris: «i: nis; Nat», Sis: «i:nis; «Ris#i; Nat»»}
+                                 (f: [To, «i: nis; Tis#i»] → [To], init: To)
+                                 (subs: «i: nis; « Ris#i; Nat»»)
+                                 (is: «i: nis; «Sis#i; Tis#i» »)
+                                 : «So; To»
+                                 = fun f_ (x: To, y: «i: nis; Tis#i»)@tt = return (f (x, y));
+                                   %tensor.map_reduce @nis @(To, Ro) So @(Tis, Ris, Sis) (f_, init) subs is;
 ///
 /// ### %%tensor.dot_product
 ///
@@ -126,7 +135,15 @@ lam dot_general_shape {r1 r2: Nat} {nc nb: Nat}
       let s12_res  = %vec.cat (s1_res, s2_res);
       let s_out    = %vec.cat (bs, s12_res);
       s_out;
-lam %tensor.dot_product
+axm %tensor.dot_product: [R: Ring]
+                       → {r1 r2: Nat}
+                       → {nc nb: Nat}
+                       → [c1: «nc; Idx r1», c2: «nc; Idx r2», b1: «nb; Idx r1», b2: «nb; Idx r2»]
+                       → {s1: «r1; Nat», s2: «r2; Nat»}
+                       → [a: «s1; R#T», b: «s2; R#T»]
+                       → «dot_general_shape (c1, c2, b1, b2) (s1, s2); R#T»;
+
+lam %tensor.dot_product_impl
   (R: Ring) {r1 r2: Nat} {nc nb: Nat}
   (c1: «nc; Idx r1», c2: «nc; Idx r2», b1: «nb; Idx r1», b2: «nb; Idx r2»)
   {s1: «r1; Nat», s2: «r2; Nat»} (a: «s1; R#T», b: «s2; R#T»)
@@ -156,7 +173,7 @@ axm %tensor.product_2d: [R: Ring]
                       → «m, l; R#T»;
 
 lam %tensor.product_2d_impl (R: Ring) {m k l: Nat} (t1: «m, k; R#T», t2: «k, l; R#T»): «m, l; R#T»
-        = %tensor.dot_product R @(2, 2) (1_2, 0_2, (), ()) @((m, k), (k, l)) (t1, t2);
+        = %tensor.dot_product_impl R @(2, 2) (1_2, 0_2, (), ()) @((m, k), (k, l)) (t1, t2);
 
 ///
 /// ### %%tensor.transpose
@@ -164,21 +181,31 @@ lam %tensor.product_2d_impl (R: Ring) {m k l: Nat} (t1: «m, k; R#T», t2: «k, 
 /// Permutes the dimensions of `input` according to `permutation`.
 ///
 fun transpose_fun {T:*} [x: T, y: T]@tt: T = return y;
-lam %tensor.transpose {T: *, r: Nat, s: «r; Nat»}
-                      (input: «s;T», permutation: «r; Idx r»)
-                    : let shape_permutation = ‹i: r; (%vec.first (%core.icmp.e @r) (permutation, i))#tt›;
-                      let out_s = ‹i: r; s#(shape_permutation#i)›;
-                      «out_s; T»
-                    = let permutation_nat   = <i: r; %core.bitcast Nat permutation#i>;
-                      let shape_permutation = ‹i: r; (%vec.first (%core.icmp.e @r) (permutation, i))#tt›;
-                      let out_s             = ‹i: r; s#(shape_permutation#i)›;
-                      %tensor.map_reduce @1 @(T, r) out_s @(T, r, s) (transpose_fun @T, ⊥: T) permutation_nat input;
+lam transpose_shape {r: Nat} (s: «r; Nat», permutation: «r; Idx r»): «r; Nat» =
+  let shape_permutation = ‹i: r; (%vec.first (%core.icmp.e @r) (permutation, i))#tt›;
+  ‹i: r; s#(shape_permutation#i)›;
+axm %tensor.transpose: {T: *, r: Nat, s: «r; Nat»}
+                     → [input: «s; T», permutation: «r; Idx r»]
+                     → «transpose_shape (s, permutation); T»;
+
+lam %tensor.transpose_impl {T: *, r: Nat, s: «r; Nat»}
+                           (input: «s;T», permutation: «r; Idx r»)
+                         : «transpose_shape (s, permutation); T»
+                         = let permutation_nat   = <i: r; %core.bitcast Nat permutation#i>;
+                           let out_s             = transpose_shape (s, permutation);
+                           %tensor.map_reduce @1 @(T, r) out_s @(T, r, s) (transpose_fun @T, ⊥: T) permutation_nat input;
 ///
 /// ### %%tensor.transpose_2d
 ///
 /// Permutes the dimensions of a 2-dimensional tensor.
 ///
-lam %tensor.transpose_2d {T: *} {s: «2; Nat»} (input: «s; T»): «s#tt, s#ff; T» = %tensor.transpose @(T, 2, s) (input, (tt, ff));
+axm %tensor.transpose_2d: {T: *}
+                        → {s: «2; Nat»}
+                        → [input: «s; T»]
+                        → «s#tt, s#ff; T»;
+
+lam %tensor.transpose_2d_impl {T: *} {s: «2; Nat»} (input: «s; T»): «s#tt, s#ff; T» =
+  %tensor.transpose_impl @(T, 2, s) (input, (tt, ff));
 ///
 /// ### %%tensor.broadcast
 ///
@@ -205,11 +232,17 @@ axm %tensor.broadcast_in_dim: {T: *, r_in r_out: Nat}
 ///
 /// Maps a function over a collection of tensors.
 ///
-lam %tensor.map {T: *, ni: Nat, Is: «ni; *»}
-                (app: «i: ni; Is#i» → T)
-                {r: Nat, s: «r; Nat»}
-                (is: «i: ni; «s; Is#i» »)
-                : «s; T» =
+axm %tensor.map: {T: *, ni: Nat, Is: «ni; *»}
+               → [app: «i: ni; Is#i» → T]
+               → {r: Nat, s: «r; Nat»}
+               → [is: «i: ni; «s; Is#i»»]
+               → «s; T»;
+
+lam %tensor.map_impl {T: *, ni: Nat, Is: «ni; *»}
+                     (app: «i: ni; Is#i» → T)
+                     {r: Nat, s: «r; Nat»}
+                     (is: «i: ni; «s; Is#i» »)
+                     : «s; T» =
   fun app_mr [x: T, y: «i: ni; Is#i»]@tt = return (app y);
   %tensor.map_reduce @ni @(T, r) s @(Is, ‹ni; r›, ‹ni; s›) (app_mr, ⊥: T) ‹ni; ‹i:r; %core.bitcast Nat i›› is;
 ///
@@ -217,22 +250,39 @@ lam %tensor.map {T: *, ni: Nat, Is: «ni; *»}
 ///
 /// Maps a unary function over a tensor.
 ///
-lam %tensor.unary {Ti To : *} [app: Ti → To] {r: Nat, s: «r; Nat»} (i: «s; Ti»): «s; To» =
-  %tensor.map @(To, 1, Ti) app @(r, s) i;
+axm %tensor.unary: {Ti To: *}
+                 → [app: Ti → To]
+                 → {r: Nat, s: «r; Nat»}
+                 → [i: «s; Ti»]
+                 → «s; To»;
+
+lam %tensor.unary_impl {Ti To : *} [app: Ti → To] {r: Nat, s: «r; Nat»} (i: «s; Ti»): «s; To» =
+  %tensor.map_impl @(To, 1, Ti) app @(r, s) i;
 ///
 /// ### %%tensor.binary
 ///
 /// Maps a binary function over a pair of tensors.
 ///
-lam %tensor.binary {Ti1 Ti2 To: *} (app: [Ti1, Ti2] → To) {r: Nat, s: «r; Nat»} (is: [«s; Ti1», «s; Ti2»]): «s; To» =
-  %tensor.map @(To, 2, (Ti1, Ti2)) app @(r, s) is;
+axm %tensor.binary: {Ti1 Ti2 To: *}
+                  → [app: [Ti1, Ti2] → To]
+                  → {r: Nat, s: «r; Nat»}
+                  → [is: [«s; Ti1», «s; Ti2»]]
+                  → «s; To»;
+
+lam %tensor.binary_impl {Ti1 Ti2 To: *} (app: [Ti1, Ti2] → To) {r: Nat, s: «r; Nat»} (is: [«s; Ti1», «s; Ti2»]): «s; To» =
+  %tensor.map_impl @(To, 2, (Ti1, Ti2)) app @(r, s) is;
 ///
 /// ### %%tensor.select
 ///
 /// Maps %core.select over tensors.
 ///
-lam %tensor.select {T: *} {r: Nat, s: «r; Nat»} (is: [«s; Bool», «s; T», «s; T»]): «s; T» =
-  %tensor.map @(T, 3, (Bool, T, T)) (%core.select @T) @(r, s) is;
+axm %tensor.select: {T: *}
+                  → {r: Nat, s: «r; Nat»}
+                  → [is: [«s; Bool», «s; T», «s; T»]]
+                  → «s; T»;
+
+lam %tensor.select_impl {T: *} {r: Nat, s: «r; Nat»} (is: [«s; Bool», «s; T», «s; T»]): «s; T» =
+  %tensor.map_impl @(T, 3, (Bool, T, T)) (%core.select @T) @(r, s) is;
 ///
 /// ## Phases
 ///
