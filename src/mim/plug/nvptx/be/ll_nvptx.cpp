@@ -863,7 +863,7 @@ static std::optional<std::string> get_compute_capability() {
     // out should now have form "7.5" referencing the compute capability "sm_75"
 
     auto dot_pos = out.find('.');
-    assert(dot_pos < out.size());
+    if (dot_pos >= out.size()) return std::nullopt; // nvidia-smi unavailable or failed to parse
 
     for (size_t i = 0; i < out.size(); ++i)
         if (i != dot_pos && !std::isdigit(out[i])) return std::nullopt;

@@ -1,0 +1,139 @@
+/// # The gpu_pcuda Plugin {#gpu_pcuda}
+///
+/// @see mim::plug::gpu_pcuda
+///
+/// pCUDA-specific extensions for the GPU plugin
+/// Provides backend/platform selection and JIT reflection capabilities
+///
+/// [TOC]
+///
+/// ## Dependencies
+///
+plugin core;
+plugin gpu;
+import compile;
+///
+/// ## Types
+///
+/// ### Backend and Platform Indices
+///
+/// pCUDA uses a hierarchical device topology:
+/// Backend (CUDA, HIP, OpenCL, Host) → Platform → Device
+///
+axm %gpu_pcuda.Backend: *;
+axm %gpu_pcuda.Platform: *;
+///
+/// ### Compiler/Runtime Backend Enumeration
+///
+/// Represents which backend the compiler/runtime is targeting
+axm %gpu_pcuda.CompilerBackend: *;
+let %gpu_pcuda.compiler_backend_ptx = 0: I32;      // NVIDIA PTX
+let %gpu_pcuda.compiler_backend_amdgpu = 1: I32;   // AMD AMDGPU
+let %gpu_pcuda.compiler_backend_spirv = 2: I32;    // SPIR-V (Intel, etc.)
+let %gpu_pcuda.compiler_backend_host = 3: I32;     // CPU Host backend
+let %gpu_pcuda.compiler_backend_metal = 4: I32;    // Apple Metal
+///
+/// ## Operations
+///
+/// ### Backend Management
+///
+/// #### %%gpu_pcuda.get_backend
+///
+/// Retrieves the currently active backend index
+axm %gpu_pcuda.get_backend: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// #### %%gpu_pcuda.set_backend
+///
+/// Sets the active backend by index
+/// Also resets the active device and platform to 0
+axm %gpu_pcuda.set_backend: [%mem.M 0, I32] → [%mem.M 0];
+///
+/// ### Platform Management
+///
+/// #### %%gpu_pcuda.get_platform_count
+///
+/// Retrieves the number of platforms in the current backend
+axm %gpu_pcuda.get_platform_count: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// #### %%gpu_pcuda.get_platform
+///
+/// Retrieves the currently active platform index within the current backend
+axm %gpu_pcuda.get_platform: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// #### %%gpu_pcuda.set_platform
+///
+/// Sets the active platform by index within the current backend
+/// Also resets the active device to 0
+axm %gpu_pcuda.set_platform: [%mem.M 0, I32] → [%mem.M 0];
+///
+/// ### JIT Reflection Queries
+///
+/// These operations query compiler/device information at JIT compile time
+/// Useful for runtime-adaptive code generation
+///
+/// #### %%gpu_pcuda.jit_reflect_compiler_backend
+///
+/// Returns which backend the compiler is currently targeting
+/// One of: ptx, amdgpu, spirv, host, metal
+/// Note: This is evaluated at JIT compile time, not runtime
+axm %gpu_pcuda.jit_reflect_compiler_backend: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// #### %%gpu_pcuda.jit_reflect_target_is_gpu
+///
+/// Returns true (1I32) if the target is a GPU, false (0I32) if CPU
+axm %gpu_pcuda.jit_reflect_target_is_gpu: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// #### %%gpu_pcuda.jit_reflect_target_is_cpu
+///
+/// Returns true (1I32) if the target is a CPU, false (0I32) if GPU
+axm %gpu_pcuda.jit_reflect_target_is_cpu: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// #### %%gpu_pcuda.jit_reflect_target_vendor_id
+///
+/// Returns the vendor ID of the target device
+/// Common vendor IDs: NVIDIA=4318, AMD=1022, Intel=8086
+axm %gpu_pcuda.jit_reflect_target_vendor_id: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// ### Extended Device Properties
+///
+/// #### %%gpu_pcuda.get_device_compute_capability
+///
+/// For NVIDIA devices, returns major and minor compute capability
+/// Returns as [major, minor] in a 2-element array
+axm %gpu_pcuda.get_device_compute_capability: [%mem.M 0, I32]
+                                            → [%mem.M 0, %mem.Ptr0 I32];
+///
+/// #### %%gpu_pcuda.get_device_warp_size
+///
+/// Returns the warp size for the current device (or target device)
+axm %gpu_pcuda.get_device_warp_size: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// #### %%gpu_pcuda.get_device_max_threads_per_block
+///
+/// Returns the maximum number of threads per block
+axm %gpu_pcuda.get_device_max_threads_per_block: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// #### %%gpu_pcuda.get_device_shared_memory_per_block
+///
+/// Returns bytes of shared memory available per block
+axm %gpu_pcuda.get_device_shared_memory_per_block: [%mem.M 0] → [%mem.M 0, I32];
+///
+/// ## Stages
+///
+/// ### Phases
+///
+axm %gpu_pcuda.setup_backend_selection_phase: %compile.Phase;
+///
+/// ## Integration Notes
+///
+/// These operations are designed to be used with AdaptiveCpp's generic JIT compiler
+/// which generates code for multiple backends from a single source.
+///
+/// Example usage:
+///   let (m0, backend_id) = %gpu_pcuda.get_backend m0;
+///   let (m0, platform_count) = %gpu_pcuda.get_platform_count m0;
+///   let (m0, is_gpu) = %gpu_pcuda.jit_reflect_target_is_gpu m0;
+///
+/// The JIT reflection queries return values that are known at compile time,
+/// allowing the compiler to optimize away branches and specialize code.
+///
