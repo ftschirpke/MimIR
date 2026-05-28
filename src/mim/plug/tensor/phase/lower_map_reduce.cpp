@@ -522,7 +522,7 @@ const Def* LowerMapReduce::lower_map_reduce(const App* app) {
             input_elements[i] = element_i;
         }
 
-        w.DLOG("  read elements {,}", input_elements);
+        w.DLOG("  read elements {}", fe::Join(input_elements));
         w.DLOG("  fun {} : {}", fun, fun->type());
         w.DLOG("  current_mut {} : {}", current_mut, current_mut->type());
 
