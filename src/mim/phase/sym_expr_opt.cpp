@@ -110,16 +110,8 @@ const Def* SymExprOpt::Analysis::rewrite_imm_App(const App* app) {
             }
         }
 
-        // set new abstract var
-        auto abstr_var = world().tuple(abstr_vars);
-        map(lam->var(), abstr_var);
-        lattice_[lam->var()] = abstr_var;
-
-        if (!lookup(lam))
-            for (auto d : lam->deps())
-                rewrite(d);
-
-        return world().app(lam, abstr_args);
+        set(lam->var(), world().tuple(abstr_vars)); // set new abstract var
+        return world().app(rewrite_deps(lam), abstr_args);
     }
 
     return mim::Analysis::rewrite_imm_App(app);
@@ -186,7 +178,7 @@ const Def* SymExprOpt::rewrite_imm_App(const App* old_app) {
         }
     }
 
-    return Rewriter::rewrite_imm_App(old_app);
+    return RWPhase::rewrite_imm_App(old_app);
 }
 
 } // namespace mim

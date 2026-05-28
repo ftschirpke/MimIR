@@ -6,10 +6,10 @@
 #include <absl/container/node_hash_map.h>
 
 #include "mim/flags.h"
-#include "mim/ast/tok.h"
 #include "mim/plugin.h"
 #include "mim/world.h"
 
+#include "mim/ast/tok.h"
 #include "mim/util/log.h"
 
 namespace mim {
@@ -18,7 +18,14 @@ namespace mim {
 /// Well, there are not really global - that's the point of this class.
 class Driver : public fe::SymPool {
 public:
+    /// @name Construction
+    ///@{
     Driver();
+
+    Driver(const Driver&)     = delete;
+    Driver(Driver&&)          = delete;
+    Driver& operator=(Driver) = delete;
+    ///@}
 
     /// @name Getters
     ///@{
@@ -26,6 +33,7 @@ public:
     const Flags& flags() const { return flags_; }
     Log& log() const { return log_; }
     World& world() { return world_; }
+    const Version& version() const { return version_; } ///< MimIR Version.
     ///@}
 
     /// @name Manage Search Paths
@@ -33,7 +41,7 @@ public:
     /// 1. The empty path. Used as prefix to look into current working directory without resorting to an absolute path.
     /// 2. All further user-specified paths via Driver::add_search_path; paths added first will also be searched first.
     /// 3. All paths specified in the environment variable `MIM_PLUGIN_PATH`.
-    /// 4. `path/to/mim.exe/../../lib/mim`
+    /// 4. The path derived from the location of `libmim` (`<libmim>/mim`)
     /// 5. `CMAKE_INSTALL_PREFIX/lib/mim`
     ///@{
     const auto& search_paths() const { return search_paths_; }
@@ -117,6 +125,7 @@ public:
 private:
     // This must go *first* so plugins will be unloaded *last* in the d'tor; otherwise funny things might happen ...
     absl::node_hash_map<Sym, Plugin::Handle> plugins_;
+    Version version_;
     Flags flags_;
     mutable Log log_;
     World world_;

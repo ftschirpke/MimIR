@@ -7,6 +7,8 @@
 
 namespace mim::plug::core {
 
+constexpr flags_t icmp_mask = 0b00011111; // low 5 bits encode X Y G L E as bits 4..0
+
 /// @name Mode
 ///@{
 /// What should happen if Idx arithmetic overflows?
@@ -14,7 +16,7 @@ enum class Mode : nat_t {
     none = 0,      ///< Wrap around.
     nsw  = 1 << 0, ///< No Signed Wrap around.
     nuw  = 1 << 1, ///< No Unsigned Wrap around.
-    nusw = nuw | nsw,
+    nsuw = nsw | nuw,
 };
 
 /// Give Mode as mim::plug::math::Mode, mim::nat_t or const Def*.
@@ -24,7 +26,7 @@ using VMode = std::variant<Mode, nat_t, const Def*>;
 inline const Def* mode(World& w, VMode m) {
     if (auto def = std::get_if<const Def*>(&m)) return *def;
     if (auto nat = std::get_if<nat_t>(&m)) return w.lit_nat(*nat);
-    return w.lit_nat((nat_t)std::get<Mode>(m));
+    return w.lit_nat(std::to_underlying(std::get<Mode>(m)));
 }
 ///@}
 
@@ -82,7 +84,8 @@ inline const Def* insert_unsafe(const Def* d, u64 i, const Def* val) {
 /// @name Convert TBound to Sigma
 /// This is WIP.
 ///@{
-template<bool up> const Sigma* convert(const TBound<up>* b);
+template<bool up>
+const Sigma* convert(const TBound<up>* b);
 inline const Sigma* convert(const Bound* b) { return b->isa<Join>() ? convert(b->as<Join>()) : convert(b->as<Meet>()); }
 ///@}
 
@@ -129,5 +132,6 @@ constexpr bool is_associative(plug::core::wrap id) { return is_commutative(id); 
 } // namespace mim
 
 #ifndef DOXYGEN
-template<> struct fe::is_bit_enum<mim::plug::core::Mode> : std::true_type {};
+template<>
+struct fe::is_bit_enum<mim::plug::core::Mode> : std::true_type {};
 #endif

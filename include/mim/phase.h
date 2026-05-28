@@ -90,37 +90,85 @@ public:
         : Phase(world, annex)
         , Rewriter(world) {}
 
-    /// Clears rewriter state, analysis state, and resets Phase::todo() for the next fixed-point iteration.
+    /// Clears the rewriter map and resets Phase::todo() for the next fixed-point iteration.
+    /// lattice() is **preserved** across iterations so that abstract values accumulated in earlier
+    /// rounds remain available - this is what makes fixed-point convergence possible.
     /// @see RWPhase::analyze
     virtual void reset();
     ///@}
 
     /// @name Getters
     ///@{
-    auto& lattice() { return lattice_; }
-    const auto& lattice() const { return lattice_; }
+    World& world() { return Phase::world(); }
+    Def* curr_mut() const { return curr_mut_; }
     bool is_bootstrapping() const { return bootstrapping_; }
     ///@}
 
-    /// @name Rewrite
+    /// @name lattice
     ///@{
-    virtual void rewrite_annex(flags_t, const Def*);
-    virtual void rewrite_external(Def*);
-    Def* rewrite_mut(Def*) override; ///< Keeps old muts/vars.
-    ///@}
+    auto& lattice() { return lattice_; }
+    const auto& lattice() const { return lattice_; }
 
-    /// @name Getters
-    ///@{
-    World& world() { return Phase::world(); }
+    /// Records the abstract value @p abstr for @p concr in both lattice() (the analysis result)
+    /// and map() (so the rewriter short-circuits future rewrites of @p concr to @p abstr).
+    void set(const Def* concr, const Def* abstr) {
+        lattice_[concr] = abstr;
+        map(concr, abstr);
+    }
     ///@}
 
 protected:
+    /// Helps to keep track of curr_mut().
+    /// @see enter()
+    class Enter {
+    public:
+        Enter(Analysis* analysis, Def* new_mut)
+            : analysis_(analysis)
+            , prev_mut_(analysis->curr_mut()) {
+            analysis->curr_mut_ = new_mut;
+        }
+        ~Enter() { analysis_->curr_mut_ = prev_mut_; }
+
+    private:
+        Analysis* analysis_;
+        Def* prev_mut_;
+    };
+
+    /// @name Rewrite
+    ///@{
     void start() override;
+    Enter enter(Def* new_mut) { return {this, new_mut}; } //< Updates curr_mut() to @p new_mut.
+    virtual void rewrite_annex(flags_t, const Def*);
+    virtual void rewrite_external(Def*);
+
+    /// Walks @p mut's dependencies under its curr_mut() scope.
+    /// Unlike rewrite_mut(), does **not** record `mut -> mut` and does **not** seed
+    /// any binder-related lattice state.
+    ///
+    /// Use this when you have already populated custom lattice entries for @p mut's
+    /// binder (typically inside a `rewrite_imm_App` override that propagates abstract
+    /// values from call arguments into the callee's tvars) and need to traverse the
+    /// body without rewrite_mut() clobbering that state.
+    virtual Def* rewrite_deps(Def*);
+
+    /// Default "visit a mutable" entry point: maps `mut -> mut`, seeds Lam binder
+    /// vars to **top** (`v -> v`) in the lattice, and delegates to rewrite_deps()
+    /// for the recursive traversal.
+    ///
+    /// If a binder var already carried a non-top lattice value, it is reset to top
+    /// and invalidate() is called: reaching a Lam through this default path means
+    /// it has been used as a value (not as an `App` callee) and has therefore
+    /// escaped, so any prior propagation for it is unsound and must be retracted.
+    Def* rewrite_mut(Def*) override;
+    ///@}
 
     Def2Def lattice_;
 
 private:
+    Def* curr_mut_      = nullptr;
     bool bootstrapping_ = true;
+
+    friend class Enter;
 };
 
 /// Rebuilds old_world() into new_world() and then swaps them.
@@ -334,29 +382,34 @@ private:
 
 /// Transitively visits all *reachable*, [*closed*](@ref Def::is_closed) mutables in the World.
 /// * Select with `elide_empty` whether you want to visit trivial mutables without body.
+/// * Set `schedule` if the mutables should be scheduled to ensure a correct order of dependencies.
 /// * If you are only interested in specific mutables, you can pass this to @p M.
 /// @see @ref phases_closed_mut_phase
 template<class M = Def>
 class ClosedMutPhase : public Phase {
 public:
-    ClosedMutPhase(World& world, std::string name, bool elide_empty)
+    ClosedMutPhase(World& world, std::string name, bool elide_empty, bool schedule = false)
         : Phase(world, std::move(name))
-        , elide_empty_(elide_empty) {}
-    ClosedMutPhase(World& world, flags_t annex, bool elide_empty)
+        , elide_empty_(elide_empty)
+        , schedule_(schedule) {}
+    ClosedMutPhase(World& world, flags_t annex, bool elide_empty, bool schedule = false)
         : Phase(world, annex)
-        , elide_empty_(elide_empty) {}
+        , elide_empty_(elide_empty)
+        , schedule_(schedule) {}
 
     bool elide_empty() const { return elide_empty_; }
+    bool schedule() const { return schedule_; }
 
 protected:
     void start() override {
-        world().template for_each<M>(elide_empty(), [this](M* mut) { root_ = mut, visit(mut); });
+        world().template for_each<M>(elide_empty(), [this](M* mut) { root_ = mut, visit(mut); }, schedule());
     }
     virtual void visit(M*) = 0;
     M* root() const { return root_; }
 
 private:
     const bool elide_empty_;
+    const bool schedule_;
     M* root_;
 };
 
@@ -365,10 +418,10 @@ private:
 template<class M = Def>
 class NestPhase : public ClosedMutPhase<M> {
 public:
-    NestPhase(World& world, std::string name, bool elide_empty)
-        : ClosedMutPhase<M>(world, std::move(name), elide_empty) {}
-    NestPhase(World& world, flags_t annex, bool elide_empty)
-        : ClosedMutPhase<M>(world, annex, elide_empty) {}
+    NestPhase(World& world, std::string name, bool elide_empty, bool schedule = false)
+        : ClosedMutPhase<M>(world, std::move(name), elide_empty, schedule) {}
+    NestPhase(World& world, flags_t annex, bool elide_empty, bool schedule = false)
+        : ClosedMutPhase<M>(world, annex, elide_empty, schedule) {}
 
     const Nest& nest() const { return *nest_; }
     virtual void visit(const Nest&) = 0;

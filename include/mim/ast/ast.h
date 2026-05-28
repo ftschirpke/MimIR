@@ -47,7 +47,8 @@ struct AnnexInfo {
 
 class AST {
 public:
-    AST() = default;
+    AST()           = default;
+    AST(const AST&) = delete;
     AST(World& world)
         : world_(&world) {}
     AST(AST&& other)
@@ -82,9 +83,9 @@ public:
     /// @name Formatted Output
     ///@{
     // clang-format off
-    template<class... Args> Error& error(Loc loc, const char* fmt, Args&&... args) const { return err_.error(loc, fmt, std::forward<Args>(args)...); }
-    template<class... Args> Error& warn (Loc loc, const char* fmt, Args&&... args) const { return err_.warn (loc, fmt, std::forward<Args>(args)...); }
-    template<class... Args> Error& note (Loc loc, const char* fmt, Args&&... args) const { return err_.note (loc, fmt, std::forward<Args>(args)...); }
+    template<class... Args> Error& error(Loc loc, std::format_string<Args...> fmt, Args&&... args) const { return err_.error(loc, fmt, std::forward<Args>(args)...); }
+    template<class... Args> Error& warn (Loc loc, std::format_string<Args...> fmt, Args&&... args) const { return err_.warn (loc, fmt, std::forward<Args>(args)...); }
+    template<class... Args> Error& note (Loc loc, std::format_string<Args...> fmt, Args&&... args) const { return err_.note (loc, fmt, std::forward<Args>(args)...); }
     // clang-format on
     ///@}
 
@@ -94,7 +95,11 @@ public:
     const auto& plugin2annexes(Sym plugin) { return plugin2sym2annex_[plugin]; }
     ///@}
 
+    /// @name bootstrap
+    ///@{
     void bootstrap(Sym plugin, std::ostream& h);
+    void bootstrap_py(Sym plugin, std::ostream& h);
+    ///@}
 
     friend void swap(AST& a1, AST& a2) noexcept {
         using std::swap;
@@ -121,7 +126,7 @@ protected:
 public:
     Loc loc() const { return loc_; }
 
-    virtual std::ostream& stream(Tab&, std::ostream&) const = 0;
+    virtual void stream(fe::Tab&, std::ostream&) const = 0;
     void dump() const;
 
 private:
@@ -194,7 +199,7 @@ public:
     void bind(Scopes&, bool rebind, bool quiet) const override;
     const Def* emit_value(Emitter&, const Def*) const override;
     const Def* emit_type(Emitter&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 };
 
 /// `dbg: type`
@@ -220,7 +225,7 @@ public:
     void bind(Scopes&, bool rebind, bool quiet) const override;
     const Def* emit_value(Emitter&, const Def*) const override;
     const Def* emit_type(Emitter&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Dbg dbg_;
@@ -241,7 +246,7 @@ public:
     void bind(Scopes&, bool rebind, bool quiet) const override;
     const Def* emit_value(Emitter&, const Def*) const override;
     const Def* emit_type(Emitter&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Dbg dbg_;
@@ -263,7 +268,7 @@ public:
     void bind(Scopes&, bool rebind, bool quiet) const override;
     const Def* emit_value(Emitter&, const Def*) const override;
     const Def* emit_type(Emitter&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Ptr<Ptrn> ptrn_;
@@ -293,7 +298,7 @@ public:
     const Def* emit_type(Emitter&) const override;
     const Def* emit_decl(Emitter&, const Def* type) const;
     const Def* emit_body(Emitter&, const Def* decl) const;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Tok::Tag delim_l_;
@@ -310,7 +315,7 @@ public:
         : Expr(loc) {}
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -322,7 +327,7 @@ public:
         : Expr(loc) {}
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -339,7 +344,7 @@ public:
     const Decl* decl() const { return decl_; }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -360,7 +365,7 @@ public:
     Tok::Tag tag() const { return tag_; }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -381,7 +386,7 @@ public:
     const Expr* type() const { return type_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -404,7 +409,7 @@ public:
     const Expr* expr() const { return expr_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -424,7 +429,7 @@ public:
     const Expr* level() const { return level_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -435,19 +440,19 @@ private:
 /// Reform (type of a rule) `Rule type`.
 class RuleExpr : public Expr {
 public:
-    RuleExpr(Loc loc, Ptr<Expr>&& meta_type)
+    RuleExpr(Loc loc, Ptr<Expr>&& dom)
         : Expr(loc)
-        , meta_type_(std::move(meta_type)) {}
+        , dom_(std::move(dom)) {}
 
-    const Expr* meta_type() const { return meta_type_.get(); }
+    const Expr* dom() const { return dom_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
 
-    Ptr<Expr> meta_type_;
+    Ptr<Expr> dom_;
 };
 
 // union
@@ -462,7 +467,7 @@ public:
     const auto& types() const { return types_; }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -484,7 +489,7 @@ public:
     const Expr* type() const { return type_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -510,7 +515,7 @@ public:
 
         virtual void bind(Scopes&) const;
         Lam* emit(Emitter&) const;
-        std::ostream& stream(Tab&, std::ostream&) const override;
+        void stream(fe::Tab&, std::ostream&) const override;
 
     private:
         Ptr<Ptrn> ptrn_;
@@ -528,7 +533,7 @@ public:
     size_t num_arms() const { return arms_.size(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -554,7 +559,7 @@ private:
     void bind(Scopes&) const override;
     const Def* emit_decl(Emitter&, const Def* type) const override;
     void emit_body(Emitter&, const Def* decl) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -587,7 +592,7 @@ public:
 
         virtual void bind(Scopes&, bool quiet = false) const;
         virtual void emit_type(Emitter&) const;
-        std::ostream& stream(Tab&, std::ostream&) const override;
+        void stream(fe::Tab&, std::ostream&) const override;
 
     protected:
         mutable Pi* decl_ = nullptr;
@@ -614,7 +619,7 @@ private:
     void bind(Scopes&) const override;
     const Def* emit_decl(Emitter&, const Def* type) const override;
     void emit_body(Emitter&, const Def* decl) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -634,7 +639,7 @@ public:
     void bind(Scopes&) const override;
     const Def* emit_decl(Emitter&, const Def* type) const override;
     void emit_body(Emitter&, const Def* decl) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -656,7 +661,7 @@ public:
     const Expr* arg() const { return arg_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -682,7 +687,7 @@ public:
     const Expr* body() const { return body_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -706,7 +711,7 @@ public:
     void bind(Scopes&) const override;
     const Def* emit_decl(Emitter&, const Def* type) const override;
     void emit_body(Emitter&, const Def* decl) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -728,7 +733,7 @@ public:
     size_t num_elems() const { return elems().size(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -750,7 +755,7 @@ public:
     const Expr* body() const { return body_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -777,7 +782,7 @@ public:
     const Decl* decl() const { return decl_; }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -801,7 +806,7 @@ public:
     const Expr* value() const { return value_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -821,7 +826,7 @@ public:
     const Expr* inhabitant() const { return inhabitant_.get(); }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     const Def* emit_(Emitter&) const override;
@@ -846,7 +851,7 @@ public:
 
     void bind(Scopes&) const override;
     void emit(Emitter&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Ptr<Ptrn> ptrn_;
@@ -867,7 +872,7 @@ public:
         Dbg dbg() const { return dbg_; }
 
         void bind(Scopes&, const AxmDecl*) const;
-        std::ostream& stream(Tab&, std::ostream&) const override;
+        void stream(fe::Tab&, std::ostream&) const override;
 
     private:
         Dbg dbg_;
@@ -896,7 +901,7 @@ public:
 
     void bind(Scopes&) const override;
     void emit(Emitter&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Dbg dbg_;
@@ -932,7 +937,7 @@ public:
     virtual void emit_decl(Emitter&) const;
     virtual void emit_body(Emitter&) const;
 
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Dbg dbg_;
@@ -963,7 +968,7 @@ public:
 
         void bind(Scopes&, bool quiet = false) const override;
         Lam* emit_value(Emitter&) const;
-        std::ostream& stream(Tab&, std::ostream&) const override;
+        void stream(fe::Tab&, std::ostream&) const override;
 
     private:
         Ptr<Expr> filter_;
@@ -999,7 +1004,7 @@ public:
     void bind_body(Scopes&) const override;
     void emit_decl(Emitter&) const override;
     void emit_body(Emitter&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Tok::Tag tag_;
@@ -1027,7 +1032,7 @@ public:
 
     void bind(Scopes&) const override;
     void emit(Emitter&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     Tok::Tag tag_;
@@ -1039,7 +1044,6 @@ private:
 /// rewrite rules
 /// rule (x:T, y:T) : x+y => y+x (when );
 /// all meta variables have to be introduced
-
 class RuleDecl : public ValDecl {
 public:
     RuleDecl(Loc loc, Dbg dbg, Ptr<Ptrn>&& var, Ptr<Expr>&& lhs, Ptr<Expr>&& rhs, Ptr<Expr>&& guard, bool is_normalizer)
@@ -1059,7 +1063,7 @@ public:
     bool is_normalizer() const { return is_normalizer_; }
 
     void bind(Scopes&) const override;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     void emit(Emitter&) const override;
@@ -1078,11 +1082,8 @@ private:
 
 class Import : public Node {
 public:
-    Import(Loc loc, Tok::Tag tag, Dbg dbg, Ptr<Module>&& module)
-        : Node(loc)
-        , dbg_(dbg)
-        , tag_(tag)
-        , module_(std::move(module)) {}
+    Import(Loc loc, Tok::Tag tag, Dbg dbg, Ptr<Module>&& module);
+    ~Import();
 
     Dbg dbg() const { return dbg_; }
     Tok::Tag tag() const { return tag_; }
@@ -1090,7 +1091,7 @@ public:
 
     void bind(Scopes&) const;
     void emit(Emitter&) const;
-    std::ostream& stream(Tab&, std::ostream&) const;
+    void stream(fe::Tab&, std::ostream&) const;
 
     friend void swap(Import& i1, Import& i2) noexcept {
         using std::swap;
@@ -1123,7 +1124,7 @@ public:
     void bind(Scopes&) const;
     void emit(AST&) const;
     void emit(Emitter&) const;
-    std::ostream& stream(Tab&, std::ostream&) const override;
+    void stream(fe::Tab&, std::ostream&) const override;
 
 private:
     mutable Ptrs<Import> implicit_imports_;

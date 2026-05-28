@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include <absl/container/btree_map.h>
 #include <fe/arena.h>
@@ -13,12 +14,9 @@
 
 #include "mim/util/dbg.h"
 #include "mim/util/log.h"
+#include "mim/util/span.h"
 
 namespace mim {
-
-template<class T>
-concept DefPtr = std::is_pointer_v<std::remove_reference_t<T>>
-              && std::is_base_of_v<Def, std::remove_pointer_t<std::remove_reference_t<T>>>;
 
 template<class T>
 concept Enum = std::is_enum_v<std::remove_reference_t<T>>;
@@ -200,7 +198,7 @@ public:
     const Def* annex(Id id) {
         auto flags = static_cast<flags_t>(id);
         if (auto i = move_.flags2annex.find(flags); i != move_.flags2annex.end()) return i->second;
-        error("Axm with ID '{x}' not found; demangled plugin name is '{}'", flags, Annex::demangle(driver(), flags));
+        error("Axm with ID '{:x}' not found; demangled plugin name is '{}'", flags, Annex::demangle(driver(), flags));
     }
 
     /// Get Axm from a plugin.
@@ -366,13 +364,10 @@ public:
 
     /// @name Rewrite Rules
     ///@{
-    const Reform* reform(const Def* meta_type) { return unify<Reform>(Reform::infer(meta_type), meta_type); }
+    const Reform* reform(const Def* dom) { return unify<Reform>(Reform::infer(dom), dom); }
     Rule* mut_rule(const Reform* type) { return insert<Rule>(type); }
     const Rule* rule(const Reform* type, const Def* lhs, const Def* rhs, const Def* guard) {
-        return mut_rule(type)->set(lhs, rhs, guard);
-    }
-    const Rule* rule(const Def* meta_type, const Def* lhs, const Def* rhs, const Def* guard) {
-        return rule(reform(meta_type), lhs, rhs, guard);
+        return unify<Rule>(type, lhs, rhs, guard);
     }
     ///@}
 
@@ -587,7 +582,7 @@ public:
     const Def* implicit_app(const Def* callee, E arg)
         requires std::is_enum_v<E> && std::is_same_v<std::underlying_type_t<E>, nat_t>
     {
-        return implicit_app<Normalize>(callee, lit_nat((nat_t)arg));
+        return implicit_app<Normalize>(callee, lit_nat(std::to_underlying(arg)));
     }
     ///@}
 
@@ -617,6 +612,12 @@ public:
     const Def* call(Args&&... args) {
         return call<Normalize>(annex<Id>(), std::forward<Args>(args)...);
     }
+
+    /// Annex overload with `flags_t` as first argument.
+    template<bool Normalize = true, class... Args>
+    const Def* call(flags_t id, Args&&... args) {
+        return call<Normalize>(annex(id), std::forward<Args>(args)...);
+    }
     ///@}
 
     /// @name Vars & Muts
@@ -636,13 +637,16 @@ public:
     /// @name for_each
     /// Visits all closed mutables in this World.
     ///@{
-    void for_each(bool elide_empty, std::function<void(Def*)>);
+    void for_each(bool elide_empty, std::function<void(Def*)>, bool schedule = false);
 
     template<class M>
-    void for_each(bool elide_empty, std::function<void(M*)> f) {
-        for_each(elide_empty, [f](Def* m) {
-            if (auto mut = m->template isa<M>()) f(mut);
-        });
+    void for_each(bool elide_empty, std::function<void(M*)> f, bool schedule = false) {
+        for_each(
+            elide_empty,
+            [f](Def* m) {
+                if (auto mut = m->template isa<M>()) f(mut);
+            },
+            schedule);
     }
     ///@}
 
@@ -687,7 +691,7 @@ private:
         if (auto loc = get_loc()) def->set(loc);
 
 #ifdef MIM_ENABLE_CHECKS
-        if (flags().trace_gids) outln("{}: {} - {}", def->node_name(), def->gid(), def->flags());
+        if (flags().trace_gids) std::println("{}: {} - {}", def->node_name(), def->gid(), def->flags());
         if (flags().reeval_breakpoints && breakpoints().contains(def->gid())) fe::breakpoint();
 #endif
 
@@ -728,7 +732,7 @@ private:
         if (auto loc = get_loc()) def->set(loc);
 
 #ifdef MIM_ENABLE_CHECKS
-        if (flags().trace_gids) outln("{}: {} - {}", def->node_name(), def->gid(), def->flags());
+        if (flags().trace_gids) std::println("{}: {} - {}", def->node_name(), def->gid(), def->flags());
         if (breakpoints().contains(def->gid())) fe::breakpoint();
 #endif
         assert_emplace(move_.defs, def);

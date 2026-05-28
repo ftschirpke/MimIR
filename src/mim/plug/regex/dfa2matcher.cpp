@@ -10,6 +10,9 @@
 #include <mim/plug/core/core.h>
 #include <mim/plug/mem/mem.h>
 
+template<>
+struct std::formatter<automaton::DFA> : fe::ostream_formatter {};
+
 using namespace mim;
 using namespace automaton;
 
@@ -45,20 +48,20 @@ DFAMap<Ranges> transitions_to_ranges(World& w, const DFANode* state) {
     state->for_transitions([&](std::uint16_t transition, const DFANode* next_state) {
         if (!state2ranges.contains(next_state))
             state2ranges.try_emplace(next_state, Ranges{
-                                                 {transition, transition}
+                                                     {transition, transition}
             });
         else
             state2ranges[next_state].emplace_back(transition, transition);
     });
     Range any_range{0, 255};
     for (auto& [state, ranges] : state2ranges) {
-        if (std::find(ranges.cbegin(), ranges.cend(), any_range) != ranges.cend()) {
+        if (std::ranges::contains(ranges, any_range)) {
             ranges = {any_range};
             continue;
         }
 
         std::sort(ranges.begin(), ranges.end(), RangeCompare{});
-        ranges = merge_ranges(ranges, [&w](auto&&... args) { w.DLOG(std::forward<decltype(args)>(args)...); });
+        ranges = merge_ranges(ranges, [&w](std::string_view msg) { w.DLOG("{}", msg); });
     }
     return state2ranges;
 }
@@ -150,7 +153,7 @@ extern "C" const Def* dfa2matcher(World& w, const DFA& dfa, const Def* n) {
         auto not_end = mem::mut_con(w.type_idx(n));
         not_end->debug_prefix("not_end_" + state_to_name(state));
 
-        auto new_i = w.call(core::wrap::add, core::Mode::nusw, w.tuple({i, w.call(core::conv::u, n, w.lit_i64(1))}));
+        auto new_i = w.call(core::wrap::add, core::Mode::nsuw, w.tuple({i, w.call(core::conv::u, n, w.lit_i64(1))}));
         lam->app(false, w.select(is_end, exiting(state), not_end), {mem2, i});
 
         auto transitions = create_check_match_transitions_from(c, state);

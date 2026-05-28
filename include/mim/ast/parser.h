@@ -42,7 +42,7 @@ public:
     Ptr<Module> import(Dbg, std::ostream* md = nullptr, Tok::Tag tag = Tok::Tag::K_import);
     Ptr<Module> import(std::istream&, Loc = {}, const fs::path* = nullptr, std::ostream* md = nullptr);
     Ptr<Module> plugin(Dbg);
-    Ptr<Module> plugin(const std::string& s) { return plugin({Loc(), driver().sym(s)}); }
+    Ptr<Module> plugin(std::string_view sv) { return plugin({Loc(), driver().sym(sv)}); }
     Ptr<Module> plugin(const char* name) { return plugin({Loc(), driver().sym(name)}); }
 
 private:
@@ -155,10 +155,8 @@ private:
 
     using Super::expect;
     template<class... Args>
-    Tok expect(Tok::Tag tag, const char* f, Args&&... args) {
-        std::ostringstream oss;
-        print(oss, f, std::forward<Args>(args)...);
-        return Super::expect(tag, oss.str());
+    Tok expect(Tok::Tag tag, std::format_string<Args...> f, Args&&... args) {
+        return Super::expect(tag, std::format(f, std::forward<Args>(args)...));
     }
     ///@}
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fe/assert.h>
+#include <fe/format.h>
 
 #include "mim/util/dbg.h"
 
@@ -43,7 +44,8 @@ enum class Prec {
 /// Associativity of precedence level @p p.
 constexpr Assoc prec_assoc(Prec p) {
     switch (p) {
-#define CODE(name, assoc) case Prec::name: return Assoc::assoc;
+#define CODE(name, assoc) \
+    case Prec::name: return Assoc::assoc;
         MIM_PREC(CODE)
 #undef CODE
     }
@@ -237,3 +239,8 @@ private:
 
 } // namespace ast
 } // namespace mim
+
+#ifndef DOXYGEN // clang-format off
+template<> struct std::formatter<mim::ast::Tok     > : fe::ostream_formatter {};
+template<> struct std::formatter<mim::ast::Tok::Tag> : fe::ostream_formatter {};
+#endif // clang-format on
