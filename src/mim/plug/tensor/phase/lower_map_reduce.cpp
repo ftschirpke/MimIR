@@ -219,7 +219,7 @@ extract_indices(const u64 n_nat, const u64 nis_nat, const Def* S, const Def* Ris
             throw std::runtime_error("matrix has non-constant dimension count");
         }
         u64 ni_nat = *ni_lit;
-        w.DLOG("  dims({i}) = {}", i, ni_nat);
+        w.DLOG("  dims({}) = {}", i, ni_nat);
         auto Sis_i = Sis->proj(nis_nat, i);
         DefVec input_dims_i;
         for (u64 j = 0; j < ni_nat; ++j) {
