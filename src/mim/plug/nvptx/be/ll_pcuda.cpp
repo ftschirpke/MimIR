@@ -1,4 +1,5 @@
 #include "mim/plug/nvptx/be/ll_pcuda.h"
+#include "mim/plug/nvptx/be/hcf_adapter.h"
 
 #include <mim/driver.h>
 #include <mim/util/sys.h>
@@ -41,6 +42,7 @@ protected:
 private:
     LamMap<int> kernel_ids_;
     DefSet analyzed_;
+    HCFMetadata hcf_metadata_;  // Track kernel metadata for HCF registration
 };
 
 // ============================================================================
