@@ -276,7 +276,9 @@ std::string PCUDADeviceEmitter::prepare() {
     if (!is_kern) return Super::prepare();
     auto kernel = root();
 
-    print(func_impls_, "define spir_kernel {} {}(", convert_ret_pi(kernel->type()->ret_pi()), id(kernel));
+    // Generate generic kernel attributes compatible with SSCP/multiple backends
+    // Instead of spir_kernel, use a generic function attribute
+    print(func_impls_, "define void {} {}(", convert_ret_pi(kernel->type()->ret_pi()), id(kernel));
 
     auto [m1, m3, m4, m5, group_id, item_id, symptrs, smem, arg, ret_lam] = kernel->vars<10>();
 
@@ -297,12 +299,15 @@ std::string PCUDADeviceEmitter::prepare() {
         if (type_name == "i0") {
             locals_[def] = "0";
         } else if (type_name == "i32") {
-            declare("i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()");
-            declare("i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
-            if (sreg == "ctaid.x")
-                bb.assign(name, "call i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()");
-            else if (sreg == "tid.x")
-                bb.assign(name, "call i32 @llvm.nvvm.read.ptx.sreg.tid.x()");
+            // Use SSCP generic work item/group ID queries instead of NVIDIA-specific ones
+            // These will be lowered to appropriate backend calls in stage 2
+            if (sreg == "ctaid.x") {
+                declare("i32 @__acpp_sscp_get_group_id(i32)");
+                bb.assign(name, "call i32 @__acpp_sscp_get_group_id(i32 0)");
+            } else if (sreg == "tid.x") {
+                declare("i32 @__acpp_sscp_get_local_id(i32)");
+                bb.assign(name, "call i32 @__acpp_sscp_get_local_id(i32 0)");
+            }
         }
     };
     register_sreg_idx(group_id, "ctaid.x");
@@ -315,16 +320,21 @@ std::optional<std::string> PCUDADeviceEmitter::isa_targetspecific_intrinsic(BB& 
     auto name = id(def);
 
     if (auto sync_work_items = Axm::isa<gpu::sync_work_items>(def)) {
-        declare("void @llvm.nvvm.barrier0()");
+        // Use SSCP generic barrier instead of NVVM-specific intrinsic
+        // This allows AdaptiveCpp to lower to any backend (NVIDIA, AMD, Intel, etc.)
+        declare("void @llvm.convergent.barrier()");
         emit_unsafe(sync_work_items->arg(0));
         emit_unsafe(sync_work_items->arg(1));
-        print(bb.body().emplace_back(), "call void @llvm.nvvm.barrier0()");
+        // For SSCP, use a generic synchronization approach that works across backends
+        // The actual backend lowering happens in stage 2 compilation
+        print(bb.body().emplace_back(), "call void @llvm.convergent.barrier()");
         return name;
     } else if (auto warp_size = Axm::isa<nvptx::warp_size>(def)) {
-        declare("i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
+        // Use SSCP JIT reflection for warp size (backend-agnostic)
+        declare("i32 @__acpp_sscp_jit_reflect_warp_size()");
         assert(name[0] == '%');
         auto valid_name = name.substr(1);
-        bb.assign(valid_name, "call i32 @llvm.nvvm.read.ptx.sreg.warpsize()");
+        bb.assign(valid_name, "call i32 @__acpp_sscp_jit_reflect_warp_size()");
         return valid_name;
     }
 
