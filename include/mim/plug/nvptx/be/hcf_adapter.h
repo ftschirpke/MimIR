@@ -1,66 +1,74 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
-#include <map>
-#include <cstdint>
 
 namespace mim::ll::pcuda {
 
-/// HCF (Heterogeneous Container Format) adapter for kernel metadata generation
-/// Provides utilities for creating HCF-compatible kernel metadata structures
-/// that enable AdaptiveCpp's kernel cache to discover and JIT-compile kernels
+/// HCF (Heterogeneous Container Format) builder for the pCUDA backend.
+///
+/// Produces the exact text-plus-binary-appendix format that AdaptiveCpp's
+/// runtime parses via `hipsycl::common::hcf_container::parse`, mirroring the
+/// SSCP plugin's `generateHCF` (TargetSeparationPass.cpp:434-516). The output
+/// is embedded into the host LLVM IR as `@__acpp_local_sscp_hcf_content`.
+///
+/// Layout:
+///   root: object-id, generator
+///     images / llvm-ir.global: variant=global-module, format=llvm-ir,
+///                              exported-symbols (list), imported-symbols (list),
+///                              __binary { start, size }
+///     kernels / <name>: image-providers, host-side-parameter-sizes,
+///                       compile-flags, compile-options,
+///                       parameters / <i>: byte-offset, byte-size,
+///                                         original-index, type, annotations
+///   __acpp_hcf_binary_appendix<raw device bitcode bytes>
 
-/// Represents metadata for a single kernel
-struct KernelMetadata {
-    std::string name;                    // Kernel function name
-    std::string target_backend;          // "ptx", "amdgpu", "spirv", "host", "metal"
-    std::vector<std::string> arg_types;  // Argument types for parameter canonicalization
-    int32_t warp_size;                   // SIMD lane count (32 for NVIDIA, 64 for AMD)
-    int32_t max_threads_per_block;       // Device capability
-    int32_t shared_mem_per_block;        // Device shared memory in bytes
+enum class HCFParamType { Integer, FloatingPoint, Pointer, OtherByValue };
+
+struct HCFParam {
+    std::size_t byte_offset;
+    std::size_t byte_size;
+    std::size_t original_index;
+    HCFParamType type;
+    std::vector<std::string> annotations;
 };
 
-/// HCF metadata container for kernel cache registration
-class HCFMetadata {
+struct HCFKernel {
+    std::string name;
+    std::vector<std::size_t> host_side_parameter_sizes;
+    std::vector<HCFParam> parameters;
+};
+
+class HCFBuilder {
 public:
-    /// Create a new HCF metadata container
-    HCFMetadata();
+    HCFBuilder() = default;
 
-    /// Add kernel metadata to the container
-    void add_kernel(const KernelMetadata& metadata);
+    void set_object_id(std::uint64_t id) { object_id_ = id; }
+    void set_generator(std::string s) { generator_ = std::move(s); }
 
-    /// Generate HCF readable header (text portion)
-    /// Returns the textual HCF metadata format
-    std::string generate_readable_header() const;
+    /// Raw LLVM bitcode bytes (output of llvm-as on the device .ll).
+    void set_device_bitcode(std::string bytes) { device_bitcode_ = std::move(bytes); }
 
-    /// Generate minimal HCF for kernel registration
-    /// Creates a self-contained HCF string that can be embedded in host code
-    /// and registered with __acpp_register_hcf()
-    std::string generate_hcf_string() const;
+    void set_exported_symbols(std::vector<std::string> syms) { exported_ = std::move(syms); }
+    void set_imported_symbols(std::vector<std::string> syms) { imported_ = std::move(syms); }
 
-    /// Generate HCF registration code
-    /// Returns C code that registers the HCF at program startup
-    std::string generate_registration_code() const;
+    void add_kernel(HCFKernel k) { kernels_.push_back(std::move(k)); }
+
+    std::uint64_t object_id() const { return object_id_; }
+    const std::vector<HCFKernel>& kernels() const { return kernels_; }
+
+    /// Serialize to the wire format that the AdaptiveCpp runtime accepts.
+    std::string serialize() const;
 
 private:
-    std::vector<KernelMetadata> kernels_;
-    std::map<std::string, size_t> kernel_ids_;
+    std::uint64_t object_id_ = 0;
+    std::string generator_ = "MimIR pCUDA backend";
+    std::string device_bitcode_;
+    std::vector<std::string> exported_;
+    std::vector<std::string> imported_;
+    std::vector<HCFKernel> kernels_;
 };
-
-/// Generate kernel launch wrapper for pCUDA runtime
-/// Creates a C function that wraps a kernel launch using pCUDA's
-/// pcudaLaunchKernel or equivalent
-std::string generate_kernel_launch_wrapper(
-    const std::string& kernel_name,
-    const std::vector<std::string>& arg_types,
-    int32_t block_size_x,
-    int32_t block_size_y,
-    int32_t block_size_z
-);
-
-/// Convert LLVM IR function signature to HCF parameter format
-/// Parses function signature and returns canonical argument type list
-std::vector<std::string> extract_kernel_arguments(const std::string& llvm_function_sig);
 
 } // namespace mim::ll::pcuda

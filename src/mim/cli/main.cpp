@@ -232,7 +232,7 @@ int main(int argc, char** argv) {
                             else if (device_only)
                                 backend_name = "ll-dev-pcuda";
                             else
-                                backend_name = "ll-host-pcuda";  // No embedded device for pCUDA yet
+                                backend_name = "ll-host-pcuda-embed-dev";
                             plugin_name = "nvptx";  // pCUDA backends are registered in nvptx plugin
                             break;
                         case Num_DeviceTargets: fe::unreachable();
