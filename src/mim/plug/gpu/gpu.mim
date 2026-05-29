@@ -79,14 +79,14 @@ axm %gpu.exec_items: {n: Nat, T: *}
 
 // axm %gpu.sync_work_items: {n: Nat} → %gpu.Block n → %gpu.Block n;
 
-//let %matrix.MatrixCreateOptions = [n: Nat, DataT: *, OutT: *, extract: [DataT, Idx n] → OutT];
-//lam %matrix.MemMat (T: *, a n: Nat) : %matrix.MatrixCreateOptions =
+//let %matrix.MatrixCreateConfig = [n: Nat, DataT: *, OutT: *, extract: [DataT, Idx n] → OutT];
+//lam %matrix.MemMat (T: *, a n: Nat) : %matrix.MatrixCreateConfig =
 //    (n, %mem.Ptr(«n; T», a), %mem.Ptr(T, a), lm (data: %mem.Ptr(«n; T», a), idx: Idx n) = %mem.lea (data, idx));
 
-// lam %gpu.GridMat (n m: Nat) : %matrix.MatrixCreateOptions = (n, %gpu.Grid (n, m), %gpu.WorkGroup m, ...);
-// lam %gpu.GroupMat (n: Nat) : %matrix.MatrixCreateOptions = ...
-// lam %gpu.ItemMat (n: Nat) : %matrix.MatrixCreateOptions = ...
-// lam %nvptx.WarpMat (k: Nat) : %matrix.MatrixCreateOptions = ...
+// lam %gpu.GridMat (n m: Nat) : %matrix.MatrixCreateConfig = (n, %gpu.Grid (n, m), %gpu.WorkGroup m, ...);
+// lam %gpu.GroupMat (n: Nat) : %matrix.MatrixCreateConfig = ...
+// lam %gpu.ItemMat (n: Nat) : %matrix.MatrixCreateConfig = ...
+// lam %nvptx.WarpMat (k: Nat) : %matrix.MatrixCreateConfig = ...
 
 // probably not necessary if CreateOptions are chosen correctly
 // axm %gpu.grid_as_group_mat: {n m: Nat} → %gpu.Grid (n, m) → %matrix.Mat (n, 1) (%gpu.WorkGroup m);
