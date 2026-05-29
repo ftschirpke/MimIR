@@ -25,7 +25,7 @@ const Def* LowerMapReduce::lower_get(const App* app) {
 
     w.DLOG("lower_get");
     w.DLOG("    arr = {} : {}", arr, arr->type());
-    w.DLOG("    arr shape = {}", arr->type()->as<Seq>()->arity());
+    if (auto arr_seq = arr->type()->isa<Seq>()) w.DLOG("    arr shape = {}", arr_seq->arity());
     w.DLOG("    index = {} : {}", index, index->type());
     w.DLOG("    T = {} : {}", T, T->type());
     w.DLOG("    r = {} : {}", r, r->type());
