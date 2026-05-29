@@ -27,6 +27,34 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}"
 option(BUILD_SHARED_LIBS    "Build shared libraries." ON)
 option(MIM_BUILD_DOCS       "If ON, build the documentation (requires Doxygen)." OFF)
 option(MIM_BUILD_EXAMPLES   "If ON, build examples." OFF)
+option(MIM_WITH_ADAPTIVECPP "If ON, locate AdaptiveCpp (acpp-rt + acpp-common) so the pCUDA backend can shell to llvm-link with sscp_stubs.ll, and so users can link MimIR-emitted host LL with the SSCP runtime." ON)
+
+# AdaptiveCpp discovery for the pCUDA backend in the nvptx plugin. The plugin
+# itself does NOT link against acpp-rt at build time (it only shells out at
+# emit time and bakes a stubs path into a configured header), but downstream
+# user binaries built from MimIR-emitted .ll do need the runtime libs.
+if(MIM_WITH_ADAPTIVECPP)
+    # Default hint: the in-tree AdaptiveCpp build install dir, if present.
+    set(_acpp_in_tree "${CMAKE_CURRENT_LIST_DIR}/AdaptiveCpp/build/install")
+    if(EXISTS "${_acpp_in_tree}/lib/cmake/AdaptiveCpp/adaptivecpp-config.cmake")
+        list(APPEND CMAKE_PREFIX_PATH "${_acpp_in_tree}")
+    endif()
+    find_package(AdaptiveCpp QUIET)
+    if(AdaptiveCpp_FOUND)
+        # The find_package config sets PACKAGE_PREFIX_DIR locally; derive a
+        # globally-available install dir from the imported acpp-rt location.
+        get_target_property(_acpp_rt_loc AdaptiveCpp::acpp-rt LOCATION)
+        if(_acpp_rt_loc)
+            get_filename_component(MIM_ACPP_LIB_DIR     "${_acpp_rt_loc}" DIRECTORY)
+            get_filename_component(MIM_ACPP_INSTALL_DIR "${MIM_ACPP_LIB_DIR}/.." ABSOLUTE)
+            message(STATUS "AdaptiveCpp found: ${MIM_ACPP_INSTALL_DIR}")
+        else()
+            message(WARNING "AdaptiveCpp_FOUND but AdaptiveCpp::acpp-rt LOCATION not set; pCUDA backend will fall back to cwd-relative stubs path.")
+        endif()
+    else()
+        message(STATUS "AdaptiveCpp not found; pCUDA backend will use cwd-relative scripts/sscp_stubs.ll.")
+    endif()
+endif()
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}; shared libs: ${BUILD_SHARED_LIBS}")
 

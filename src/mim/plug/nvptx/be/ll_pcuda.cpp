@@ -1,5 +1,6 @@
 #include "mim/plug/nvptx/be/ll_pcuda.h"
 #include "mim/plug/nvptx/be/hcf_adapter.h"
+#include "mim/plug/nvptx/be/pcuda_config.h"
 
 #include <iomanip>
 #include <sstream>
@@ -736,7 +737,12 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     static constexpr auto dev_ll_name   = "tmp_mimir_pcuda_dev.ll";
     static constexpr auto dev_bc_name   = "tmp_mimir_pcuda_dev.bc";
     static constexpr auto dev_link_name = "tmp_mimir_pcuda_dev_linked.bc";
-    static constexpr auto stub_path     = "scripts/sscp_stubs.ll";
+
+    // SSCP stubs path is baked at configure time from the source tree by CMake.
+    // If find_package(AdaptiveCpp) didn't run (MIM_WITH_ADAPTIVECPP=OFF), the
+    // path is the empty string — fall back to cwd-relative for back-compat.
+    std::string stub_path = config::SSCP_STUBS_PATH;
+    if (stub_path.empty()) stub_path = "scripts/sscp_stubs.ll";
 
     auto [stage, setup_phase] = get_setup_stage(world);
     setup_phase->run();
@@ -836,6 +842,19 @@ void emit_host_with_embedded_device(World& world, std::ostream& ostream) {
     PCUDAHostEmitter host_emitter(setup_phase->old_world(), ostream);
     host_emitter.set_hcf_embed(std::move(hcf_blob), object_id);
     host_emitter.run();
+
+    // 6. Print the link recipe so users don't have to look it up. CMake baked
+    // the AdaptiveCpp install dir into pcuda_config.h at configure time.
+    if (config::ACPP_FOUND) {
+        std::cerr << "[pcuda] emitted host module with embedded device bitcode.\n"
+                     "[pcuda] link recipe:\n"
+                     "[pcuda]   clang++ -O2 <host.ll> -o <app> \\\n"
+                     "[pcuda]     -L"
+                  << config::ACPP_LIB_DIR
+                  << " -lacpp-rt -lacpp-common \\\n"
+                     "[pcuda]     -Wl,-rpath="
+                  << config::ACPP_LIB_DIR << " -pthread -ldl\n";
+    }
 }
 
 } // namespace mim::ll::pcuda
