@@ -84,16 +84,16 @@ axm %matrix.idx_1DtoND: {n a: Nat} → [layout: %matrix.Layout] → [%mem.M a, I
 axm %matrix.idx_NDto1D: [layout: %matrix.Layout] → %matrix.MatIdx layout
                       → Idx (%matrix.size layout), normalize_idx_NDto1D;
 
-let %matrix.MatrixCreateOptions = [n: Nat, DataT: *, OutT: *, extract: [DataT, Idx n] → OutT];
+let %matrix.MatrixCreateConfig = [n: Nat, DataT: *, OutT: *, extract: [DataT, Idx n] → OutT];
 
-lam %matrix.MemMat (T: *, a n: Nat) : %matrix.MatrixCreateOptions =
+lam %matrix.MemMat (T: *, a n: Nat) : %matrix.MatrixCreateConfig =
     (n, %mem.Ptr(«n; T», a), %mem.Ptr(T, a), lm (data: %mem.Ptr(«n; T», a), idx: Idx n) = %mem.lea (data, idx));
 
 ///
 /// ### %%matrix.create_mat
 ///
 /// Create a %%matrix.Mat
-lam %matrix.create_mat (Opts: %matrix.MatrixCreateOptions) (layout: %matrix.Layout) (data: Opts#DataT)
+lam %matrix.create_mat (Opts: %matrix.MatrixCreateConfig) (layout: %matrix.Layout) (data: Opts#DataT)
                      : %matrix.Mat layout (Opts#OutT) =
     lm {a: Nat} (mem: %mem.M a, idx: %matrix.MatIdx layout) : [%mem.M a, Opts#OutT] =
         let idx1d = %matrix.idx_NDto1D layout idx;
@@ -112,4 +112,4 @@ axm %matrix.tiling_layouts: %matrix.Layout → %matrix.Tiler
 /// Tiles a %%matrix.Mat given the dimensions and strides of the tiles.
 axm %matrix.tile: {layout: %matrix.Layout, T: *} → %matrix.Mat layout T → [tiler: %matrix.Tiler]
                 → let (tile_layout, outer_layout) = %matrix.tiling_layouts layout tiler;
-                  [%matrix.Mat outer_layout (%matrix.Mat tile_layout T)], normalize_tile, 3;
+                  %matrix.Mat outer_layout (%matrix.Mat tile_layout T), normalize_tile, 3;
