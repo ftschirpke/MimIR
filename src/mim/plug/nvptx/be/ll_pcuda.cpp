@@ -278,7 +278,7 @@ std::string PCUDADeviceEmitter::prepare() {
 
     // Generate generic kernel attributes compatible with SSCP/multiple backends
     // Instead of spir_kernel, use a generic function attribute
-    print(func_impls_, "define void {} {}(", convert_ret_pi(kernel->type()->ret_pi()), id(kernel));
+    print(func_impls_, "define {} {}(", convert_ret_pi(kernel->type()->ret_pi()), id(kernel));
 
     auto [m1, m3, m4, m5, group_id, item_id, symptrs, smem, arg, ret_lam] = kernel->vars<10>();
 

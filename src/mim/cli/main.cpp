@@ -21,11 +21,12 @@ using namespace std::literals;
 
 int main(int argc, char** argv) {
     enum Backends { AST, Dot, H, LL, Md, Mim, Nest, Num_Backends };
-    enum DeviceTargets { None, NVPTX, Num_DeviceTargets };
+    enum DeviceTargets { None, NVPTX, PCUDA, Num_DeviceTargets };
 
     absl::btree_map<std::string, DeviceTargets> device_target_names = {
         { "none"s,  DeviceTargets::None},
         {"nvptx"s, DeviceTargets::NVPTX},
+        {"pcuda"s, DeviceTargets::PCUDA},
     };
 
     try {
@@ -71,7 +72,7 @@ int main(int argc, char** argv) {
             | lyra::opt(output[Md ],  "file"               )      ["--output-md"            ]("Emits the input formatted as Markdown.")
             | lyra::opt(output[Mim],  "file"               )["-o"]["--output-mim"           ]("Emits the Mim program again.")
             | lyra::opt(output[Nest], "file"               )      ["--output-nest"          ]("Emits program nesting tree as Dot.")
-            | lyra::opt(device_target_name, "target"       )      ["--device-target"        ]("Target for device code ('none' or 'nvptx'). Default: 'none'")
+            | lyra::opt(device_target_name, "target"       )      ["--device-target"        ]("Target for device code ('none', 'nvptx', or 'pcuda'). Default: 'none'")
               .choices([&device_target_names](std::string value) { return device_target_names.contains(value); })
             | lyra::opt(host_only                          )      ["--ll-host-only"         ]("Emit LLVM only for the host code (Default: compile both and embed device binary in host LLVM)")
             | lyra::opt(device_only                        )      ["--ll-device-only"       ]("Emit LLVM only for the device code (Default: compile both and embed device binary in host LLVM)")
@@ -224,6 +225,15 @@ int main(int argc, char** argv) {
                             else
                                 backend_name = "ll-host-nvptx-embed-dev";
                             plugin_name = "nvptx";
+                            break;
+                        case PCUDA:
+                            if (host_only)
+                                backend_name = "ll-host-pcuda";
+                            else if (device_only)
+                                backend_name = "ll-dev-pcuda";
+                            else
+                                backend_name = "ll-host-pcuda";  // No embedded device for pCUDA yet
+                            plugin_name = "nvptx";  // pCUDA backends are registered in nvptx plugin
                             break;
                         case Num_DeviceTargets: fe::unreachable();
                     }
