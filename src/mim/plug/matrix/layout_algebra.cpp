@@ -359,18 +359,21 @@ std::pair<const Def*, const Def*> idx_1DtoND(World& world, const Def* mem, const
         auto bitcast_calc   = world.call<plug::core::bitcast>(idx->type());
         auto bitcast_result = world.call<plug::core::bitcast>(world.type_idx(dim));
 
-        auto dim_lit_nat    = world.lit_nat(dim);
         auto stride_lit_nat = world.lit_nat(stride);
-        auto dim_lit        = world.app(bitcast_calc, dim_lit_nat);
         auto stride_lit     = world.app(bitcast_calc, stride_lit_nat);
+        auto idx_div        = world.call(plug::core::div::udiv, world.tuple({mem, world.tuple({idx, stride_lit})}));
+        mem                 = world.extract(idx_div, 2, 0);
+        idx                 = world.extract(idx_div, 2, 1);
 
-        auto idx_div = world.call(plug::core::div::udiv, world.tuple({mem, world.tuple({idx, stride_lit})}));
-        mem          = world.extract(idx_div, 2, 0);
-        idx          = world.extract(idx_div, 2, 1);
-        auto idx_rem = world.call(plug::core::div::urem, world.tuple({mem, world.tuple({idx, dim_lit})}));
-        mem          = world.extract(idx_rem, 2, 0);
-        idx          = world.extract(idx_rem, 2, 1);
-        auto result  = world.app(bitcast_result, idx);
+        auto idx_n = Idx::isa_lit(idx->type());
+        if (!idx_n || idx_n.value() > dim) {
+            auto dim_lit_nat = world.lit_nat(dim);
+            auto dim_lit     = world.app(bitcast_calc, dim_lit_nat);
+            auto idx_rem     = world.call(plug::core::div::urem, world.tuple({mem, world.tuple({idx, dim_lit})}));
+            mem              = world.extract(idx_rem, 2, 0);
+            idx              = world.extract(idx_rem, 2, 1);
+        }
+        auto result = world.app(bitcast_result, idx);
         return std::make_pair(mem, result);
     }
 

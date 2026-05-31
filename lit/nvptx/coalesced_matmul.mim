@@ -11,20 +11,32 @@ import math;
 import mem;
 import print;
 
-let N = 32768;
-let SIZE = %core.nat.mul (N, N);
-let N_I32 = %core.bitcast I32 N;
+let N = 32768; // 1 << 15
+let NUM_BLOCKS = 1048576; // 1 << 20
+let NUM_THREADS = 1024; // 1 << 10
+let BLOCKS_PER_ROW = 32; // 1 << 5
 
-let NUM_BLOCKS = 1048576;
-let NUM_THREADS = 1024;
+// let N = 4096; // 1 << 12
+// let NUM_BLOCKS = 16384; // 1 << 14
+// let NUM_THREADS = 1024; // 1 << 10
+// let BLOCKS_PER_ROW = 4; // 1 << 2
+
+let SIZE = %core.nat.mul (N, N);
+let NUM_THREADS_I32 = %core.bitcast I32 NUM_THREADS;
+let N_I32 = %core.bitcast I32 N;
+let BLOCKS_PER_ROW_I32 = %core.bitcast I32 BLOCKS_PER_ROW;
 
 // matrix multiplication of matrix dimensions:  nxn * nxn -> nxn
 con matmul_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM,
                  group_id: Idx NUM_BLOCKS, item_id: Idx NUM_THREADS, (), (),
                  (out in1 in2: %gpu.GlobalPtr «SIZE; %math.F32»),
                  return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
-    let rid = %core.bitcast I32 group_id;
-    let cid = %core.bitcast I32 item_id;
+    let gid = %core.bitcast I32 group_id;
+    let iid = %core.bitcast I32 item_id;
+    let (m1, bid_idx_N) = %core.div.sdiv (m1, (gid, BLOCKS_PER_ROW_I32));
+    let (m1, bid_rest) = %core.div.srem (m1, (gid, BLOCKS_PER_ROW_I32));
+    let rid = bid_idx_N;
+    let cid = %core.wrap.add 0 (%core.wrap.mul 0 (bid_rest, NUM_THREADS_I32), iid);
 
     let id = %core.bitcast I32 (
         %core.wrap.add 0 (%core.wrap.mul 0 (rid, N_I32), cid)

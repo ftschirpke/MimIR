@@ -68,19 +68,32 @@ fun extern tile2 (mem: %mem.M 0, ptr: %mem.Ptr0 «32; I32») =
 
     let mat = %matrix.create_mat (%matrix.MemMat (I32, 0, 32)) layout ptr;
 
-    let (tile_layout, outer_layout) = %matrix.tiling_layouts layout tiler;
-    let mat = %matrix.tile@(layout, %mem.Ptr0 I32) mat tiler;
+    // let (tile_layout, outer_layout) = %matrix.tiling_layouts layout tiler;
+    let ElemT = %mem.Ptr0 I32;
+    // let TileT = %matrix.Mat tile_layout ElemT;
+    // let MatT = %matrix.Mat outer_layout TileT;
+    let TileT = %matrix.Mat (%matrix.layout (2, (2, 2)) (2, (4, 16))) ElemT;
+    let MatT = %matrix.Mat (%matrix.layout (2, 2) (1, 8)) TileT;
 
-    let (mem, A1) = mat (mem, (tt, tt));
-    let (mem, A2) = A1 (mem, (ff, (tt, tt)));
+    // lam type_check_elem (elem: ElemT) : ElemT = elem;
+    // lam type_check_tile (tile: TileT) : TileT = tile;
+    // lam type_check_mat (mat: MatT) : MatT = mat;
+
+    let mat : MatT = %matrix.tile@(layout, %mem.Ptr0 I32) mat tiler;
+    // let mat = type_check_mat mat;
+
+    let (mem, A1: TileT) = mat (mem, (1_2, 1_2));
+    // let A1 = type_check_tile A1;
+    let (mem, A2: ElemT) = A1 (mem, (0_2, (1_2, 1_2)));
+    // let A2 = type_check_elem A2;
     // EXPECTATION => lea 29_32
 
-    let (mem, B1) = mat (mem, (ff, ff));
-    let (mem, B2) = B1 (mem, (tt, (tt, ff)));
+    let (mem, B1: TileT) = mat (mem, (0_2, 0_2));
+    let (mem, B2: ElemT) = B1 (mem, (1_2, (1_2, 0_2)));
     // EXPECTATION => lea 6_32
 
-    let (mem, C1) = mat (mem, (tt, ff));
-    let (mem, C2) = C1 (mem, (tt, (ff, tt)));
+    let (mem, C1: TileT) = mat (mem, (1_2, 0_2));
+    let (mem, C2: ElemT) = C1 (mem, (1_2, (0_2, 1_2)));
     // EXPECTATION => lea 19_32
 
     return (mem, A2, B2, C2);

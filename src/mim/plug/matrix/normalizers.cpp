@@ -302,7 +302,11 @@ const Def* normalize_tile(const Def* type, const Def* callee, const Def* arg) {
 
     Vector<layalg::Layout> tilers, tiler_complements;
     for (size_t i = 0; i < tiler_n; ++i) {
-        auto tiler_def = tiler_defs->proj(i);
+        const Def* tiler_def;
+        if (tiler_n == 1)
+            tiler_def = tiler_defs;
+        else
+            tiler_def = tiler_defs->proj(i);
         auto tiler_opt = extract_layout_static(tiler_def);
         if (!tiler_opt) return {};
         auto& tiler = tiler_opt.value();
@@ -348,12 +352,23 @@ const Def* normalize_tile(const Def* type, const Def* callee, const Def* arg) {
     DefVec layout_idx_defs;
     auto add = world.call(core::wrap::add, world.lit_nat_0());
     for (size_t i = 0; i < tiler_n; ++i) {
-        auto sublay          = sublayout(layout, i);
+        layalg::Layout sublay;
         auto& subtiler       = tilers[i];
         auto& subtiler_compl = tiler_complements[i];
 
-        auto inner_idx_1d = layalg::idx_NDto1D(world, layout_size, subtiler.strides, inner_idx->proj(i));
-        auto outer_idx_1d = layalg::idx_NDto1D(world, layout_size, subtiler_compl.strides, outer_idx->proj(i));
+        const Def *inner_idx_proj, *outer_idx_proj;
+        if (tiler_n == 1) {
+            sublay         = layout;
+            inner_idx_proj = inner_idx;
+            outer_idx_proj = outer_idx;
+        } else {
+            sublay         = sublayout(layout, i);
+            inner_idx_proj = inner_idx->proj(i);
+            outer_idx_proj = outer_idx->proj(i);
+        }
+
+        auto inner_idx_1d = layalg::idx_NDto1D(world, layout_size, subtiler.strides, inner_idx_proj);
+        auto outer_idx_1d = layalg::idx_NDto1D(world, layout_size, subtiler_compl.strides, outer_idx_proj);
 
         sublay.strides   = layalg::tuple_prefix_product(sublay.dims);
         auto idx_1d      = world.app(add, {inner_idx_1d, outer_idx_1d});
