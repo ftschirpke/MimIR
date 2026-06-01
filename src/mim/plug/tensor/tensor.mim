@@ -62,11 +62,11 @@ axm %tensor.map_reduce: {nis: Nat}
                       → [is: «i: nis; «Sis#i; Tis#i» »]
                       → «So; To», normalize_map_reduce;
 ///
-/// ### %%tensor.map_reduce_pure
+/// ### %%tensor.map_reduce_ds
 ///
-/// Variant of %tensor.map_reduce that takes a pure function as input.
+/// Variant of %tensor.map_reduce that takes a direct-style function as input.
 ///
-axm %tensor.map_reduce_pure: {nis: Nat}
+axm %tensor.map_reduce_ds: {nis: Nat}
                            → {To: *, Ro: Nat}
                            → [So: «Ro; Nat»]
                            → {Tis: «nis; *», Ris: «i: nis; Nat», Sis: «i:nis; «Ris#i; Nat»»}
@@ -75,7 +75,7 @@ axm %tensor.map_reduce_pure: {nis: Nat}
                            → [is: «i: nis; «Sis#i; Tis#i» »]
                            → «So; To»;
 
-lam %tensor.map_reduce_pure_impl {nis: Nat}
+lam %tensor.map_reduce_ds_impl {nis: Nat}
                                  {To: *, Ro: Nat}
                                  (So: «Ro; Nat»)
                                  {Tis: «nis; *», Ris: «i: nis; Nat», Sis: «i:nis; «Ris#i; Nat»»}

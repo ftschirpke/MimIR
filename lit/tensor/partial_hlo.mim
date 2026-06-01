@@ -45,7 +45,7 @@ con extern main_hlo [arg0: «784; «1024; F32»», arg1: «1024; F32», arg2: «
     // // let v_16 = %tensor.broadcast ((1, 10), (128, 10), arg5);
     // // let v_17 = F32_add @(2, (128, 10)) (v_14, v_16);
     // let v_cst_0 = 0xFF800000 : F32;
-    // let v_18 = %tensor.map_reduce_pure @1 (128) @(F32, 2, (128, 10)) ((%math.extrema.fmax @f32 0), v_cst_0) (0, 1) v_14;
+    // let v_18 = %tensor.map_reduce_ds @1 (128) @(F32, 2, (128, 10)) ((%math.extrema.fmax @f32 0), v_cst_0) (0, 1) v_14;
     // // let v_cst_1 = 0xFF800000 : F32;
     // // let v_19 = ‹128; v_cst_1›;
     // // let v_20 = F32_maximum (v_19, v_18);
@@ -66,7 +66,7 @@ con extern main_hlo [arg0: «784; «1024; F32»», arg1: «1024; F32», arg2: «
     let v_16 = %tensor.broadcast ((1, 10), (128, 10), arg5);
     let v_17 = F32_add @(2, (128, 10)) (v_14, v_16);
     let v_cst_0 = 0xFEC00000 : F32;
-    let v_18 = %tensor.map_reduce_pure @1 (128) @(F32, 2, (128, 10)) ((%math.extrema.ieee754max @f32 0), v_cst_0) (0, 1) v_17;
+    let v_18 = %tensor.map_reduce_ds @1 (128) @(F32, 2, (128, 10)) ((%math.extrema.ieee754max @f32 0), v_cst_0) (0, 1) v_17;
     // let v_cst_1 = 0xFF800000 : F32;
     // let v_19 = ‹128; v_cst_1›;
     // let v_20 = F32_maximum (v_19, v_18);

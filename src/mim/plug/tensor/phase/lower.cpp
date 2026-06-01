@@ -118,8 +118,8 @@ const Def* Lower::rewrite_imm_App(const App* app) {
         return lower_via_impl(app, w.annex<tensor::transpose_2d_impl>());
     } else if (Axm::isa<tensor::map>(app)) {
         return lower_via_impl(app, w.annex<tensor::map_impl>());
-    } else if (Axm::isa<tensor::map_reduce_pure>(app)) {
-        return lower_via_impl(app, w.annex<tensor::map_reduce_pure_impl>());
+    } else if (Axm::isa<tensor::map_reduce_ds>(app)) {
+        return lower_via_impl(app, w.annex<tensor::map_reduce_ds_impl>());
     } else if (Axm::isa<tensor::unary>(app)) {
         return lower_via_impl(app, w.annex<tensor::unary_impl>());
     } else if (Axm::isa<tensor::binary>(app)) {
