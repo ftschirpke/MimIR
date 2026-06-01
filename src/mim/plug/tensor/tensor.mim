@@ -98,7 +98,6 @@ lam %tensor.map_reduce_ds_impl {nis: Nat}
 /// Returns the generalised dot product of `a` and `b`.
 /// https://openxla.org/stablehlo/spec#dot_general
 ///
-lam type {T: *} (x: T): * = T;
 fun dot_general_fun [R: %tensor.Ring] [x: R#T, [y: R#T, z: R#T]]@tt: R#T = return (R#add (x, (R#mul (y, z))));
 lam dot_general_pick {n: Nat} {na nb nc: Nat} (a: «na; Idx n», b: «nb; Idx n», c: «nc; Idx n») (off_1 off_2: Nat) (i: Idx n): Nat =
   let (ab, ai) = %vec.first (%core.icmp.e @n) (a, i);
