@@ -14,9 +14,10 @@ import mem;
 axm %print.single_f32: [%mem.M 0, %math.F32] → [%mem.M 0, I32];
 axm %print.single_i32: [%mem.M 0, I32] → [%mem.M 0, I32];
 
-fun %print.arr_f32 (m0: %mem.M 0, n: Nat, x: %mem.Ptr0 («n; %math.F32»), count: I32) : %mem.M 0 =
-    let last = %core.extrema.smin (%core.bitcast I32 n, count);
-    loop (m0, 0I32, return)
+fun %print.arr_f32 (m0: %mem.M 0, n: Nat, x: %mem.Ptr0 («n; %math.F32»), start: I32, count: I32) : %mem.M 0 =
+    let last = %core.wrap.add 0 (start, count);
+    let last = %core.extrema.smin (%core.bitcast I32 n, last);
+    loop (m0, start, return)
     where
         con loop (m0: %mem.M 0, i: I32, exit: Cn [%mem.M 0]) =
             let cond = %core.icmp.sl (i, last);

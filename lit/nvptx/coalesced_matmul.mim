@@ -11,20 +11,30 @@ import math;
 import mem;
 import print;
 
-let N = 32768; // 1 << 15
-let NUM_BLOCKS = 1048576; // 1 << 20
+// let N = 32768; // 1 << 15
+// let NUM_BLOCKS = 1048576; // 1 << 20
+// let NUM_THREADS = 1024; // 1 << 10
+// let NUM_BLOCKS_DIV_N = 32; // 1 << 5
+
+let N = 8192; // 1 << 13
+let NUM_BLOCKS = 65536; // 1 << 16
 let NUM_THREADS = 1024; // 1 << 10
-let BLOCKS_PER_ROW = 32; // 1 << 5
+let NUM_BLOCKS_DIV_N = 8; // 1 << 3
 
 // let N = 4096; // 1 << 12
 // let NUM_BLOCKS = 16384; // 1 << 14
 // let NUM_THREADS = 1024; // 1 << 10
-// let BLOCKS_PER_ROW = 4; // 1 << 2
+// let NUM_BLOCKS_DIV_N = 4; // 1 << 2
+
+// let N = 2048; // 1 << 11
+// let NUM_BLOCKS = 4096; // 1 << 12
+// let NUM_THREADS = 1024; // 1 << 10
+// let NUM_BLOCKS_DIV_N = 2; // 1 << 1
 
 let SIZE = %core.nat.mul (N, N);
 let NUM_THREADS_I32 = %core.bitcast I32 NUM_THREADS;
 let N_I32 = %core.bitcast I32 N;
-let BLOCKS_PER_ROW_I32 = %core.bitcast I32 BLOCKS_PER_ROW;
+let NUM_BLOCKS_DIV_N_I32 = %core.bitcast I32 NUM_BLOCKS_DIV_N;
 
 // matrix multiplication of matrix dimensions:  nxn * nxn -> nxn
 con matmul_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM,
@@ -33,8 +43,8 @@ con matmul_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu
                  return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
     let gid = %core.bitcast I32 group_id;
     let iid = %core.bitcast I32 item_id;
-    let (m1, bid_idx_N) = %core.div.sdiv (m1, (gid, BLOCKS_PER_ROW_I32));
-    let (m1, bid_rest) = %core.div.srem (m1, (gid, BLOCKS_PER_ROW_I32));
+    let (m1, bid_idx_N) = %core.div.udiv (m1, (gid, NUM_BLOCKS_DIV_N_I32));
+    let (m1, bid_rest) = %core.div.urem (m1, (gid, NUM_BLOCKS_DIV_N_I32));
     let rid = bid_idx_N;
     let cid = %core.wrap.add 0 (%core.wrap.mul 0 (bid_rest, NUM_THREADS_I32), iid);
 
@@ -155,7 +165,10 @@ fun extern main (m0: %mem.M 0) =
 
     let m0 = %gpu.deinit (m0, m1, m4);
 
-    ret m0 = %print.arr_f32 $ (m0, SIZE, h_out, 10I32);
+    // ret m0 = %print.arr_f32 $ (m0, SIZE, h_out, 0I32, %core.bitcast I32 SIZE);
+    ret m0 = %print.arr_f32 $ (m0, SIZE, h_out, 0I32, 10I32);
+    // let start = %core.wrap.sub 0 (%core.bitcast I32 SIZE, 20I32);
+    // ret m0 = %print.arr_f32 $ (m0, SIZE, h_out, start, 10I32);
 
     let m0 = %mem.free (m0, h_in1);
     let m0 = %mem.free (m0, h_in2);

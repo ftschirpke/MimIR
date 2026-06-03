@@ -35,7 +35,7 @@ con softmax_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gp
                     return: Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]) =
     let warpSize = %nvptx.warp_size;
 
-    let (m1, warpsPerBlock) = %core.div.sdiv (m1, (%core.bitcast I32 blockSize, warpSize));
+    let (m1, warpsPerBlock) = %core.div.udiv (m1, (%core.bitcast I32 blockSize, warpSize));
     let tid = %core.bitcast I32 item_id;
     let bid = %core.bitcast I32 group_id;
 
@@ -43,8 +43,8 @@ con softmax_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gp
     (continue, return)#is_idle_thread (m1, m3, m4, m5)
     where
         con continue (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gpu.LocalM) =
-            let (m1, warpId) = %core.div.sdiv (m1, (tid, warpSize));
-            let (m1, laneId) = %core.div.srem (m1, (tid, warpSize));
+            let (m1, warpId) = %core.div.udiv (m1, (tid, warpSize));
+            let (m1, laneId) = %core.div.urem (m1, (tid, warpSize));
             let row = %core.wrap.add 0 (%core.wrap.mul 0 (bid, warpsPerBlock), warpId);
 
             let is_idle_row = %core.icmp.sge (row, N);
@@ -88,7 +88,7 @@ con softmax_kernel (m1: %gpu.GlobalM, m3: %gpu.SharedM, m4: %gpu.ConstM, m5: %gp
                         end;
                     ret (m1, maxval, sumval) = loopA $ (m1, laneId, maxval, sumval);
 
-                    let (m1, offset) = %core.div.sdiv (m1, (warpSize, 2I32));
+                    let (m1, offset) = %core.div.udiv (m1, (warpSize, 2I32));
 
                     fun loopB (m1: %gpu.GlobalM, m5: %gpu.LocalM, offset: I32, maxval: %math.F32, sumval: %math.F32) =
                         wrapped_loop (m1, m5, offset, maxval, sumval, return)
@@ -176,7 +176,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
                         let idx = %core.bitcast (Idx size) i;
                         let addr = %mem.lea (h_in, idx);
                         let (m0, value_i32) = %libc.rand m0;
-                        let (m0, value_i32) = %core.div.srem (m0, (value_i32, cutoff));
+                        let (m0, value_i32) = %core.div.urem (m0, (value_i32, cutoff));
                         let value = %math.conv.s2f %math.f32 value_i32;
                         let value = %math.arith.div 0 (value, div);
                         let value = %math.arith.add 0 (value, a);
@@ -204,7 +204,7 @@ fun extern main (m0: %mem.M 0, argc: I32, argv: %mem.Ptr («⊤:Nat; %mem.Ptr (�
 
     let m0 = %gpu.deinit (m0, m1, m4);
 
-    ret m0 = %print.arr_f32 $ (m0, size, h_out, 10I32);
+    ret m0 = %print.arr_f32 $ (m0, size, h_out, 0I32, 10I32);
 
     let m0 = %mem.free (m0, h_in);
     let m0 = %mem.free (m0, h_out);
