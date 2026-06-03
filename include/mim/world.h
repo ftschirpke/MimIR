@@ -259,10 +259,8 @@ public:
     auto roots() const {
         auto res = Vector<const Def*>(); // TODO use std::views::concat - once we have C++26
         res.reserve(annexes().size() + externals().size());
-        for (auto def : annexes())
-            res.emplace_back(def);
-        for (auto mut : externals().muts())
-            res.emplace_back(mut);
+        res.append_range(annexes());
+        res.append_range(externals().muts());
         return res;
     }
     ///@}
