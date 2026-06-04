@@ -368,6 +368,11 @@ bool Emitter::isa_nested_proj(const Extract* extract) {
 void Emitter::emit_decl(BB& bb, const Def* def) {
     if (auto axm = def->isa<Axm>()) {
         if (!world().flags2annex().contains(axm->flags()) && !is_declared(axm->sym().str())) {
+            // Slots may have been disabled if we are coming from a rule declaration below
+            // in which case we want to enable them for the duration of emitting the axioms' type.
+            bool slots = slots_enabled();
+            if (!slots) toggle_slots();
+
             if (typed()) std::print(decls_, "(@ {}\n", emit_type(bb, axm->type()));
 
             if (slotted())
@@ -378,6 +383,8 @@ void Emitter::emit_decl(BB& bb, const Def* def) {
             if (typed()) std::print(decls_, ")");
             std::print(decls_, ")\n\n");
             declared_.insert(axm->sym().str());
+
+            if (!slots) toggle_slots();
         }
     } else if (def->isa_imm<Rule>()) {
         assert(false && "TODO no vars in immutable Rule");
