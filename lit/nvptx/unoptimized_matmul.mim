@@ -11,15 +11,10 @@ import math;
 import mem;
 import print;
 
-let N = 32768; // 1 << 15
-let NUM_BLOCKS = 1048576; // 1 << 20
+let N = 4096; // 1 << 12
+let NUM_BLOCKS = 16384; // 1 << 14
 let NUM_THREADS = 1024; // 1 << 10
-let NUM_BLOCKS_DIV_N = 32; // 1 << 5
-
-// let N = 4096; // 1 << 12
-// let NUM_BLOCKS = 16384; // 1 << 14
-// let NUM_THREADS = 1024; // 1 << 10
-// let NUM_BLOCKS_DIV_N = 4; // 1 << 2
+let NUM_BLOCKS_DIV_N = 4; // 1 << 2
 
 let SIZE = %core.nat.mul (N, N);
 let NUM_THREADS_I32 = %core.bitcast I32 NUM_THREADS;
