@@ -140,13 +140,14 @@ private:
 
     // Determines whether the symbolic expression should
     // be emitted with type annotations.
-    bool typed() const { return typed_ && types_enabled_; }
+    bool typed() const { return typed_; }
     bool typed_;
 
     // Temporarily disable type annotations while emitting.
     // We do not want to annotate values that are emitted as part of
     // a dependent type (i.e. during calls to emit_bb from emit_type for an array shape)
-    bool toggle_type_annotations() { return types_enabled_ = !types_enabled_; }
+    bool toggle_types() { return types_enabled_ = !types_enabled_; }
+    bool types_enabled() const { return typed() && types_enabled_; }
     bool types_enabled_;
 
     // Determines whether the symbolic expression should
@@ -279,7 +280,7 @@ void Emitter::emit_imported(Lam* lam) {
     if (slotted()) {
         std::print(func_decls_, "(root {} {}", ext, id(lam));
         ++tab;
-        if (typed()) std::print(func_decls_, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
+        if (types_enabled()) std::print(func_decls_, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
         std::print(func_decls_, "\n{}({}", tab, lam_kind);
         std::print(func_decls_, "{}", emit_var(bb, lam->var(), lam->type()->dom()));
         ++tab;
@@ -289,17 +290,17 @@ void Emitter::emit_imported(Lam* lam) {
         // multiple. We solve this issue by putting these filler symbols "<foo-filter>" ... into the bodies.
         std::print(func_decls_, "\n{}(scope <{}-filter> <{}-body>)", tab, id(lam), id(lam));
         --tab;
-        if (typed()) std::print(func_decls_, ")");
+        if (types_enabled()) std::print(func_decls_, ")");
         std::print(func_decls_, "))\n\n");
         --tab;
 
     } else {
-        if (typed()) std::print(func_decls_, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
+        if (types_enabled()) std::print(func_decls_, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
         std::print(func_decls_, "({} {} {}", lam_kind, ext, id(lam));
         std::print(func_decls_, "{}", emit_var(bb, lam->var(), lam->type()->dom()));
         std::print(func_decls_, "\n{}{}", tab, emit_type(bb, lam->dom()));
         std::print(func_decls_, "\n{}{}", tab, emit_type(bb, lam->codom()));
-        if (typed()) std::print(func_decls_, ")");
+        if (types_enabled()) std::print(func_decls_, ")");
         std::print(func_decls_, ")\n\n");
     }
 }
@@ -381,28 +382,14 @@ void Emitter::emit_decl(BB& bb, const Def* def) {
     } else if (def->isa_imm<Rule>()) {
         assert(false && "TODO no vars in immutable Rule");
     } else if (auto rule = def->isa_mut<Rule>()) {
-        // Rules should not have type annotations anywhere and just toggling annotations
-        // won't be enough to ensure that because they might be toggled on again via arr in emit_type
-        bool is_typed = typed_;
-        if (is_typed) typed_ = false;
-
-        // We also don't want any declarations (axioms) to be emitted via the rule so we
-        // save the state of the declarations before emitting the rule and restore it afterwards.
-        auto decls      = decls_.str();
-        auto decl_names = declared_;
-
+        toggle_types();
         auto meta_var_val = emit_var(bb, rule->var(), rule->dom(), true);
         toggle_slots();
         auto lhs_val   = emit_bb(bb, rule->lhs());
         auto rhs_val   = emit_bb(bb, rule->rhs());
         auto guard_val = emit_bb(bb, rule->guard());
         toggle_slots();
-
-        if (is_typed) typed_ = true;
-
-        decls_.str(decls);
-        decls_.seekp(0, std::ios::end);
-        declared_ = decl_names;
+        toggle_types();
 
         std::print(decls_, "(rule {} {} {} {} {})\n\n", indent(1, id(rule)), indent(1, meta_var_val),
                    indent(1, lhs_val), indent(1, rhs_val), indent(1, guard_val));
@@ -459,7 +446,7 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
         std::print(func_impls_, "{}", closing_parens);
 
         // Close type annotation '@'
-        if (typed()) std::print(func_impls_, ")");
+        if (types_enabled()) std::print(func_impls_, ")");
 
         if (slotted()) {
             --tab;
@@ -552,7 +539,7 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool nested) {
             std::print(os, "\n{}{}", tab, id(lam));
             std::print(os, "\n{}(scope", tab);
             ++tab;
-            if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
+            if (types_enabled()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
             std::print(os, "\n{}({}", tab, lam_kind);
         } else {
             // We toggle slot-printing to emit the lam id without a slot prefix '$'
@@ -560,7 +547,7 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool nested) {
             std::print(os, "(root {} {}", ext, id(lam));
             toggle_slots();
             ++tab;
-            if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
+            if (types_enabled()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
             std::print(os, "\n{}({}", tab, lam_kind);
         }
 
@@ -568,10 +555,10 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool nested) {
         std::print(os, "\n{}(let", tab);
         ++tab;
         std::print(os, "\n{}{}", tab, id(lam));
-        if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
+        if (types_enabled()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
         std::print(os, "\n{}({} {} {}", tab, lam_kind, ext, id(lam));
     } else {
-        if (typed()) std::print(os, "\n{}(@ {}\n", tab, emit_type(bb, lam->type()));
+        if (types_enabled()) std::print(os, "\n{}(@ {}\n", tab, emit_type(bb, lam->type()));
         std::print(os, "({} {} {}", lam_kind, ext, id(lam));
     }
 
@@ -658,10 +645,11 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             // We disable type annotations and the creation of new bindings
             // to prevent the array shape term from creating bindings in the lambda body
             // which it can't access and we also don't want type annotations inside of types.
-            toggle_type_annotations();
+            bool suppress_annotations = types_enabled();
+            if (suppress_annotations) toggle_types();
             toggle_bindings();
             arity_val = flatten(emit_bb(bb, arr->arity()));
-            toggle_type_annotations();
+            if (suppress_annotations) toggle_types();
             toggle_bindings();
         }
         std::string arr_val = arity_val + " " + emit_type(bb, arr->body());
@@ -707,10 +695,7 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
             std::print(os, "(tuple {})",
                        fe::Join(tuple->ops() | std::views::transform([&](auto op) { return emit_type(bb, op); }), " "));
     } else if (auto app = type->isa<App>()) {
-        if (Pi::isa_implicit(app->callee()->type()))
-            std::print(os, "{}", emit_type(bb, app->callee()));
-        else
-            std::print(os, "(app {} {})", emit_type(bb, app->callee()), emit_type(bb, app->arg()));
+        std::print(os, "(app {} {})", emit_type(bb, app->callee()), emit_type(bb, app->arg()));
     } else if (auto axm = type->isa<Axm>()) {
         std::print(os, "{}", id(axm));
         emit_decl(bb, axm);
@@ -719,7 +704,11 @@ std::string Emitter::emit_type(BB& bb, const Def* type) {
     } else if (auto hole = type->isa<Hole>()) {
         std::print(os, "(hole {})", emit_type(bb, hole->type()));
     } else if (auto extract = type->isa<Extract>()) {
-        std::print(os, "(extract {} {})", emit_type(bb, extract->tuple()), emit_type(bb, extract->index()));
+        // Projections of rule variables are meta vars and should just be printed by name
+        if (auto var = extract->tuple()->isa<Var>(); var && var->mut()->isa<Rule>())
+            std::print(os, "{}", id(extract));
+        else
+            std::print(os, "(extract {} {})", emit_type(bb, extract->tuple()), emit_type(bb, extract->index()));
     } else if (auto mType = type->isa<Type>()) {
         std::print(os, "(type {})", emit_type(bb, mType->level()));
     } else if (type->isa<Univ>()) {
@@ -818,7 +807,7 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
     if (is_bound(def) && bindings_enabled()) {
         bb.assign(tab, slotted(), id(def), [&](fe::Tab tab, auto& os) {
             ++tab;
-            if (typed()) std::print(os, "\n{}(@ {}", tab, type_val);
+            if (types_enabled()) std::print(os, "\n{}(@ {}", tab, type_val);
             std::print(os, "\n{}({}", tab, node_name);
 
             if (slotted() && variadic)
@@ -834,7 +823,7 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
             if (slotted() && def->isa<Pack>()) std::print(os, ")");
 
             std::print(os, ")");
-            if (typed()) std::print(os, ")");
+            if (types_enabled()) std::print(os, ")");
             --tab;
         });
         std::print(os, "\n{}{}", tab, id(def, true));
@@ -871,7 +860,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
 
     // We don't annotate axioms since this makes the sexpr's extremely cluttered and the axioms
     // will already be emitted separately with an annotation.
-    if (typed() && !def->isa<Axm>()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, def->type()));
+    if (types_enabled() && !def->isa<Axm>()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, def->type()));
 
     if (def->isa_imm<Lam>()) {
         assert(false && "TODO immutable lam inline");
@@ -919,6 +908,9 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
     } else if (auto extract = def->isa<Extract>()) {
         if (!slotted() && ((Lit::isa(extract->index()) && extract->tuple()->isa<Var>()) || isa_nested_proj(extract)))
             std::print(os, "\n{}{}", tab, id(extract));
+        // Projections of rule variables are meta vars and should just be printed by name
+        else if (auto var = extract->tuple()->isa<Var>(); var && var->mut()->isa<Rule>())
+            std::print(os, "\n{}{}", tab, id(extract));
         else
             std::print(os, "{}", emit_node(bb, extract, "extract"));
     } else if (auto insert = def->isa<Insert>()) {
@@ -926,44 +918,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
     } else if (auto var = def->isa<Var>()) {
         std::print(os, "\n{}{}", tab, id(var, true));
     } else if (auto app = def->isa<App>()) {
-        auto callee     = app->callee();
-        auto arg        = app->arg();
-        auto callee_val = emit_bb(bb, callee);
-        auto arg_val    = emit_bb(bb, arg);
-
-        std::ostringstream app_os;
-        if (Pi::isa_implicit(callee->type())) {
-            // Removes the type annotation of an implicit app since we are not
-            // emitting this app, but emit only its callee (already annotated)
-            if (typed()) os.str("");
-            std::print(app_os, "{}", indent(tab.indent(), callee_val));
-        } else {
-            std::print(app_os, "\n{}(app", tab);
-            std::print(app_os, "{}", callee_val);
-            std::print(app_os, "{})", arg_val);
-        }
-        auto app_val = app_os.str();
-
-        if (is_bound(app)) {
-            bb.assign(tab, slotted(), id(app), [&](fe::Tab tab, auto& os) {
-                ++tab;
-                if (typed()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, app->type()));
-                std::print(os, "{}", indent(tab.indent(), app_val));
-                if (typed()) std::print(os, ")");
-                --tab;
-            });
-            std::print(os, "\n{}{}", tab, id(app, true));
-        } else {
-            std::print(os, "{}", app_val);
-        }
-
-        // Short-circuit return to avoid emitting an extraneous closing parentheses
-        // for a type-annotation that we flushed (see explanation above.)
-        if (typed() && Pi::isa_implicit(callee->type())) {
-            --tab;
-            return os.str();
-        }
-
+        std::print(os, "{}", emit_node(bb, app, "app"));
     } else if (auto axm = def->isa<Axm>()) {
         std::print(os, "\n{}{}", tab, id(axm));
         emit_decl(bb, axm);
@@ -999,7 +954,7 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
         fe::unreachable();
     }
 
-    if (typed() && !def->isa<Axm>()) std::print(os, ")");
+    if (types_enabled() && !def->isa<Axm>()) std::print(os, ")");
     --tab;
 
     return os.str();
