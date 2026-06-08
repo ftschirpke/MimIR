@@ -85,13 +85,14 @@ struct BB {
     friend void swap(BB& a, BB& b) noexcept {
         using std::swap;
         swap(a.parts, b.parts);
+        swap(a.assigned, b.assigned);
     }
 
     bool is_assigned(std::string name) const { return assigned.contains(name); }
     void assign(std::string name) { assigned.insert(name); }
 
     std::array<std::deque<std::ostringstream>, 3> parts;
-    std::unordered_set<std::string> assigned;
+    absl::flat_hash_set<std::string> assigned;
 };
 
 class Emitter : public mim::Emitter<std::string, std::string, BB, Emitter> {
@@ -115,7 +116,6 @@ public:
     void emit_epilogue(Lam*);
     void finalize();
 
-    using LamSet = std::unordered_set<Lam*>;
     LamSet next_lams(Lam* lam);
     bool isa_nested_proj(const Extract* extract);
 
@@ -173,7 +173,7 @@ private:
 
     // Ensures that we don't redeclare things, for example %axm.foo
     // should only be declared once.
-    std::unordered_set<std::string> declared_;
+    absl::flat_hash_set<std::string> declared_;
     bool is_declared(std::string name) { return declared_.contains(name); }
 
     std::ostringstream decls_;
@@ -328,8 +328,8 @@ void Emitter::finalize() {
     if (is_bound(root_lam)) emit_lam(root_lam, root_lam, rec_lams);
 }
 
-std::unordered_set<Lam*> Emitter::next_lams(Lam* lam) {
-    std::unordered_set<Lam*> next_lams;
+LamSet Emitter::next_lams(Lam* lam) {
+    LamSet next_lams;
     for (auto op : lam->deps()) {
         for (auto mut : op->local_muts())
             if (auto next = nest()[mut]) {
@@ -370,8 +370,8 @@ void Emitter::emit_decl(BB& bb, const Def* def) {
         if (!world().flags2annex().contains(axm->flags()) && !is_declared(axm->sym().str())) {
             // Slots may have been disabled if we are coming from a rule declaration below
             // in which case we want to enable them for the duration of emitting the axioms' type.
-            bool slots = slots_enabled();
-            if (!slots) toggle_slots();
+            bool enable_slots = !slots_enabled();
+            if (enable_slots) toggle_slots();
 
             if (typed()) std::print(decls_, "(@ {}\n", emit_type(bb, axm->type()));
 
@@ -382,24 +382,32 @@ void Emitter::emit_decl(BB& bb, const Def* def) {
 
             if (typed()) std::print(decls_, ")");
             std::print(decls_, ")\n\n");
-            declared_.insert(axm->sym().str());
 
-            if (!slots) toggle_slots();
+            if (enable_slots) toggle_slots();
+
+            declared_.insert(axm->sym().str());
         }
     } else if (def->isa_imm<Rule>()) {
         assert(false && "TODO no vars in immutable Rule");
     } else if (auto rule = def->isa_mut<Rule>()) {
-        toggle_types();
+        bool suppress_annotations = types_enabled();
+        bool suppress_slots       = slots_enabled();
+
+        if (suppress_annotations) toggle_types();
         auto meta_var_val = emit_var(bb, rule->var(), rule->dom(), true);
-        toggle_slots();
+
+        if (suppress_slots) toggle_slots();
         auto lhs_val   = emit_bb(bb, rule->lhs());
         auto rhs_val   = emit_bb(bb, rule->rhs());
         auto guard_val = emit_bb(bb, rule->guard());
-        toggle_slots();
-        toggle_types();
+
+        if (suppress_slots) toggle_slots();
+        if (suppress_annotations) toggle_types();
 
         std::print(decls_, "(rule {} {} {} {} {})\n\n", indent(1, id(rule)), indent(1, meta_var_val),
                    indent(1, lhs_val), indent(1, rhs_val), indent(1, guard_val));
+
+        declared_.insert(rule->sym().str());
     }
 }
 
