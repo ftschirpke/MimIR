@@ -1,3 +1,4 @@
+// REQUIRES: nvptx
 // RUN: rm -f %t.ll
 // RUN: %mim %s -O 0
 

@@ -1,3 +1,4 @@
+// REQUIRES: nvptx
 // RUN: rm -f %t.ll
 // RUN: %mim %s --output-ll %t.ll --device-target nvptx -o -
 // RUN: rm -f %t
