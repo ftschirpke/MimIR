@@ -1,5 +1,5 @@
-#include "mim/plug/nvptx/be/hcf_adapter.h"
-#include "mim/plug/nvptx/be/hcf_container.hpp"
+#include "mim/plug/pcuda/be/hcf_adapter.h"
+#include "mim/plug/pcuda/be/hcf_container.hpp"
 
 namespace mim::ll::pcuda {
 

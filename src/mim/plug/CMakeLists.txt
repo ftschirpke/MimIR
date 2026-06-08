@@ -12,6 +12,7 @@ set(MIM_PLUGINS
     matrix
     mem
     nvptx
+    pcuda
     opt
     ord
     print

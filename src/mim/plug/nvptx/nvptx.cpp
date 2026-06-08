@@ -6,7 +6,6 @@
 #include <mim/plug/gpu/gpu.h>
 
 #include "mim/plug/nvptx/be/ll_nvptx.h"
-#include "mim/plug/nvptx/be/ll_pcuda.h"
 
 using namespace mim;
 using namespace mim::plug;
@@ -25,9 +24,5 @@ extern "C" MIM_EXPORT Plugin mim_get_plugin() {
                 backends["ll-host-nvptx"]           = &ll::nvptx::emit_host;
                 backends["ll-dev-nvptx"]            = &ll::nvptx::emit_device;
                 backends["ll-host-nvptx-embed-dev"] = &ll::nvptx::emit_host_with_embedded_device;
-                // pCUDA (AdaptiveCpp SSCP - generic multi-backend) backends
-                backends["ll-host-pcuda"]           = &ll::pcuda::emit_host;
-                backends["ll-dev-pcuda"]            = &ll::pcuda::emit_device;
-                backends["ll-host-pcuda-embed-dev"] = &ll::pcuda::emit_host_with_embedded_device;
             }};
 }

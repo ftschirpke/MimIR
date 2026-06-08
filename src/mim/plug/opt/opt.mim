@@ -17,6 +17,7 @@ import direct;
 import gpu;
 import matrix;
 import nvptx;
+import pcuda;
 import refly;
 import regex;
 ///
@@ -75,6 +76,7 @@ lam extern _default_compile (): %compile.Phase =
                 %mem.alloc2malloc_repl,
                 cond_repl "gpu" %gpu.general_repls,
                 cond_repl "nvptx" %nvptx.general_repls,
+                cond_repl "pcuda" %pcuda.general_repls,
                 cond_repl "refly" %refly.remove_dbg_repl,
             )
         ),

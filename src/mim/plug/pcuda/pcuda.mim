@@ -1,0 +1,46 @@
+/// # The pcuda Plugin {#pcuda}
+///
+/// @see mim::plug::pcuda
+///
+/// A minimal pCUDA plugin targeting AdaptiveCpp's SSCP (generic, multi-backend)
+/// runtime. Unlike @ref nvptx it does not lower streams to a backend-specific
+/// pointer type; the host emitter consumes the @ref gpu stream axioms directly
+/// and maps them onto the `pcudaStream*` runtime ABI.
+///
+/// [TOC]
+///
+/// ## Dependencies
+///
+plugin gpu;
+import compile;
+import mem;
+///
+/// ## Types
+///
+/// ### Streams
+///
+/// The pCUDA runtime ABI represents `pcudaStream_t` as a plain pointer, so the
+/// abstract @ref gpu stream is lowered to a byte pointer (mirrors @ref nvptx).
+let %pcuda.Stream = %mem.Ptr0 I8;
+///
+/// ## Operations
+///
+/// ### Special Registers
+///
+/// Retrieves the warp size on the device. With SSCP this is resolved via JIT
+/// reflection (`__acpp_sscp_jit_reflect_warp_size`) so it stays backend-agnostic.
+axm %pcuda.warp_size: I32;
+// TODO: only allow in device code
+///
+/// ## Stages
+///
+/// ### Repls
+///
+/// Lowers `%gpu.Stream` to `%pcuda.Stream` during the opt pipeline.
+axm %pcuda.stream_impl_repl: %compile.Repl;
+///
+/// ### Pipelines
+///
+let %pcuda.general_repls = %compile.repls (
+    %pcuda.stream_impl_repl,
+);

@@ -165,6 +165,7 @@ int main(int argc, char** argv) {
             switch (device_target) {
                 case None: break;
                 case NVPTX: plugins.emplace_back("nvptx"s); break;
+                case PCUDA: plugins.emplace_back("pcuda"s); break;
                 case Num_DeviceTargets: fe::unreachable();
             }
 
@@ -233,7 +234,7 @@ int main(int argc, char** argv) {
                                 backend_name = "ll-dev-pcuda";
                             else
                                 backend_name = "ll-host-pcuda-embed-dev";
-                            plugin_name = "nvptx";  // pCUDA backends are registered in nvptx plugin
+                            plugin_name = "pcuda";
                             break;
                         case Num_DeviceTargets: fe::unreachable();
                     }

@@ -1,6 +1,6 @@
-#include "mim/plug/nvptx/be/ll_pcuda.h"
-#include "mim/plug/nvptx/be/hcf_adapter.h"
-#include "mim/plug/nvptx/be/pcuda_config.h"
+#include "mim/plug/pcuda/be/ll_pcuda.h"
+#include "mim/plug/pcuda/be/hcf_adapter.h"
+#include "mim/plug/pcuda/be/pcuda_config.h"
 
 #include <iomanip>
 #include <sstream>
@@ -11,7 +11,7 @@
 #include <mim/plug/core/core.h>
 #include <mim/plug/gpu/gpu.h>
 #include <mim/plug/mem/mem.h>
-#include <mim/plug/nvptx/nvptx.h>
+#include <mim/plug/pcuda/pcuda.h>
 
 using namespace std::string_literals;
 
@@ -21,7 +21,7 @@ namespace core  = mim::plug::core;
 namespace math  = mim::plug::math;
 namespace mem   = mim::plug::mem;
 namespace gpu   = mim::plug::gpu;
-namespace nvptx = mim::plug::nvptx;
+namespace pcuda = mim::plug::pcuda;
 
 // ============================================================================
 // PCUDAHostEmitter Class Definition
@@ -664,21 +664,13 @@ std::optional<std::string> PCUDADeviceEmitter::isa_targetspecific_intrinsic(BB& 
         emit_unsafe(sync_work_items->arg(1));
         print(bb.body().emplace_back(), "call void @__acpp_sscp_work_group_barrier(i32 2, i32 0)");
         return name;
-    } else if (auto warp_size = Axm::isa<nvptx::warp_size>(def)) {
+    } else if (auto warp_size = Axm::isa<pcuda::warp_size>(def)) {
         // Use SSCP JIT reflection for warp size (backend-agnostic)
         declare("i32 @__acpp_sscp_jit_reflect_warp_size()");
         assert(name[0] == '%');
         auto valid_name = name.substr(1);
         bb.assign(valid_name, "call i32 @__acpp_sscp_jit_reflect_warp_size()");
         return valid_name;
-    } else if (Axm::isa<nvptx::sync_warp_threads>(def)) {
-        error("pCUDA backend does not yet support 'nvptx.sync_warp_threads'; use --device-target nvptx or extend the pCUDA backend");
-    } else if (Axm::isa<nvptx::shfl_sync>(def)) {
-        error("pCUDA backend does not yet support 'nvptx.shfl_sync'; use --device-target nvptx or extend the pCUDA backend");
-    } else if (Axm::isa<nvptx::fmaf>(def)) {
-        error("pCUDA backend does not yet support 'nvptx.fmaf'; use --device-target nvptx or extend the pCUDA backend");
-    } else if (Axm::isa<math::exp>(def)) {
-        error("pCUDA backend does not yet support 'math.exp' (libdevice); use --device-target nvptx or extend the pCUDA backend");
     }
 
     return std::nullopt;
