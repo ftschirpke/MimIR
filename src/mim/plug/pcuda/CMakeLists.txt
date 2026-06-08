@@ -11,12 +11,18 @@ add_mim_plugin(pcuda
 # a configured header so the orchestrator finds them regardless of cwd.
 if(AdaptiveCpp_FOUND AND MIM_ACPP_INSTALL_DIR)
     set(MIM_ACPP_FOUND 1)
+    message("Using AdaptiveCpp from ${MIM_ACPP_INSTALL_DIR}")
 else()
     set(MIM_ACPP_FOUND 0)
     set(MIM_ACPP_INSTALL_DIR "")
     set(MIM_ACPP_LIB_DIR "")
 endif()
-set(MIM_SSCP_STUBS_PATH "${CMAKE_SOURCE_DIR}/scripts/sscp_stubs.ll")
+set(MIM_SSCP_STUBS_PATH "${CMAKE_BINARY_DIR}/lib/mim/sscp_stubs.ll")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/sscp_stubs.ll"
+    "${MIM_SSCP_STUBS_PATH}"
+    COPYONLY)
+
 configure_file(
     "${CMAKE_CURRENT_LIST_DIR}/be/pcuda_config.h.in"
     "${CMAKE_BINARY_DIR}/include/mim/plug/pcuda/be/pcuda_config.h"

@@ -439,10 +439,10 @@ void PCUDADeviceEmitter::start() {
     // MimIR's GPU model has a single group_id + item_id per launch (1D), so
     // we always emit `hipsycl_kernel_dimension = 1`. Multi-dim launches would
     // need this to come from launch_config instead.
+    std::ostringstream tmp;
+    int next_id = 0;
     if (!kernels_.empty()) {
-        std::ostringstream tmp;
         std::vector<int> md_ids;
-        int next_id = 0;
         for (auto k : kernels_) {
             md_ids.push_back(next_id);
             print(tmp, "!{} = !{{ptr {}, !\"hipsycl_kernel_dimension\", i32 1}}\n",
@@ -456,8 +456,21 @@ void PCUDADeviceEmitter::start() {
             sep = ", ";
         }
         print(tmp, "}}\n");
-        ostream() << tmp.str();
     }
+
+    // AdaptiveCpp's PTX backend flavoring (LLVMToPtx::toBackendFlavor) appends
+    // the nvvm-reflect ftz / prec-div / prec-sqrt settings via
+    //   M.getModuleFlagsMetadata()->addOperand(...)
+    // and that accessor returns null when the module carries no
+    // !llvm.module.flags — so a device module without module flags makes the
+    // JIT dereference null and segfault. A clang-generated SSCP module always
+    // has module flags; MimIR's minimal device IR does not, so emit a benign
+    // one to give the JIT a node to append to.
+    int uwtable_id = next_id++;
+    print(tmp, "!{} = !{{i32 1, !\"uwtable\", i32 0}}\n", uwtable_id);
+    print(tmp, "!llvm.module.flags = !{{!{}}}\n", uwtable_id);
+
+    ostream() << tmp.str();
 }
 
 std::string PCUDADeviceEmitter::prepare() {
