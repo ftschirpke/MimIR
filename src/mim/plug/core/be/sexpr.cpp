@@ -320,7 +320,7 @@ void Emitter::finalize() {
     // via emit_bb() but we don't want to emit the lambda itself.
     // We can't do this with Axm::isa because 'eqsat' is an out-of-tree plugin
     // that isn't guaranteed to have been cloned so we can't include its header file.
-    else if (root()->codom()->sym().str() == "%eqsat.Rules")
+    else if (root()->codom()->sym().str() == "%eqsat.Config")
         return;
 
     LamSet rec_lams;
