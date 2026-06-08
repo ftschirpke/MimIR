@@ -32,6 +32,16 @@ let %pcuda.Stream = %mem.Ptr0 I8;
 axm %pcuda.warp_size: I32;
 // TODO: only allow in device code
 ///
+/// ### Arithmetic Functions
+///
+/// #### %%pcuda.fmaf
+///
+/// Computes `x*y+z`, i.e. fused-multiply-add. Lowered to AdaptiveCpp's
+/// backend-agnostic SSCP builtin `__acpp_sscp_fma_f32` / `__acpp_sscp_fma_f64`
+/// depending on the float width of `T`. Unlike @ref nvptx's `%nvptx.fmaf` there
+/// is no rounding-mode selector — SSCP rounds to nearest (the IEEE default).
+axm %pcuda.fmaf: {T: *} → [T, T, T] → T;
+///
 /// ## Stages
 ///
 /// ### Repls

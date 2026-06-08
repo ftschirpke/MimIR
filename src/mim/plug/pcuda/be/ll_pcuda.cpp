@@ -671,6 +671,24 @@ std::optional<std::string> PCUDADeviceEmitter::isa_targetspecific_intrinsic(BB& 
         auto valid_name = name.substr(1);
         bb.assign(valid_name, "call i32 @__acpp_sscp_jit_reflect_warp_size()");
         return valid_name;
+    } else if (auto fmaf = Axm::isa<pcuda::fmaf>(def)) {
+        // Fused multiply-add → SSCP builtin, picked by float width. The JIT
+        // resolves __acpp_sscp_fma_f32/f64 against the kernel library for the
+        // active backend, so this stays backend-agnostic.
+        std::string_view builtin;
+        std::string_view ty;
+        switch (math::isa_f(fmaf->arg(0)->type()).value_or(0)) {
+            case 32: builtin = "__acpp_sscp_fma_f32"; ty = "float"; break;
+            case 64: builtin = "__acpp_sscp_fma_f64"; ty = "double"; break;
+            default: error("pCUDA backend: %pcuda.fmaf only supports f32 and f64");
+        }
+
+        auto x = emit(fmaf->arg(0));
+        auto y = emit(fmaf->arg(1));
+        auto z = emit(fmaf->arg(2));
+
+        declare("{} @{}({}, {}, {})", ty, builtin, ty, ty, ty);
+        return bb.assign(name, "call {} @{}({} {}, {} {}, {} {})", ty, builtin, ty, x, ty, y, ty, z);
     }
 
     return std::nullopt;
