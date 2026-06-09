@@ -45,9 +45,10 @@ public:
 
         auto dot = str.find('.');
         if (dot == std::string::npos) return;
-        if (!driver().is_loaded(driver().sym(str.substr(0, dot)))) return;
+        auto begin = str[0] == '%' ? 1uz : 0uz; // skip the leading '%' of the annex name
+        if (!driver().is_loaded(driver().sym(str.substr(begin, dot - begin)))) return;
 
-        auto target = driver().sym("%" + str);
+        auto target = driver().sym(str);
         for (auto def : world().annexes())
             if (def->sym() == target) {
                 resolved_ = Stage::create(driver().stages(), def);

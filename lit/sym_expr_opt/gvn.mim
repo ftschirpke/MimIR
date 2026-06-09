@@ -38,7 +38,7 @@ lam extern _compile(): %compile.Phase =
         ),
         %compile.eta_exp_phase,
         %compile.sym_expr_opt,
-        %compile.named_phase "ll.emit",
+        %compile.named_phase "%ll.emit",
     );
 
 // CHECK: phi i64
