@@ -1136,7 +1136,7 @@ AST load_plugins(World&, View<Sym>);
 inline AST load_plugins(World& w, View<std::string> plugins) {
     return load_plugins(w, Vector<Sym>(plugins.size(), [&](size_t i) { return w.sym(plugins[i]); }));
 }
-inline AST load_plugins(World& w, Sym sym) { return load_plugins(w, View<Sym>({sym})); }
-inline AST load_plugins(World& w, const std::string& plugin) { return load_plugins(w, w.sym(plugin)); }
+inline AST load_plugin(World& w, Sym sym) { return load_plugins(w, View<Sym>({sym})); }
+inline AST load_plugin(World& w, const std::string& plugin) { return load_plugin(w, w.sym(plugin)); }
 
 } // namespace mim::ast

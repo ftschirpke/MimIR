@@ -27,7 +27,7 @@ TEST(RestrictedDependentTypes, join_singleton) {
     auto test_on_world = [](auto test) {
         Driver driver;
         World& w = driver.world();
-        ast::load_plugins(w, {"compile"s, "mem"s, "core"s, "math"s});
+        ast::load_plugins(w, {"mem"s, "core"s, "math"s});
 
         auto i32_t = w.type_i32();
         auto i64_t = w.type_i64();
@@ -218,7 +218,7 @@ TEST(RestrictedDependentTypes, ll) {
     Driver driver;
     World& w = driver.world();
     w.set("restricted_dep_types");
-    ast::load_plugins(w, {"compile"s, "mem"s, "core"s, "math"s, "opt"s, "ll"s});
+    ast::load_plugins(w, {"mem"s, "core"s, "math"s, "ll"s});
 
     auto mem_t  = w.call<mem::M>(0);
     auto i32_t  = w.type_i32();

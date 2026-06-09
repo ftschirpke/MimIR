@@ -7,7 +7,9 @@
 /// The LLVM backend.
 /// Loading this plugin (`mim foo.mim -p ll`) appends an emission phase to the compilation pipeline that writes the LLVM IR of the fully lowered program to `<world>.ll`.
 ///
-import compile;
+/// ## Dependencies
+///
+plugin opt;
 ///
 /// ## Phases
 ///

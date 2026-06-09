@@ -14,7 +14,7 @@ int main(int, char**) {
         auto driver = Driver("hello");
         auto& w     = driver.world();
         driver.log().set(&std::cerr).set(Log::Level::Debug);
-        ast::load_plugins(w, View<std::string>{"compile", "core", "opt", "ll"});
+        ast::load_plugins(w, View<std::string>{"core", "ll"});
 
         // Cn [%mem.M 0, I32, %mem.Ptr (I32, 0) Cn [%mem.M 0, I32]]
         auto mem_t  = w.call<mem::M>(0);
