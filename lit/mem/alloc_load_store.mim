@@ -1,6 +1,6 @@
-// RUN: rm -f alloc_load_store.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o -
-// RUN: clang alloc_load_store.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t; test $? -eq 1
 // RUN: %t 1 2 3; test $? -eq 4
 // RUN: %t 1 2 3 4 5; test $? -eq 6

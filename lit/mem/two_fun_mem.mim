@@ -1,6 +1,6 @@
-// RUN: rm -f two_fun_mem.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o -
-// RUN: clang two_fun_mem.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t; test $? -eq 5
 // RUN: %t 1; test $? -eq 7
 // RUN: %t 1 2; test $? -eq 9

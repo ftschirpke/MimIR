@@ -1,6 +1,6 @@
-// RUN: rm -f llvm_array_ext.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll
-// RUN: clang llvm_array_ext.ll -c -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -c -o %t -Wno-override-module
 
 plugin core;
 plugin vec;

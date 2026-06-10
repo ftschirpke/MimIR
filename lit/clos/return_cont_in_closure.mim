@@ -1,4 +1,4 @@
-// RUN: rm -f return_cont_in_closure.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt -p clos %s -p ll -o -
 
 plugin core;

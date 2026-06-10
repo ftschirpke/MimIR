@@ -1,6 +1,6 @@
-// RUN: rm -f alloc.ll %t
+// RUN: rm -f %{s:stem}.ll %t
 // RUN: %mim -p opt %s -p ll -o -
-// RUN: clang alloc.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 
 plugin core;
 

@@ -1,6 +1,6 @@
-// RUN: rm -f dynamic_for.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o - | %FileCheck %s
-// RUN: clang dynamic_for.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t 1 3 1; test $? -eq 3
 // RUN: %t 0 5 2 ; test $? -eq 6
 

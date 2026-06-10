@@ -1,4 +1,4 @@
-// RUN: rm -f ds2cps_cps_only.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o - | %FileCheck %s
 
 // sanity check that the pass do not interfere with normal operation

@@ -1,4 +1,4 @@
-// RUN: rm -f autodiff_mult_in_call.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt -p direct %s -p ll -o - | %FileCheck %s
 
 plugin core;

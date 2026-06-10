@@ -1,4 +1,4 @@
-// RUN: rm -f 2out.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt -p direct %s -p ll -o - | %FileCheck %s
 
 plugin core;

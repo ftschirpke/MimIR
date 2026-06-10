@@ -1,4 +1,4 @@
-// RUN: rm -f loopDiff.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt -p clos %s -p ll -o -
 
 plugin core;

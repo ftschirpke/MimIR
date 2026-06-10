@@ -1,6 +1,6 @@
-// RUN: rm -f match_wplusa.ll ; \
+// RUN: rm -f %{s:stem}.ll ; \
 // RUN: %mim -p opt %s -o - -p ll --aggr-lam-spec | %FileCheck %s
-// RUN: clang match_wplusa.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t "aa"; test $? -eq 1
 // RUN: %t "abca"; test $? -eq 1
 // RUN: %t "a"; test $? -eq 0

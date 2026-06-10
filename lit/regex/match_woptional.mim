@@ -1,6 +1,6 @@
-// RUN: rm -f match_woptional.ll ; \
+// RUN: rm -f %{s:stem}.ll ; \
 // RUN: %mim -p opt %s -o - -p ll | %FileCheck %s
-// RUN: clang match_woptional.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t "g1 "; test $? -eq 1
 // RUN: %t "# "; test $? -eq 1
 

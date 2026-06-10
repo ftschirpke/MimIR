@@ -1,6 +1,6 @@
-// RUN: rm -f for_over_mem.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o - | %FileCheck %s
-// RUN: clang for_over_mem.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t 0 1 2 3 ; test $? -eq 1
 // RUN: %t 0 1 2 3 4 5 6 7 ; test $? -eq 15
 

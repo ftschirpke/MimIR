@@ -1,4 +1,4 @@
-// RUN: rm -f get_shape.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll --output-mim - | %FileCheck %s
 
 plugin core;

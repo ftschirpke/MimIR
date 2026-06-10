@@ -1,6 +1,6 @@
-// RUN: rm -f affine_index.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o - | %FileCheck %s
-// RUN: clang affine_index.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t       ; test $? -eq 9
 // RUN: %t 1 2 3 ; test $? -eq 21
 

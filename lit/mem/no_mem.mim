@@ -1,4 +1,4 @@
-// RUN: rm -f no_mem.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o - | %FileCheck %s
 
 plugin core;

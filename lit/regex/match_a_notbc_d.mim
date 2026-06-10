@@ -1,6 +1,6 @@
-// RUN: rm -f match_a_notbc_d.ll ; \
+// RUN: rm -f %{s:stem}.ll ; \
 // RUN: %mim -p opt %s -o - -p ll | %FileCheck %s
-// RUN: clang match_a_notbc_d.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t "aad"; test $? -eq 1
 // RUN: %t "abd"; test $? -eq 0
 // RUN: %t "aaa"; test $? -eq 0

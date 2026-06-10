@@ -1,6 +1,6 @@
-// RUN: rm -f pow.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o -
-// RUN: clang pow.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t ; test $? -eq 81
 
 plugin core;

@@ -1,4 +1,4 @@
-// RUN: rm -f invoke_ds.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -o - -p ll | %FileCheck %s
 
 plugin core;

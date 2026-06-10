@@ -1,4 +1,4 @@
-// RUN: rm -f restructre_free_var.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o -
 
 plugin core;

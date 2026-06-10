@@ -1,6 +1,6 @@
-// RUN: rm -f normalize_bitcast.ll
+// RUN: rm -f %{s:stem}.ll
 // RUN: %mim -p opt %s -p ll -o - | %FileCheck %s
-// RUN: clang -c normalize_bitcast.ll -o %t -Wno-override-module
+// RUN: clang -c %{s:stem}.ll -o %t -Wno-override-module
 
 plugin core;
 

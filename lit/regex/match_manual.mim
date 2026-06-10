@@ -1,6 +1,6 @@
-// RUN: rm -f match_manual.ll ; \
+// RUN: rm -f %{s:stem}.ll ; \
 // RUN: %mim -p opt %s -o - -p ll | %FileCheck %s
-// RUN: clang match_manual.ll -o %t -Wno-override-module %S/../lib.c
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module %S/../lib.c
 // RUN: %t "aa"; test $? -eq 1
 // RUN: %t "abbaa"; test $? -eq 1
 // RUN: %t "a"; test $? -eq 0

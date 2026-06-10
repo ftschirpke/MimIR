@@ -1,6 +1,6 @@
-// RUN: rm -f match_neg_aW.ll ; \
+// RUN: rm -f %{s:stem}.ll ; \
 // RUN: %mim -p opt %s -o - -p ll | %FileCheck %s
-// RUN: clang match_neg_aW.ll -o %t -Wno-override-module
+// RUN: clang %{s:stem}.ll -o %t -Wno-override-module
 // RUN: %t "a"; test $? -eq 0
 // RUN: %t "b"; test $? -eq 1
 // RUN: %t "#"; test $? -eq 0
