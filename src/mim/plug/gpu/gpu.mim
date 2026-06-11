@@ -270,7 +270,7 @@ axm %gpu.launch: {n: Nat, Ts: «n; *»}
                      «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
                → «i: n; Ts#i»
-               → Fn [%mem.M 0] → %mem.M 0;
+               → Fn [%mem.M 0, %gpu.GlobalM, %gpu.ConstM] → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM];
 ///
 /// #### %%gpu.hier_launch
 ///
