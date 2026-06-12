@@ -10,8 +10,6 @@ void optimize(World& world) {
     auto compilation_functions = {
         world.sym("_compile"),
         world.sym("_default_compile"),
-        world.sym("_core_compile"),
-        world.sym("_fallback_compile")
     };
     // clang-format on
 
@@ -26,7 +24,6 @@ void optimize(World& world) {
     // make all functions `[] -> %compile.Phase` internal
     for (auto def : world.externals().mutate()) {
         if (auto lam = def->isa<Lam>(); lam && lam->num_doms() == 0) {
-            // TODO use Axm::isa - but rn there is a problem with the rec Pi and plugin deps
             if (lam->codom()->sym().view() == "%compile.Phase") {
                 if (!compilation) compilation = lam;
                 def->internalize();

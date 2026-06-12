@@ -120,7 +120,7 @@ public:
     auto stage(flags_t flags) { return lookup(stages_, flags); }
     const auto& stages() const { return stages_; }
     auto normalizer(flags_t flags) const { return lookup(normalizers_, flags); }
-    auto normalizer(plugin_t d, tag_t t, sub_t s) const { return normalizer(d | flags_t(t << 8u) | s); }
+    auto normalizer(plugin_t d, tag_t t, sub_t s) const { return normalizer(Annex::flags(d, t, s)); }
     ///@}
 
 private:

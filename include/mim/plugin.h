@@ -125,16 +125,19 @@ struct Annex {
     ///@{
     /// Yields the `plugin` part of the name as integer.
     /// It consists of 48 relevant bits that are returned in the highest 6 bytes of a 64-bit integer.
-    static plugin_t flags2plugin(flags_t f) { return f & Global_Plugin; }
+    static constexpr plugin_t flags2plugin(flags_t f) { return f & Global_Plugin; }
 
     /// Yields the `tag` part of the name as integer.
-    static tag_t flags2tag(flags_t f) { return tag_t((f & 0x0000'0000'0000'ff00_u64) >> 8_u64); }
+    static constexpr tag_t flags2tag(flags_t f) { return tag_t((f & 0x0000'0000'0000'ff00_u64) >> 8_u64); }
 
     /// Yields the `sub` part of the name as integer.
-    static sub_t flags2sub(flags_t f) { return sub_t(f & 0x0000'0000'0000'00ff_u64); }
+    static constexpr sub_t flags2sub(flags_t f) { return sub_t(f & 0x0000'0000'0000'00ff_u64); }
 
     /// Includes Axm::plugin() and Axm::tag() but **not** Axm::sub.
-    static flags_t flags2base(flags_t f) { return f & ~0xff_u64; }
+    static constexpr flags_t flags2base(flags_t f) { return f & ~0xff_u64; }
+
+    /// Assembles the full flags from its `plugin`, `tag`, and `sub` fields.
+    static constexpr flags_t flags(plugin_t p, tag_t t, sub_t s = 0) { return p | (flags_t(t) << 8_u64) | flags_t(s); }
     ///@}
 
     /// @name Helpers for Matching
