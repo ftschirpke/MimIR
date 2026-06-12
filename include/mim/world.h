@@ -190,32 +190,56 @@ public:
 #endif
     ///@}
 
-    /// @name Annexes
-    ///@{
-    /// An annex's flags map to its full name and its Def.
-    /// We track the name explicitly because Def::sym is unreliable for annexes: due to hash-consing several
-    /// names may share one Def (e.g. `let %foo.bar = 23; let %foo.baz = 23;`).
-    struct AnnexEntry {
-        Sym sym;
-        const Def* def;
+    class Annexes {
+    public:
+        struct Entry {
+            Sym sym;
+            const Def* def;
+        };
+
+        /// An annex's flags map to its full name and its Def.
+        const auto& flags2entry() const { return flags2entry_; }
+        auto entries() const { return flags2entry_ | std::views::values; }
+        auto defs() const {
+            return entries() | std::views::transform([](Entry e) { return e.def; });
+        }
+        const auto& sym2flags() const { return sym2flags_; }
+        size_t size() const { return flags2entry_.size(); }
+
+        /// @name Iterators
+        ///@{
+        auto begin() const { return flags2entry_.cbegin(); }
+        auto end() const { return flags2entry_.cend(); }
+        ///@}
+
+        friend void swap(Annexes& a1, Annexes& a2) noexcept {
+            using std::swap;
+            swap(a1.flags2entry_, a2.flags2entry_);
+            swap(a1.sym2flags_, a2.sym2flags_);
+        }
+
+    private:
+        absl::btree_map<flags_t, Entry> flags2entry_; ///< Authoritative annex table; iterated in flags order.
+        fe::SymMap<flags_t> sym2flags_;               ///< Reverse index: an annex's full name to its flags.
+
+        friend class World;
     };
 
-    const auto& flags2annex() const { return move_.flags2annex; }
-    const auto& sym2annex() const { return move_.sym2annex; }
-    auto annexes() const {
-        return move_.flags2annex | std::views::values
-             | std::views::transform([](const AnnexEntry& a) { return a.def; });
-    }
+    /// @name Annexes
+    ///@{
+
+    Annexes& annexes() { return move_.annexes; }
+    const Annexes& annexes() const { return move_.annexes; }
 
     /// Lookup annex by Sym.
     const Def* annex(Sym sym) {
-        if (auto flags = lookup(move_.sym2annex, sym)) return annex(*flags);
+        if (auto flags = lookup(annexes().sym2flags(), sym)) return annex(*flags);
         return nullptr;
     }
 
     /// Lookup annex by flags.
     const Def* annex(flags_t flags) {
-        if (auto a = lookup(move_.flags2annex, flags)) return a->def;
+        if (auto e = lookup(annexes().flags2entry(), flags)) return e->def;
         ELOG("Axm with ID `{}` not found; demangled plugin name is `{}`", flags, Annex::demangle(driver(), flags));
         return nullptr;
     }
@@ -283,7 +307,7 @@ public:
     auto roots() const {
         auto res = Vector<const Def*>(); // TODO use std::views::concat - once we have C++26
         res.reserve(annexes().size() + externals().size());
-        res.append_range(annexes());
+        res.append_range(annexes().defs());
         res.append_range(externals().muts());
         return res;
     }
@@ -836,8 +860,7 @@ private:
         } arena;
 
         Externals externals;
-        absl::btree_map<flags_t, AnnexEntry> flags2annex; ///< Authoritative annex table; iterated in flags order.
-        fe::SymMap<flags_t> sym2annex;                    ///< Reverse index: an annex's full name to its flags.
+        Annexes annexes;
         absl::flat_hash_set<const Def*, SeaHash, SeaEq> defs;
         Sets<Def> muts;
         Sets<const Var> vars;
@@ -852,9 +875,8 @@ private:
             swap(m1.substs,       m2.substs);
             swap(m1.vars,         m2.vars);
             swap(m1.muts,         m2.muts);
-            swap(m1.flags2annex,  m2.flags2annex);
-            swap(m1.sym2annex,    m2.sym2annex);
             swap(m1.externals,    m2.externals);
+            swap(m1.annexes,      m2.annexes);
             // clang-format on
         }
     } move_;

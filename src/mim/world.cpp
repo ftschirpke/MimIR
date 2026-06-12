@@ -96,8 +96,8 @@ const Def* World::register_annex(flags_t flags, Sym sym, const Def* def) {
     TLOG("register: 0x{:x} -> {} ({})", flags, def, sym);
     auto plugin = Annex::demangle(driver(), flags);
     if (driver().is_loaded(plugin)) {
-        assert_emplace(move_.flags2annex, flags, AnnexEntry{sym, def});
-        assert_emplace(move_.sym2annex, sym, flags);
+        assert_emplace(annexes().flags2entry_, flags, Annexes::Entry{sym, def});
+        assert_emplace(annexes().sym2flags_, sym, flags);
         def->annex_ = true;
         return def;
     }
@@ -743,7 +743,7 @@ const Def* World::gid2def(u32 gid) {
 World& World::verify() {
     for (auto mut : externals().muts())
         assert(mut->is_closed() && mut->is_set());
-    for (auto anx : annexes())
+    for (auto anx : annexes().defs())
         assert(anx->is_closed());
     return *this;
 }

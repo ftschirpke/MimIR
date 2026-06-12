@@ -366,7 +366,7 @@ bool Emitter::isa_nested_proj(const Extract* extract) {
 
 void Emitter::emit_decl(BB& bb, const Def* def) {
     if (auto axm = def->isa<Axm>()) {
-        if (!world().flags2annex().contains(axm->flags()) && !is_declared(axm->sym().str())) {
+        if (!world().annexes().flags2entry().contains(axm->flags()) && !is_declared(axm->sym().str())) {
             // Slots may have been disabled if we are coming from a rule declaration below
             // in which case we want to enable them for the duration of emitting the axioms' type.
             bool enable_slots = !slots_enabled();

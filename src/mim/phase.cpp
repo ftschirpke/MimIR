@@ -27,8 +27,8 @@ void Analysis::reset() {
 }
 
 void Analysis::start() {
-    for (const auto& [flags, a] : world().flags2annex())
-        rewrite_annex(flags, a.sym, a.def);
+    for (const auto& [flags, e] : world().annexes())
+        rewrite_annex(flags, e.sym, e.def);
 
     bootstrapping_ = false;
 
@@ -76,8 +76,8 @@ void RWPhase::start() {
         todo |= analyze();
     }
 
-    for (const auto& [flags, a] : old_world().flags2annex())
-        rewrite_annex(flags, a.sym, a.def);
+    for (const auto& [flags, e] : old_world().annexes())
+        rewrite_annex(flags, e.sym, e.def);
 
     bootstrapping_ = false;
 
