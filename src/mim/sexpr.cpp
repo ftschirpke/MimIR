@@ -1,10 +1,9 @@
+#include "mim/sexpr.h"
+
 #include <iostream>
 #include <ranges>
 #include <regex>
 #include <sstream>
-
-#include <mim/plug/core/be/sexpr.h>
-#include <mim/plug/math/math.h>
 
 #include "mim/def.h"
 

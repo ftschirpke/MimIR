@@ -245,13 +245,7 @@ void Module::compile(AST& ast) const {
 }
 
 AST load_plugins(World& world, View<Sym> plugins) {
-    auto tag = Tok::Tag::K_import;
-    if (!world.driver().flags().bootstrap) {
-        for (auto plugin : plugins)
-            world.driver().load(plugin);
-        tag = Tok::Tag::K_plugin;
-    }
-
+    auto tag     = world.driver().flags().bootstrap ? Tok::Tag::K_import : Tok::Tag::K_plugin;
     auto ast     = AST(world);
     auto parser  = Parser(ast);
     auto imports = Ptrs<Import>();

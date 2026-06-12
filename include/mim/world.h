@@ -39,12 +39,14 @@ public:
     ///@{
     struct State {
         State() = default;
+        State(Sym name)
+            : pod{.name = name} {}
 
         /// [Plain Old Data](https://en.cppreference.com/w/cpp/named_req/PODType)
         struct POD {
             u32 curr_gid = 0;
             u32 curr_sub = 0;
-            Loc loc;
+            Loc loc      = {};
             Sym name;
             mutable bool frozen = false;
         } pod;
@@ -68,7 +70,7 @@ public:
     ///@{
     World& operator=(World) = delete;
 
-    explicit World(Driver*);
+    explicit World(Driver*, Sym name);
     World(Driver*, const State&);
     World(World&& other) noexcept
         : World(&other.driver(), other.state()) {

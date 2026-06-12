@@ -34,20 +34,23 @@ void optimize(World& world) {
         }
     }
 
-    if (!compilation) world.ELOG("no compilation function found");
-    world.DLOG("compilation using {} : {}", compilation, compilation->type());
+    if (!compilation) {
+        world.ILOG("no compilation function found - skipping optimization");
+    } else {
+        world.DLOG("compilation using {} : {}", compilation, compilation->type());
 
-    auto body   = compilation->as<Lam>()->body();
-    auto callee = App::uncurry_callee(body);
+        auto body   = compilation->as<Lam>()->body();
+        auto callee = App::uncurry_callee(body);
 
-    world.DLOG("Building pipeline");
-    if (auto f = world.driver().stage(callee->flags())) {
-        auto stage = (*f)(world);
-        auto phase = stage.get()->as<Phase>();
-        if (auto app = body->isa<App>()) phase->apply(app);
-        phase->run();
-    } else
-        world.ELOG("axm not found in passes");
+        world.DLOG("Building pipeline");
+        if (auto f = world.driver().stage(callee->flags())) {
+            auto stage = (*f)(world);
+            auto phase = stage.get()->as<Phase>();
+            if (auto app = body->isa<App>()) phase->apply(app);
+            phase->run();
+        } else
+            world.ELOG("axm not found in passes");
+    }
 }
 
 } // namespace mim

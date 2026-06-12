@@ -73,8 +73,8 @@ World::World(Driver* driver, const State& state)
     data_.lit_nat_max = lit_nat(nat_t(-1));
 }
 
-World::World(Driver* driver)
-    : World(driver, State()) {}
+World::World(Driver* driver, Sym name)
+    : World(driver, State(name)) {}
 
 World::~World() {
     for (auto def : move_.defs)
