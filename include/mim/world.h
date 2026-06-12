@@ -192,15 +192,37 @@ public:
 
     /// @name Annexes
     ///@{
-    const auto& flags2annex() const { return move_.flags2annex; }
-    auto annexes() const { return move_.flags2annex | std::views::values; }
+    /// An annex's flags map to its full name and its Def.
+    /// We track the name explicitly because Def::sym is unreliable for annexes: due to hash-consing several
+    /// names may share one Def (e.g. `let %foo.bar = 23; let %foo.baz = 23;`).
+    struct AnnexEntry {
+        Sym sym;
+        const Def* def;
+    };
 
-    /// Lookup annex by Axm::id.
+    const auto& flags2annex() const { return move_.flags2annex; }
+    const auto& sym2annex() const { return move_.sym2annex; }
+    auto annexes() const {
+        return move_.flags2annex | std::views::values
+             | std::views::transform([](const AnnexEntry& a) { return a.def; });
+    }
+
+    /// Lookup annex by Sym.
+    const Def* annex(Sym sym) {
+        if (auto flags = lookup(move_.sym2annex, sym)) return annex(*flags);
+        return nullptr;
+    }
+
+    /// Lookup annex by flags.
+    const Def* annex(flags_t flags) {
+        if (auto a = lookup(move_.flags2annex, flags)) return a->def;
+        ELOG("Axm with ID `{}` not found; demangled plugin name is `{}`", flags, Annex::demangle(driver(), flags));
+        return nullptr;
+    }
+    /// Lookup annex by Axm::id
     template<class Id>
     const Def* annex(Id id) {
-        auto flags = static_cast<flags_t>(id);
-        if (auto i = move_.flags2annex.find(flags); i != move_.flags2annex.end()) return i->second;
-        error("Axm with ID '{:x}' not found; demangled plugin name is '{}'", flags, Annex::demangle(driver(), flags));
+        return annex(static_cast<flags_t>(id));
     }
 
     /// Get Axm from a plugin.
@@ -211,9 +233,9 @@ public:
         return annex(Annex::base<id>());
     }
 
-    const Def* register_annex(flags_t f, const Def*);
-    const Def* register_annex(plugin_t p, tag_t t, sub_t s, const Def* def) {
-        return register_annex(p | (flags_t(t) << 8_u64) | flags_t(s), def);
+    const Def* register_annex(flags_t, Sym, const Def*);
+    const Def* register_annex(plugin_t p, tag_t t, sub_t s, Sym sym, const Def* def) {
+        return register_annex(p | (flags_t(t) << 8_u64) | flags_t(s), sym, def);
     }
     ///@}
 
@@ -814,7 +836,8 @@ private:
         } arena;
 
         Externals externals;
-        absl::btree_map<flags_t, const Def*> flags2annex;
+        absl::btree_map<flags_t, AnnexEntry> flags2annex; ///< Authoritative annex table; iterated in flags order.
+        fe::SymMap<flags_t> sym2annex;                    ///< Reverse index: an annex's full name to its flags.
         absl::flat_hash_set<const Def*, SeaHash, SeaEq> defs;
         Sets<Def> muts;
         Sets<const Var> vars;
@@ -830,6 +853,7 @@ private:
             swap(m1.vars,         m2.vars);
             swap(m1.muts,         m2.muts);
             swap(m1.flags2annex,  m2.flags2annex);
+            swap(m1.sym2annex,    m2.sym2annex);
             swap(m1.externals,    m2.externals);
             // clang-format on
         }

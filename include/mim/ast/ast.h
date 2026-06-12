@@ -21,8 +21,8 @@ class Emitter;
 template<class T>
 using Ptr = fe::Arena::Ptr<const T>;
 template<class T>
-using Ptrs                   = std::deque<Ptr<T>>;
-/*             */ using Dbgs = std::deque<Dbg>;
+using Ptrs = std::deque<Ptr<T>>;
+using Dbgs = std::deque<Dbg>;
 
 struct AnnexInfo {
     AnnexInfo(Sym sym_plugin, Sym sym_tag, plugin_t id_plugin, tag_t id_tag)
@@ -114,6 +114,8 @@ private:
     World* world_ = nullptr;
     fe::Arena arena_;
     mutable Error err_;
+    // Inner map must be pointer-stable: name2annex() hands out `AnnexInfo*`s that are cached in AST nodes,
+    // so the elements must not be relocated when further annexes are inserted into the same plugin.
     absl::node_hash_map<fe::Sym, absl::node_hash_map<fe::Sym, AnnexInfo>> plugin2sym2annex_;
 };
 

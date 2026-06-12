@@ -40,7 +40,8 @@ AnnexInfo* AST::name2annex(Dbg dbg, sub_t* sub_id) {
         plugin_id = *Annex::mangle(plugin_s);
     }
 
-    auto [i, fresh] = sym2annex.try_emplace(plugin_tag, AnnexInfo{plugin_s, tag_s, plugin_id, (tag_t)sym2annex.size()});
+    auto sub        = (tag_t)sym2annex.size();
+    auto [i, fresh] = sym2annex.try_emplace(plugin_tag, AnnexInfo{plugin_s, tag_s, plugin_id, sub});
     auto annex      = &i->second;
 
     if (sub_s) {

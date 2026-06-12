@@ -92,11 +92,12 @@ Sym World::sym(const char* s) { return driver().sym(s); }
 Sym World::sym(std::string_view s) { return driver().sym(s); }
 Sym World::sym(const std::string& s) { return driver().sym(s); }
 
-const Def* World::register_annex(flags_t f, const Def* def) {
-    TLOG("register: 0x{:x} -> {} ({})", f, def, def->sym());
-    auto plugin = Annex::demangle(driver(), f);
+const Def* World::register_annex(flags_t flags, Sym sym, const Def* def) {
+    TLOG("register: 0x{:x} -> {} ({})", flags, def, sym);
+    auto plugin = Annex::demangle(driver(), flags);
     if (driver().is_loaded(plugin)) {
-        assert_emplace(move_.flags2annex, f, def);
+        assert_emplace(move_.flags2annex, flags, AnnexEntry{sym, def});
+        assert_emplace(move_.sym2annex, sym, flags);
         def->annex_ = true;
         return def;
     }

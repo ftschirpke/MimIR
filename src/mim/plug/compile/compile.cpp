@@ -26,8 +26,6 @@
 using namespace mim;
 using namespace mim::plug;
 
-namespace {
-
 /// Stage hook for `%compile.named_phase`, `%compile.named_pass`, and `%compile.named_repl`.
 /// Reads the fully-qualified annex name (e.g. `"clos.clos_conv_phase"`) from the driving App at stage-build time,
 /// looks up the matching annex `Def` in the current `World`, and *redirects* Stage::create to that annex's own
@@ -48,12 +46,7 @@ public:
         auto begin = str[0] == '%' ? 1uz : 0uz; // skip the leading '%' of the annex name
         if (!driver().is_loaded(driver().sym(str.substr(begin, dot - begin)))) return;
 
-        auto target = driver().sym(str);
-        for (auto def : world().annexes())
-            if (def->sym() == target) {
-                resolved_ = Stage::create(driver().stages(), def);
-                return;
-            }
+        if (auto def = world().annex(driver().sym(str))) resolved_ = Stage::create(driver().stages(), def);
     }
 
     bool redirects() const override { return true; }
@@ -62,8 +55,6 @@ public:
 private:
     std::unique_ptr<Stage> resolved_;
 };
-
-} // namespace
 
 void reg_stages(Flags2Stages& stages) {
     // clang-format off
