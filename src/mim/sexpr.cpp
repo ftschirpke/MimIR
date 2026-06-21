@@ -116,7 +116,6 @@ public:
     void finalize();
 
     LamSet next_lams(Lam* lam);
-    bool isa_nested_proj(const Extract* extract);
 
     void emit_decl(BB& bb, const Def* def);
     void emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams);
@@ -294,13 +293,14 @@ void Emitter::emit_imported(Lam* lam) {
         --tab;
 
     } else {
+        std::print(func_decls_, "(root {} {}", ext, id(lam));
+        ++tab;
         if (types_enabled()) std::print(func_decls_, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
-        std::print(func_decls_, "({} {} {}", lam_kind, ext, id(lam));
+        std::print(func_decls_, "\n{}({}", tab, lam_kind);
         std::print(func_decls_, "{}", emit_var(bb, lam->var(), lam->type()->dom()));
-        std::print(func_decls_, "\n{}{}", tab, emit_type(bb, lam->dom()));
-        std::print(func_decls_, "\n{}{}", tab, emit_type(bb, lam->codom()));
         if (types_enabled()) std::print(func_decls_, ")");
-        std::print(func_decls_, ")\n\n");
+        std::print(func_decls_, "))\n\n");
+        --tab;
     }
 }
 
@@ -336,32 +336,6 @@ LamSet Emitter::next_lams(Lam* lam) {
             }
     }
     return next_lams;
-}
-
-bool Emitter::isa_nested_proj(const Extract* extract) {
-    // 'tuple' is another extract if we have for example two nested, sigma-typed variables
-    // and we are trying to print a named projection of the inner variable. ('baz' in the example below)
-    // ex.:  (var foo (sigma (var bar (sigma (var baz Nat)))))
-    // In this example, we have an extract where the tuple: 'bar' is another extract from 'foo'.
-    auto tuple           = extract->tuple();
-    auto index           = extract->index();
-    auto isa_nested_proj = false;
-    if (tuple->isa<Extract>() && Lit::isa(index)) {
-        auto curr_tuple = tuple;
-        auto curr_index = index;
-        while (curr_tuple && curr_index) {
-            if (curr_tuple->isa<Extract>() && Lit::isa(curr_index)) {
-                auto extract = curr_tuple->as<Extract>();
-                curr_tuple   = extract->tuple();
-                curr_index   = extract->index();
-                continue;
-            } else if (curr_tuple->isa<Var>() && Lit::isa(curr_index)) {
-                isa_nested_proj = true;
-            }
-            break;
-        }
-    }
-    return isa_nested_proj;
 }
 
 void Emitter::emit_decl(BB& bb, const Def* def) {
@@ -465,6 +439,7 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
         if (slotted()) {
             --tab;
             --tab;
+            --tab;
             if (NESTED) {
                 --tab;
                 // Close 'lam' and lam var 'scope'
@@ -478,13 +453,16 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
 
         } else if (NESTED) {
             --tab;
+            --tab;
             // Close 'lam'
             std::print(func_impls_, ")");
             // Close the 'let' at the end of the parent lambdas' definition.
             parent_bb.tail(")");
         } else {
-            // Close 'lam'
-            std::print(func_impls_, ")\n\n");
+            --tab;
+            --tab;
+            // Close 'root' and 'lam'
+            std::print(func_impls_, "))\n\n");
         }
     }
 }
@@ -523,7 +501,7 @@ std::string Emitter::emit_var(BB& bb, const Def* var, const Def* type, bool meta
         }
     }
 
-    else {
+    else if (meta_var) {
         auto projs = var->projs();
         if (projs.size() == 1 || std::ranges::all_of(projs, [](auto proj) { return proj->sym().empty(); }))
             std::print(os, "\n{}(var {})", tab, id(var));
@@ -534,6 +512,8 @@ std::string Emitter::emit_var(BB& bb, const Def* var, const Def* type, bool meta
                 std::print(os, "{}", emit_var(bb, proj, type->proj(i++)));
             std::print(os, ")");
         }
+    } else {
+        std::print(os, "\n{}{}", tab, id(var));
     }
     --tab;
 
@@ -570,18 +550,15 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool nested) {
         ++tab;
         std::print(os, "\n{}{}", tab, id(lam));
         if (types_enabled()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
-        std::print(os, "\n{}({} {} {}", tab, lam_kind, ext, id(lam));
+        std::print(os, "\n{}({}", tab, lam_kind);
     } else {
+        std::print(os, "(root {} {}", ext, id(lam));
+        ++tab;
         if (types_enabled()) std::print(os, "\n{}(@ {}\n", tab, emit_type(bb, lam->type()));
-        std::print(os, "({} {} {}", lam_kind, ext, id(lam));
+        std::print(os, "\n{}({}", tab, lam_kind);
     }
 
     std::print(os, "{}", emit_var(bb, lam->var(), lam->type()->dom()));
-
-    if (!slotted()) {
-        std::print(os, "\n{}{}", tab, emit_type(bb, lam->dom()));
-        std::print(os, "\n{}{}", tab, emit_type(bb, lam->codom()));
-    }
 
     if (slotted()) {
         ++tab;
@@ -593,8 +570,10 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool nested) {
         toggle_bindings();
         std::print(os, "{}", emit_bb(bb, lam->filter()));
         toggle_bindings();
+        ++tab;
     } else {
         std::print(os, "{}", emit_bb(bb, lam->filter()));
+        ++tab;
     }
 
     return os.str();
@@ -930,10 +909,8 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
     } else if (auto pack = def->isa<Pack>()) {
         std::print(os, "{}", emit_node(bb, pack, "pack"));
     } else if (auto extract = def->isa<Extract>()) {
-        if (!slotted() && ((Lit::isa(extract->index()) && extract->tuple()->isa<Var>()) || isa_nested_proj(extract)))
-            std::print(os, "\n{}{}", tab, id(extract));
         // Projections of rule variables are meta vars and should just be printed by name
-        else if (auto var = extract->tuple()->isa<Var>(); var && var->mut()->isa<Rule>())
+        if (auto var = extract->tuple()->isa<Var>(); var && var->mut()->isa<Rule>())
             std::print(os, "\n{}{}", tab, id(extract));
         else
             std::print(os, "{}", emit_node(bb, extract, "extract"));
