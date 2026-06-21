@@ -186,16 +186,20 @@ const Def* Rewriter::rewrite_imm_Tuple(const Tuple* d) {
 }
 
 // clang-format on
-const Def* Rewriter::rewrite_mut_Pi(Pi* d) {
-    return rewrite_stub(d, world().mut_pi(rewrite(d->type()), d->is_implicit()));
+const Def* Rewriter::rewrite_mut_Pi(Pi* pi) {
+    if (pi->is_immutabilizable()) return rewrite_imm_Pi(pi);
+    return rewrite_stub(pi, world().mut_pi(rewrite(pi->type()), pi->is_implicit()));
 }
 const Def* Rewriter::rewrite_mut_Lam(Lam* d) { return rewrite_stub(d, world().mut_lam(rewrite(d->type())->as<Pi>())); }
 const Def* Rewriter::rewrite_mut_Rule(Rule* d) {
     return rewrite_stub(d, world().mut_rule(rewrite(d->type())->as<Reform>()));
 }
-const Def* Rewriter::rewrite_mut_Sigma(Sigma* d) {
-    return rewrite_stub(d, world().mut_sigma(rewrite(d->type()), d->num_ops()));
+
+const Def* Rewriter::rewrite_mut_Sigma(Sigma* sigma) {
+    if (sigma->is_immutabilizable()) return rewrite_imm_Sigma(sigma);
+    return rewrite_stub(sigma, world().mut_sigma(rewrite(sigma->type()), sigma->num_ops()));
 }
+
 const Def* Rewriter::rewrite_mut_Global(Global* d) {
     return rewrite_stub(d, world().global(rewrite(d->type()), d->is_mutable()));
 }
@@ -261,11 +265,9 @@ const Def* Rewriter::rewrite_mut_Seq(Seq* seq) {
 const Def* Rewriter::rewrite_stub(Def* old_mut, Def* new_mut) {
     map(old_mut, new_mut);
 
-    if (old_mut->is_set()) {
+    if (old_mut->is_set())
         for (size_t i = 0, e = old_mut->num_ops(); i != e; ++i)
             new_mut->set(i, rewrite(old_mut->op(i)));
-        if (auto new_imm = new_mut->immutabilize()) return map(old_mut, new_imm);
-    }
 
     return new_mut;
 }
