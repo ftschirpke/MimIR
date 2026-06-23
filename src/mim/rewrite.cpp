@@ -238,6 +238,8 @@ const Def* Rewriter::rewrite_imm_Seq(const Seq* seq) {
 }
 
 const Def* Rewriter::rewrite_mut_Seq(Seq* seq) {
+    if (seq->is_immutabilizable()) return rewrite_imm_Seq(seq);
+
     if (!seq->is_set()) {
         auto new_seq = seq->as_mut<Seq>()->stub(world(), rewrite(seq->type()));
         return map(seq, new_seq);
