@@ -348,10 +348,7 @@ void Emitter::emit_decl(BB& bb, const Def* def) {
 
             if (typed()) std::print(decls_, "(@ {}\n", emit_type(bb, axm->type()));
 
-            if (slotted())
-                std::print(decls_, "(axm {}", id(axm));
-            else
-                std::print(decls_, "(axm {} {}", id(axm), emit_type(bb, axm->type()));
+            std::print(decls_, "(axm {}", id(axm));
 
             if (typed()) std::print(decls_, ")");
             std::print(decls_, ")\n\n");
@@ -453,13 +450,11 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
 
         } else if (NESTED) {
             --tab;
-            --tab;
             // Close 'lam'
             std::print(func_impls_, ")");
             // Close the 'let' at the end of the parent lambdas' definition.
             parent_bb.tail(")");
         } else {
-            --tab;
             --tab;
             // Close 'root' and 'lam'
             std::print(func_impls_, "))\n\n");
@@ -573,7 +568,6 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool nested) {
         ++tab;
     } else {
         std::print(os, "{}", emit_bb(bb, lam->filter()));
-        ++tab;
     }
 
     return os.str();
@@ -678,7 +672,7 @@ std::string Emitter::emit_type(BB& bb, const Def* type, bool in_term /* = false*
             auto var_val = id(var);
             std::print(os, "(sigma {} {})", var_val, scope_wrap(op_vals.str()));
         } else {
-            auto dummy_var = slotted() ? "dummy" : "dummy";
+            auto dummy_var = slotted() ? "$dummy" : "dummy";
             std::print(os, "(sigma {} {})", dummy_var, scope_wrap(op_vals.str()));
         }
 
