@@ -554,7 +554,7 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool nested) {
     } else {
         std::print(os, "(root {} {}", ext, id(lam));
         ++tab;
-        if (types_enabled()) std::print(os, "\n{}(@ {}\n", tab, emit_type(bb, lam->type()));
+        if (types_enabled()) std::print(os, "\n{}(@ {}", tab, emit_type(bb, lam->type()));
         std::print(os, "\n{}({}", tab, lam_kind);
     }
 
@@ -649,10 +649,10 @@ std::string Emitter::emit_type(BB& bb, const Def* type, bool in_term /* = false*
         std::string arr_val = arity_val + " " + emit_type(bb, arr->body(), in_term);
 
         if (auto var = arr->has_var()) {
-            auto var_val = slotted() ? id(var) : "(var " + id(var) + " nil)";
+            auto var_val = id(var);
             std::print(os, "(arr {} {})", var_val, scope_wrap(arr_val));
         } else {
-            auto dummy_var = slotted() ? "$dummy" : "(var dummy)";
+            auto dummy_var = slotted() ? "$dummy" : "dummy";
             std::print(os, "(arr {} {})", dummy_var, scope_wrap(arr_val));
         }
 
@@ -661,10 +661,10 @@ std::string Emitter::emit_type(BB& bb, const Def* type, bool in_term /* = false*
         std::string doms    = emit_type(bb, pi->dom(), in_term) + " " + emit_type(bb, pi->codom(), in_term);
 
         if (auto var = pi->has_var()) {
-            auto var_val = slotted() ? id(var) : "(var " + id(var) + " nil)";
+            auto var_val = id(var);
             std::print(os, "({} {} {})", pi_kind, var_val, scope_wrap(doms));
         } else {
-            auto dummy_var = slotted() ? "$dummy" : "(var dummy)";
+            auto dummy_var = slotted() ? "$dummy" : "dummy";
             std::print(os, "({} {} {})", pi_kind, dummy_var, scope_wrap(doms));
         }
 
@@ -675,10 +675,10 @@ std::string Emitter::emit_type(BB& bb, const Def* type, bool in_term /* = false*
                         sigma->ops() | std::views::transform([&](auto op) { return emit_type(bb, op, in_term); }), " ");
 
         if (auto var = sigma->has_var()) {
-            auto var_val = slotted() ? id(var) : "(var " + id(var) + " nil)";
+            auto var_val = id(var);
             std::print(os, "(sigma {} {})", var_val, scope_wrap(op_vals.str()));
         } else {
-            auto dummy_var = slotted() ? "$dummy" : "(var dummy)";
+            auto dummy_var = slotted() ? "dummy" : "dummy";
             std::print(os, "(sigma {} {})", dummy_var, scope_wrap(op_vals.str()));
         }
 
@@ -786,10 +786,10 @@ std::string Emitter::emit_node(BB& bb, const Def* def, std::string node_name, bo
 
     if (auto pack = def->isa<Pack>()) {
         if (auto var = pack->has_var()) {
-            std::string var_val = " " + (slotted() ? id(var) + " (scope" : "(var " + id(var) + " nil)");
+            std::string var_val = " " + (slotted() ? id(var) + " (scope" : id(var));
             op_vals.push_back(var_val);
         } else {
-            std::string var_val = slotted() ? " $dummy (scope" : " (var dummy)";
+            std::string var_val = slotted() ? " $dummy (scope" : "dummy";
             op_vals.push_back(var_val);
         }
         if (auto arity_val = emit_bb(bb, pack->arity()); !arity_val.empty()) op_vals.push_back(arity_val);
