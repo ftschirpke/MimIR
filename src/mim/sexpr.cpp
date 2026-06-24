@@ -472,7 +472,7 @@ std::string Emitter::emit_var(BB& bb, const Def* var, const Def* type, bool meta
             toggle_slots();
             auto projs = var->projs();
             if (projs.size() == 1 || std::ranges::all_of(projs, [](auto proj) { return proj->sym().empty(); }))
-                std::print(os, "\n{}(cons (metavar {} {}) nil)", tab, id(var), emit_type(bb, type));
+                std::print(os, "\n{}(cons (metavar {}) nil)", tab, id(var));
             else {
                 std::vector<std::string> meta_vars;
                 for (auto proj : projs) {
