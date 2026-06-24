@@ -682,7 +682,10 @@ std::string Emitter::emit_type(BB& bb, const Def* type, bool in_term /* = false*
         std::print(os, "{}", id(axm));
         emit_decl(bb, axm);
     } else if (auto var = type->isa<Var>()) {
-        std::print(os, "{}", id(var, true));
+        if (var->mut()->isa<Rule>())
+            std::print(os, "\n{}{}", tab, id(var));
+        else
+            std::print(os, "{}", id(var, true));
     } else if (auto hole = type->isa<Hole>()) {
         std::print(os, "(hole {})", emit_type(bb, hole->type(), in_term));
     } else if (auto extract = type->isa<Extract>()) {
@@ -898,7 +901,10 @@ std::string Emitter::emit_bb(BB& bb, const Def* def) {
     } else if (auto insert = def->isa<Insert>()) {
         std::print(os, "{}", emit_node(bb, insert, "insert"));
     } else if (auto var = def->isa<Var>()) {
-        std::print(os, "\n{}{}", tab, id(var, true));
+        if (var->mut()->isa<Rule>())
+            std::print(os, "\n{}{}", tab, id(var));
+        else
+            std::print(os, "\n{}{}", tab, id(var, true));
     } else if (auto app = def->isa<App>()) {
         std::print(os, "{}", emit_node(bb, app, "app"));
     } else if (auto axm = def->isa<Axm>()) {
