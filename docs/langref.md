@@ -13,8 +13,7 @@ This document uses a lightweight [EBNF](https://en.wikipedia.org/wiki/Extended_B
 x*         zero or more repetitions of x
 x+         one or more repetitions of x
 x?         optional x
-x ("," x)* ","?
-           comma-separated list of zero or more x, with optional trailing comma
+x ("," x)* ","?   comma-separated list of zero or more x, with an optional trailing comma
 ```
 
 ## Lexical Structure {#lex}
