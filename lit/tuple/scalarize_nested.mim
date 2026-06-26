@@ -1,5 +1,5 @@
-// RUN: %mim -p opt %s -o - --scalarize-threshold 32 | FileCheck %s
-// RUN: %mim -p opt %s -o - --scalarize-threshold 64 | FileCheck %s --check-prefix=SCALAR
+// RUN: %mim -p opt %s -o - --scalarize-threshold 32 | %FileCheck %s
+// RUN: %mim -p opt %s -o - --scalarize-threshold 64 | %FileCheck %s --check-prefix=SCALAR
 plugin tuple;
 plugin refly;
 
