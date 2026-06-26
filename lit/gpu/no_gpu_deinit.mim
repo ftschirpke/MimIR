@@ -1,5 +1,5 @@
 // RUN: rm -f %t.ll
-// RUN: %mim %s -p opt
+// RUN: %mim %s -p opt; test $? -ne 0
 
 plugin core;
 plugin gpu;
