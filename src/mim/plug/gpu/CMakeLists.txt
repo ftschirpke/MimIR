@@ -3,5 +3,7 @@ add_mim_plugin(gpu
         gpu.cpp
         phase/mem_checks.cpp
         phase/remove_double_syncs.cpp
+        phase/setup4backend.cpp
+        phase/split_off_kernels.cpp
     INSTALL
 )
