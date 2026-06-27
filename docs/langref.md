@@ -48,6 +48,7 @@ For example, `λ` and `lm` are lexically equivalent.
 ```
 
 `⟨`, `⟩`, `⟪`, and `⟫` may be used as alternatives for `‹`, `›`, `«`, and `»`.
+`★` may be used as an alternative for `*`.
 
 #### Keywords
 
@@ -94,12 +95,12 @@ L      ::= dec+
          |  sign "0" ["bB"] bin+
          |  sign "0" ["oO"] oct+
          |  sign "0" ["xX"] hex+
-         |  sign? dec+ eE sign dec+
-         |  sign? dec+ "." dec* (eE sign dec+)?
-         |  sign? dec* "." dec+ (eE sign dec+)?
-         |  sign? "0" ["xX"] hex+ pP sign dec+
-         |  sign? "0" ["xX"] hex+ "." hex* pP sign dec+
-         |  sign? "0" ["xX"] hex* "." hex+ pP sign dec+
+         |  sign? dec+ eE sign? dec+
+         |  sign? dec+ "." dec* (eE sign? dec+)?
+         |  sign? dec* "." dec+ (eE sign? dec+)?
+         |  sign? "0" ["xX"] hex+ pP sign? dec+
+         |  sign? "0" ["xX"] hex+ "." hex* pP sign? dec+
+         |  sign? "0" ["xX"] hex* "." hex+ pP sign? dec+
 X_n    ::= dec+ sub+
          |  dec+ "_" dec+
 C      ::= "'" (ascii_char | esc) "'"
@@ -170,14 +171,14 @@ Mim accepts the following declaration families.
 let p = e
 let A = e
 
-lam|con|fun [extern] n dom* [: e] = e
+lam|con|fun [extern] n dom+ [: e] = e
 ccon|cfun I b [: e]
 
 rec n [: e] = e
 and n [: e] = e
-and lam|con|fun [extern] n dom* [: e] = e
+and lam|con|fun [extern] n dom+ [: e] = e
 
-axm A [(tag (= alias)*)*] : e [, normalizer] [, curry] [, trip]
+axm A ["(" tag ("=" alias)* ("," tag ("=" alias)*)* ")"] : e [, normalizer] [, curry] [, trip]
 
 rule|norm n p : e [when e] => e
 ```
@@ -283,14 +284,15 @@ e   ::= L (":" e)?
      |  "⊥" (":" e)?
      |  "⊤" (":" e)?
      |  n
-     |  "{" d* e "}"
+     |  d+ e
      |  "⦃" e "⦄"
 ```
 
 - A numeric, character, string, `⊥`, or `⊤` literal may carry an explicit type ascription.
 - Without an explicit type, numeric literals default to `Nat`.
 - Without an explicit type, `⊥` and `⊤` default to `*`.
-- `{ d* e }` is a declaration expression whose result is the final expression `e`.
+- `d+ e` is a declaration expression: one or more declarations followed by a final expression `e`, which is the result.
+  It is not delimited by any brackets; it simply starts with a declaration keyword such as `let`.
 - `⦃ e ⦄` is a singleton type.
 
 #### Functions and Continuations
@@ -320,8 +322,8 @@ e   ::= e "→" e
 ```ebnf
 e   ::= "[" ... "]"
      |  "(" (e ("," e)* ","?)? ")"
-     |  "«" arity (";" e) "»"
-     |  "‹" arity (";" e) "›"
+     |  "«" arity ("," arity)* ";" e "»"
+     |  "‹" arity ("," arity)* ";" e "›"
      |  e "#" e
      |  e "#" I
      |  "ins" "(" e "," e "," e ")"
@@ -337,7 +339,7 @@ arity ::= e
 - `( ... )` is a tuple expression.
 - `« ... ; ... »` builds an array.
 - `‹ ... ; ... ›` builds a pack.
-- Each array or pack dimension may optionally be named, as in `«n: len; body»`.
+- An array or pack may have several comma-separated dimensions, as in `«i: m, j: n; body»`, and each dimension may optionally be named.
 - `e # i` or `e # e` extracts a component.
 - `ins(tuple, index, value)` inserts a value into a tuple-like aggregate.
 - `e ∪ t` forms a union type.
