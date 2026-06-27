@@ -8,6 +8,7 @@ set(MIM_PLUGINS
     direct
     gpu
     ll
+    ll_nvptx
     math
     matrix
     mem

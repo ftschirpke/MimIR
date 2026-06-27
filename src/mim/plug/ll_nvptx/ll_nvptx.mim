@@ -1,0 +1,70 @@
+/// # The nvptx Plugin {#nvptx}
+///
+/// @see mim::plug::nvptx
+///
+/// A minimal nvptx plugin
+///
+/// [TOC]
+///
+/// ## Dependencies
+///
+plugin gpu;
+import compile;
+import core;
+import math;
+import mem;
+import refly;
+///
+/// ## Types
+///
+/// ### Streams
+///
+let %nvptx.Stream = %mem.Ptr0 I8;
+///
+/// ## Operations
+///
+/// ### Special Registers
+///
+/// Retrieves the warp size on the device.
+axm %nvptx.warp_size: I32;
+// TODO: only allow in device code
+///
+/// ### Warp Synchronization
+///
+/// #### %%nvptx.sync_warp_threads
+///
+axm %nvptx.sync_warp_threads: [%gpu.GlobalM, %gpu.SharedM, I32] → [%gpu.GlobalM, %gpu.SharedM];
+///
+/// ### Data Movement
+///
+/// #### %%nvptx.shfl_sync
+///
+/// Shuffles registers of threads inside a warp.
+/// (See https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-shfl-sync)
+axm %nvptx.shfl_sync(up, down, bfly, idx):
+      [T: *]
+    → [%gpu.LocalM, I32, T, I32, I32]
+    → [%gpu.LocalM, T];
+// TODO: ensure T is 32-bit type and add return predicate boolean
+// NOTE: may want to consider to make clamp (4th argument) implicit, like in CUDA
+///
+/// ### Arithmetic Functions
+///
+/// #### %%nvptx.fmaf(rd, rn, ru, rz)
+///
+/// Computes x*y+z, i.e. fused-multiply-add, with a rounding mode (corresponding to CUDA's __fmaf_[rd|rn|ru|rz])
+axm %nvptx.fmaf(rd, rn, ru, rz): [%math.F32, %math.F32, %math.F32] → %math.F32;
+///
+///
+/// ## Stages
+///
+/// ### Repls
+///
+axm %nvptx.stream_impl_repl: %compile.Repl;
+///
+/// ### Pipelines
+///
+// TODO: consider moving (some) pipelines to their own plugin "gpu_opt"
+let %nvptx.general_repls = %compile.repls (
+    %nvptx.stream_impl_repl,
+);
