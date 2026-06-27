@@ -415,7 +415,6 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
     if (EMIT) {
         int unclosed_parens = 0;
 
-        ++tab;
         for (auto& term : bb.body()) {
             auto opened = std::ranges::count(term.str(), '(');
             auto closed = std::ranges::count(term.str(), ')');
@@ -425,7 +424,6 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
 
         for (auto& term : bb.tail())
             std::print(func_impls_, "{}", indent(tab.indent(), term.str()));
-        --tab;
 
         std::string closing_parens(unclosed_parens, ')');
         std::print(func_impls_, "{}", closing_parens);
@@ -433,8 +431,9 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
         // Close type annotation '@'
         if (types_enabled()) std::print(func_impls_, ")");
 
+        --tab;
+        --tab;
         if (slotted()) {
-            --tab;
             --tab;
             if (NESTED) {
                 --tab;
@@ -448,13 +447,11 @@ void Emitter::emit_lam(Lam* parent, Lam* curr, LamSet& rec_lams) {
             }
 
         } else if (NESTED) {
-            --tab;
             // Close 'lam'
             std::print(func_impls_, ")");
             // Close the 'let' at the end of the parent lambdas' definition.
             parent_bb.tail(")");
         } else {
-            --tab;
             // Close 'root' and 'lam'
             std::print(func_impls_, "))\n\n");
         }
@@ -561,6 +558,7 @@ std::string Emitter::emit_head(BB& bb, Lam* lam, bool nested) {
     } else {
         std::print(os, "{}", emit_bb(bb, lam->filter()));
     }
+    ++tab;
 
     return os.str();
 }
