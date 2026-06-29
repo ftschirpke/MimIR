@@ -250,9 +250,9 @@ const Def* World::app(const Def* callee, const Def* arg) {
                 auto filter = rw.rewrite(lam->filter());
                 if (filter == lit_tt()) {
                     DLOG("partial evaluate: {} ({})", lam, arg);
-                    auto body = rw.rewrite(lam->body());
-                    auto buf
-                        = move_.arena.substs.allocate(sizeof(Reduct) + 2 * sizeof(const Def*), alignof(const Def*));
+                    auto body        = rw.rewrite(lam->body());
+                    auto size        = sizeof(Reduct) + 2 * sizeof(const Def*);
+                    auto buf         = move_.arena.substs.allocate(size, alignof(const Def*));
                     auto reduct      = new (buf) Reduct(2);
                     reduct->defs_[0] = filter;
                     reduct->defs_[1] = body;
