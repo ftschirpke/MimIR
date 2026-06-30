@@ -6,6 +6,8 @@
 
 namespace mim::plug::gpu::phase {
 
+namespace {
+
 class MemFinder {
 public:
     MemFinder(const Def* to_search)
@@ -34,6 +36,8 @@ MemFinder::IsaMem MemFinder::next_mem() {
     return IsaMem();
 }
 
+} // namespace
+
 const Def* MemChecks::rewrite_imm_App(const App* app) {
     if (auto launch = Axm::isa<gpu::launch>(app)) {
         auto kernel        = launch->decurry()->decurry()->arg();
@@ -45,21 +49,6 @@ const Def* MemChecks::rewrite_imm_App(const App* app) {
             error("You may not pass any %mem.M across device boundaries: passing {} : {} from host to kernel '{}'",
                   kernel_args, kernel_args_t, kernel);
         }
-    } else if (auto init = Axm::isa<gpu::init>(app)) {
-        auto [_, global_syms, const_syms] = init->args<3>();
-
-        MemFinder global_mem_finder(global_syms);
-        if (global_mem_finder.next_mem()) {
-            error("You may not pass any %mem.M across device boundaries: creating symbol(s) {} in global address space "
-                  "with {}",
-                  global_syms, app);
-        }
-        MemFinder const_mem_finder(const_syms);
-        if (const_mem_finder.next_mem()) {
-            error("You may not pass any %mem.M across device boundaries: creating symbol(s) {} in constant address "
-                  "space with {}",
-                  const_syms, app);
-        }
     }
     return Super::rewrite_imm_App(app);
 }
@@ -70,7 +59,8 @@ void MemChecks::rewrite_external(Def* def) {
         MemFinder intype_mem_finder(lam->type()->dom());
         while (auto mem = intype_mem_finder.next_mem()) {
             auto addr_space = mem->arg();
-            if (Lit::as(addr_space) != 0) error("The main function may not take %mem.M n with a non-zero n as an argument");
+            if (Lit::as(addr_space) != 0)
+                error("The main function may not take %mem.M n with a non-zero n as an argument");
         }
 
         MemFinder outtype_mem_finder(lam->type()->ret_dom());
