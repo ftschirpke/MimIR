@@ -38,13 +38,6 @@ lam %gpu.SharedPtr(T: *): * = %mem.Ptr (T, %gpu.addr_space_shared);
 lam %gpu.ConstPtr(T: *): *  = %mem.Ptr (T, %gpu.addr_space_const);
 lam %gpu.LocalPtr(T: *): *  = %mem.Ptr (T, %gpu.addr_space_local);
 ///
-/// ### Symbol Pointer Types
-///
-/// Symbols require an additional ID but otherwise work like normal pointers
-axm %gpu.SymPtr: [id: Nat, T: *, a: Nat] → *;
-lam %gpu.GlobalSymPtr(id: Nat, T: *): * = %gpu.SymPtr (id, T, %gpu.addr_space_global);
-lam %gpu.ConstSymPtr(id: Nat, T: *): *  = %gpu.SymPtr (id, T, %gpu.addr_space_const);
-///
 /// ### Streams
 ///
 axm %gpu.Stream: *;
@@ -56,27 +49,14 @@ axm %gpu.default_stream: %gpu.Stream;
 ///
 /// #### %%gpu.init
 ///
-/// Initializes the GPU runtime and module-level symbols in global and constant memory
+/// Initializes the GPU runtime
 // TODO: consider allowing multiple contexts and configuration of device number or context flags
-// TODO: refactor to {n m: Nat} as soon as type inference bug is fixed
-axm %gpu.init: [n m: Nat, %mem.M 0, GTs: «n; *», CTs: «m; *»]
-             → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM,
-                «i: n; %gpu.GlobalSymPtr (%core.bitcast Nat i, GTs#i)»,
-                «j: m; %gpu.ConstSymPtr (%core.bitcast Nat j, CTs#j)»];
+axm %gpu.init: %mem.M 0 → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM];
 ///
 /// #### %%gpu.deinit
 ///
 /// Deinitializes the GPU runtime
 axm %gpu.deinit: [%mem.M 0, %gpu.GlobalM, %gpu.ConstM] → %mem.M 0;
-///
-/// ### Symbol Pointers
-///
-/// #### %%gpu.symptr2ptr
-///
-/// Get the pointer for a symbol pointer
-axm %gpu.symptr2ptr: {id: Nat, T: *, a: Nat}
-                   → [%mem.M a, %gpu.SymPtr (id, T, a)]
-                   → [%mem.M a, %mem.Ptr (T, a)];
 ///
 /// ### Streams
 ///
@@ -151,20 +131,6 @@ axm %gpu.alloc(block): [T: *] → %gpu.GlobalM → [%gpu.GlobalM, %gpu.GlobalPtr
 /// Frees memory on the device (in global address space)
 axm %gpu.free(block): {T: *} → [%gpu.GlobalM, %gpu.GlobalPtr T] → %gpu.GlobalM;
 ///
-/// #### %%gpu.symbol_copy_to_device(block)
-///
-/// Copies data from host memory to a device symbol
-axm %gpu.symbol_copy_to_device(block): {id: Nat, T: *, a: Nat}
-                                     → [%mem.M 0, %mem.M a, %mem.Ptr0 T, %gpu.SymPtr (id, T, a)]
-                                     → [%mem.M 0, %mem.M a];
-///
-/// #### %%gpu.symbol_copy_to_host(block)
-///
-/// Copies data from a device symbol to host memory
-axm %gpu.symbol_copy_to_host(block): {id: Nat, T: *, a: Nat}
-                                   → [%mem.M 0, %mem.M a, %gpu.SymPtr (id, T, a), %mem.Ptr0 T]
-                                   → [%mem.M 0, %mem.M a];
-///
 /// #### %%gpu.copy_to_device(block)
 ///
 /// Copies data from host memory to device memory
@@ -202,20 +168,6 @@ axm %gpu.alloc(async): [T: *] → [%gpu.GlobalM, %gpu.Stream] → [%gpu.GlobalM,
 /// Asynchronously frees memory on the device (in global address space)
 axm %gpu.free(async): {T: *} → [%gpu.GlobalM, %gpu.GlobalPtr T, %gpu.Stream] → %gpu.GlobalM;
 ///
-/// #### %%gpu.symbol_copy_to_device(async)
-///
-/// Copies data from host memory to a device symbol
-axm %gpu.symbol_copy_to_device(async): {id: Nat, T: *, a: Nat}
-                                     → [%mem.M 0, %mem.M a, %mem.Ptr0 T, %gpu.SymPtr (id, T, a), %gpu.Stream]
-                                     → [%mem.M 0, %mem.M a];
-///
-/// #### %%gpu.symbol_copy_to_host(async)
-///
-/// Copies data from a device symbol to host memory
-axm %gpu.symbol_copy_to_host(async): {id: Nat, T: *, a: Nat}
-                                   → [%mem.M 0, %mem.M a, %gpu.SymPtr (id, T, a), %mem.Ptr0 T, %gpu.Stream]
-                                   → [%mem.M 0, %mem.M a];
-///
 /// #### %%gpu.copy_to_device(async)
 ///
 /// Asynchronously copies data from host memory to device memory
@@ -246,13 +198,11 @@ let %gpu.alloc_copy.async = lm {T: *}
 /// #### %%gpu.launch
 ///
 /// Launches a kernel function on the device with dynamic shared memory and module symbols
-// TODO: refactor to {n m s: Nat, STs: «s; [Nat, *, Nat]»} as soon as type inference bug is fixed
+// TODO: refactor to {n m: N, Ts: «n; *»} as soon as type inference bug is fixed
 axm %gpu.launch: {n: Nat, Ts: «n; *»}
-               → [n_groups: Nat, n_items: Nat, %gpu.Stream,
-                  m: Bool, s: Nat, STs: «s; [Nat, *, Nat]», // TODO: these <- should all be implicit
-                  «i: s; %gpu.SymPtr STs#i», MT: «%core.bitcast Nat m; *»]
+               → [n_groups: Nat, n_items: Nat, %gpu.Stream, m: Bool, MT: «%core.bitcast Nat m; *»]
                → Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM, Idx n_groups, Idx n_items,
-                     «i: s; %gpu.SymPtr STs#i», «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
+                     «i: %core.bitcast Nat m; %gpu.SharedPtr MT#i», «i: n; Ts#i»,
                      Cn [%gpu.GlobalM, %gpu.SharedM, %gpu.ConstM, %gpu.LocalM]]
                → «i: n; Ts#i»
                → Fn [%mem.M 0, %gpu.GlobalM, %gpu.ConstM]
