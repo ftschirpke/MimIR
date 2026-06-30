@@ -110,6 +110,28 @@ void HostEmitter::find_kernels(const Def* def) {
     }
 }
 
+static const Def* strip_symptrs(const Def* def) {
+    DefVec def_types;
+    if (auto sigma = def->type()->isa<Sigma>())
+        for (auto op : sigma->ops())
+            def_types.emplace_back(op);
+    else
+        def_types.emplace_back(def->type());
+    DefVec args;
+    World& w = def->world();
+    for (size_t idx = 0; idx < def_types.size(); ++idx) {
+        if (Axm::isa<nvptx::SymPtr>(def_types[idx])) continue;
+        const Def* sub_arg;
+        if (def_types.size() > 1)
+            sub_arg = w.extract(def, w.lit_idx(def_types.size(), idx));
+        else
+            sub_arg = def;
+        args.push_back(sub_arg);
+    }
+    def = w.tuple(args);
+    return def;
+}
+
 constexpr auto CU_INIT                = "cuInit";
 constexpr auto CU_CTX_CREATE          = "cuCtxCreate_v4";
 constexpr auto CU_CTX_DESTROY         = "cuCtxDestroy_v2";
@@ -167,7 +189,7 @@ std::string HostEmitter::convert(const Def* type) {
             // NVIDIA treats all device pointers as i64s in host code
             return "i64";
         }
-    } else if (auto symptr = Axm::isa<gpu::SymPtr>(type)) {
+    } else if (auto symptr = Axm::isa<nvptx::SymPtr>(type)) {
         auto [_, T, a]      = symptr->args<3>();
         auto ptr_equivalent = world().call<mem::Ptr>(Defs{T, a});
         return convert(ptr_equivalent);
@@ -270,44 +292,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
             emit_cu_error_handling(bb, func_res);
         }
 
-        // TODO: refactor to {n m: Nat} as soon as bug is fixed
-        // auto [n, m] = init->decurry()->args<2>();
-        // auto [mem, global_syms_def, const_syms_def] = init->args<3>();
-        auto [n, m, mem, global_syms_def, const_syms_def] = init->args<5>();
-
-        auto global_n = Lit::as(n);
-        auto const_n  = Lit::as(m);
-        DefVec global_syms, const_syms;
-        if (global_n > 1)
-            for (auto op : global_syms_def->ops())
-                global_syms.emplace_back(op);
-        else if (global_n == 1)
-            global_syms = {global_syms_def};
-        if (const_n > 1)
-            for (auto op : const_syms_def->ops())
-                const_syms.emplace_back(op);
-        else if (const_n == 1)
-            const_syms = {const_syms_def};
-
-        World& w       = world();
-        auto def_size  = 5;
-        auto global_as = Lit::as(w.annex<gpu::addr_space_global>());
-        auto const_as  = Lit::as(w.annex<gpu::addr_space_const>());
-        for (size_t id = 0; id < global_syms.size(); ++id) {
-            auto sym_name = symbol_name(global_as, id);
-            print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(global_syms[id]));
-            const Def* sym_def = w.extract(def, w.lit_idx(def_size, 3));
-            if (global_syms.size() > 1) sym_def = w.extract(sym_def, w.lit_idx(global_syms.size(), id));
-            globals_[sym_def] = "@" + sym_name;
-        }
-        for (size_t id = 0; id < const_syms.size(); ++id) {
-            auto sym_name = symbol_name(const_as, id);
-            print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(const_syms[id]));
-            const Def* sym_def = w.extract(def, w.lit_idx(def_size, 4));
-            if (const_syms.size() > 1) sym_def = w.extract(sym_def, w.lit_idx(const_syms.size(), id));
-            globals_[sym_def] = "@" + sym_name;
-        }
-
+        auto mem = init->arg();
         return emit_unsafe(mem);
     } else if (auto deinit = Axm::isa<gpu::deinit>(def)) {
         declare("i32 @{}(ptr)", CU_MODULE_UNLOAD);
@@ -409,11 +394,11 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
 
         emit_cu_error_handling(bb, free_res);
         return free_res;
-    } else if (auto symbol_copy_to_device = Axm::isa<gpu::symbol_copy_to_device>(def)) {
+    } else if (auto symbol_copy_to_device = Axm::isa<nvptx::symbol_copy_to_device>(def)) {
         bool is_async;
         switch (symbol_copy_to_device.id()) {
-            case gpu::symbol_copy_to_device::block: is_async = false; break;
-            case gpu::symbol_copy_to_device::async: is_async = true; break;
+            case nvptx::symbol_copy_to_device::block: is_async = false; break;
+            case nvptx::symbol_copy_to_device::async: is_async = true; break;
             default: fe::unreachable();
         }
 
@@ -459,11 +444,11 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
 
         emit_cu_error_handling(bb, copy_res);
         return copy_res;
-    } else if (auto symbol_copy_to_host = Axm::isa<gpu::symbol_copy_to_host>(def)) {
+    } else if (auto symbol_copy_to_host = Axm::isa<nvptx::symbol_copy_to_host>(def)) {
         bool is_async;
         switch (symbol_copy_to_host.id()) {
-            case gpu::symbol_copy_to_host::block: is_async = false; break;
-            case gpu::symbol_copy_to_host::async: is_async = true; break;
+            case nvptx::symbol_copy_to_host::block: is_async = false; break;
+            case nvptx::symbol_copy_to_host::async: is_async = true; break;
             default: fe::unreachable();
         }
 
@@ -581,8 +566,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
         declare("i32 @{}(ptr, i32, i32, i32, i32, i32, i32, i32, ptr, ptr, ptr)", CU_LAUNCH_KERNEL);
 
         auto [implicits, launch_config, kernel_def, arg_def, func_args] = launch->uncurry_args<5>();
-        auto [n_groups_def, n_items_def, stream_def, m, _, __, ___, MT] = launch_config->projs<8>();
+        auto [n_groups_def, n_items_def, stream_def, m, MT]             = launch_config->projs<5>();
         auto [mem, ret_lam_def]                                         = func_args->projs<2>();
+        auto [m0, m1, m4]                                               = mem->projs<3>();
 
         Lam* lam = kernel_def->isa_mut<Lam>();
         if (!lam) error("kernel is not a lamda {}", kernel_def);
@@ -595,14 +581,18 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
             shared_mem_bytes = Lit::as(world().call(core::trait::size, MT));
         }
 
-        emit_unsafe(mem);
+        emit_unsafe(m0);
+        emit_unsafe(m1);
+        emit_unsafe(m4);
         auto n_groups = emit(n_groups_def);
         auto n_items  = emit(n_items_def);
         auto stream   = emit(stream_def);
         auto kernel   = emit(kernel_def);
+        auto ret_lam  = emit(ret_lam_def);
+
+        arg_def       = strip_symptrs(arg_def);
         auto arg      = emit(arg_def);
         auto arg_type = convert(arg_def->type());
-        auto ret_lam  = emit(ret_lam_def);
 
         auto func_ptr = bb.assign(name + "_kernptr", "getelementptr inbounds [{} x ptr], [{} x ptr]* {}, i64 0, i64 {}",
                                   kernel_ids_.size(), kernel_ids_.size(), kernel_array_name_, kid);
@@ -622,6 +612,49 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(BB& bb, con
                         CU_LAUNCH_KERNEL, func_inner, n_groups, n_items, shared_mem_bytes, stream, args_inner);
         emit_cu_error_handling(bb, launch_res);
         return ret_lam;
+    } else if (auto symbols = Axm::isa<nvptx::symbols>(def)) {
+        // TODO: refactor to {n m: Nat} as soon as bug is fixed
+        // auto [n, m] = init->decurry()->args<2>();
+        // auto [mem, global_syms_def, const_syms_def] = symbols->args<3>();
+        auto [n, m, m0, m1, m4, global_syms_def, const_syms_def] = symbols->args<7>();
+
+        auto global_n = Lit::as(n);
+        auto const_n  = Lit::as(m);
+        DefVec global_syms, const_syms;
+        if (global_n > 1)
+            for (auto op : global_syms_def->ops())
+                global_syms.emplace_back(op);
+        else if (global_n == 1)
+            global_syms = {global_syms_def};
+        if (const_n > 1)
+            for (auto op : const_syms_def->ops())
+                const_syms.emplace_back(op);
+        else if (const_n == 1)
+            const_syms = {const_syms_def};
+
+        World& w       = world();
+        auto def_size  = 5;
+        auto global_as = Lit::as(w.annex<gpu::addr_space_global>());
+        auto const_as  = Lit::as(w.annex<gpu::addr_space_const>());
+        for (size_t id = 0; id < global_syms.size(); ++id) {
+            auto sym_name = symbol_name(global_as, id);
+            print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(global_syms[id]));
+            const Def* sym_def = w.extract(def, w.lit_idx(def_size, 3));
+            if (global_syms.size() > 1) sym_def = w.extract(sym_def, w.lit_idx(global_syms.size(), id));
+            globals_[sym_def] = "@" + sym_name;
+        }
+        for (size_t id = 0; id < const_syms.size(); ++id) {
+            auto sym_name = symbol_name(const_as, id);
+            print(vars_decls_, "@{} = internal global {} undef\n", sym_name, convert(const_syms[id]));
+            const Def* sym_def = w.extract(def, w.lit_idx(def_size, 4));
+            if (const_syms.size() > 1) sym_def = w.extract(sym_def, w.lit_idx(const_syms.size(), id));
+            globals_[sym_def] = "@" + sym_name;
+        }
+
+        emit_unsafe(m0);
+        emit_unsafe(m1);
+        return emit_unsafe(m4);
+    } else if (auto deinit = Axm::isa<gpu::deinit>(def)) {
     } else if (auto warp_size = Axm::isa<nvptx::warp_size>(def)) {
         error("%nvptx.warp_size is device-only and cannot be used in host code");
     }
@@ -655,10 +688,12 @@ std::string DeviceEmitter::prepare() {
 
     print(func_impls_, "define ptx_kernel {} {}(", convert_ret_pi(kernel->type()->ret_pi()), id(kernel));
 
-    auto [m1, m3, m4, m5, group_id, item_id, symptrs, smem, arg, ret_lam] = kernel->vars<10>();
+    auto [m1, m3, m4, m5, group_id, item_id, smem, arg, ret_lam] = kernel->vars<9>();
 
-    auto arg_name = id(arg);
-    locals_[arg]  = arg_name;
+    auto unstripped_arg = arg;
+    arg                 = strip_symptrs(arg);
+    auto arg_name       = id(arg);
+    locals_[arg]        = arg_name;
     print(func_impls_, "{} {}) {{\n", convert(arg->type()), arg_name);
 
     auto& bb = lam2bb_[kernel];
@@ -699,22 +734,22 @@ std::string DeviceEmitter::prepare() {
         print(vars_decls_, "{} = internal addrspace({}) global {} undef\n", name, a, convert(T));
     }
 
-    DefVec syms;
-    if (auto sigma = symptrs->type()->isa<Sigma>())
+    DefVec arg_types;
+    if (auto sigma = unstripped_arg->type()->isa<Sigma>())
         for (auto op : sigma->ops())
-            syms.emplace_back(op);
+            arg_types.emplace_back(op);
     else
-        syms.emplace_back(symptrs->type());
+        arg_types.emplace_back(unstripped_arg->type());
 
-    for (size_t idx = 0; idx < syms.size(); ++idx) {
-        auto ptr_t = Axm::isa<gpu::SymPtr>(syms[idx]);
-        if (!ptr_t) error("Unexpected argument for symbols in kernel: {} : {}", symptrs, symptrs->type());
+    for (size_t idx = 0; idx < arg_types.size(); ++idx) {
+        auto ptr_t = Axm::isa<nvptx::SymPtr>(arg_types[idx]);
+        if (!ptr_t) continue;
         auto [id, T, a] = ptr_t->args<3>();
         auto sym_name   = "@" + symbol_name(Lit::as(a), Lit::as(id));
-        auto var        = symptrs;
+        auto var        = arg;
 
         World& w = world();
-        if (syms.size() > 1) var = w.extract(symptrs, w.lit_idx(syms.size(), idx));
+        if (arg_types.size() > 1) var = w.extract(unstripped_arg, w.lit_idx(arg_types.size(), idx));
 
         globals_[var] = sym_name;
         auto [_, ins] = symbols_.emplace(sym_name, Lit::as(a));
@@ -739,7 +774,7 @@ std::optional<std::string> DeviceEmitter::isa_targetspecific_intrinsic(BB& bb, c
             print(vars_decls_, "{} = internal addrspace({}) global {} undef\n", name, a, convert(T));
             return name;
         }
-    } else if (auto symptr2ptr = Axm::isa<gpu::symptr2ptr>(def)) {
+    } else if (auto symptr2ptr = Axm::isa<nvptx::symptr2ptr>(def)) {
         emit_unsafe(symptr2ptr->arg(0));
         return emit(symptr2ptr->arg(1));
     } else if (auto sync_work_items = Axm::isa<gpu::sync_work_items>(def)) {

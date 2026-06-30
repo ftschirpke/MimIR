@@ -6,6 +6,7 @@
 #include <mim/plug/gpu/gpu.h>
 
 #include "mim/plug/nvptx/be/ll_nvptx.h"
+#include "mim/plug/nvptx/phase/mem_checks.h"
 
 using namespace mim;
 using namespace mim::plug;
@@ -16,6 +17,8 @@ void reg_stages(Flags2Stages& stages) {
         if (def->flags() == stream_flags) return world().annex<nvptx::Stream>();
         return {};
     });
+
+    Stage::hook<nvptx::mem_checks_phase, nvptx::phase::MemChecks>(stages);
 }
 
 extern "C" MIM_EXPORT Plugin mim_get_plugin() {

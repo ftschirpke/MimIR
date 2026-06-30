@@ -45,21 +45,6 @@ const Def* MemChecks::rewrite_imm_App(const App* app) {
             error("You may not pass any %mem.M across device boundaries: passing {} : {} from host to kernel '{}'",
                   kernel_args, kernel_args_t, kernel);
         }
-    } else if (auto init = Axm::isa<gpu::init>(app)) {
-        auto [_, global_syms, const_syms] = init->args<3>();
-
-        MemFinder global_mem_finder(global_syms);
-        if (global_mem_finder.next_mem()) {
-            error("You may not pass any %mem.M across device boundaries: creating symbol(s) {} in global address space "
-                  "with {}",
-                  global_syms, app);
-        }
-        MemFinder const_mem_finder(const_syms);
-        if (const_mem_finder.next_mem()) {
-            error("You may not pass any %mem.M across device boundaries: creating symbol(s) {} in constant address "
-                  "space with {}",
-                  const_syms, app);
-        }
     }
     return Super::rewrite_imm_App(app);
 }

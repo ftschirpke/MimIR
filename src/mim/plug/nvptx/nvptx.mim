@@ -21,7 +21,60 @@ import refly;
 ///
 let %nvptx.Stream = %mem.Ptr0 I8;
 ///
+/// ### Symbol Pointer Types
+///
+/// Symbols require an additional ID but otherwise work like normal pointers
+axm %nvptx.SymPtr: [id: Nat, T: *, a: Nat] → *;
+lam %nvptx.GlobalSymPtr(id: Nat, T: *): * = %nvptx.SymPtr (id, T, %gpu.addr_space_global);
+lam %nvptx.ConstSymPtr(id: Nat, T: *): *  = %nvptx.SymPtr (id, T, %gpu.addr_space_const);
+///
 /// ## Operations
+///
+/// ### Symbols
+///
+/// #### %%nvptx.symbols
+///
+/// Initializes symbols in global and constant memory
+// TODO: refactor to {n m: Nat} as soon as bug is fixed
+axm %nvptx.symbols: [n m: Nat, %mem.M 0, %gpu.GlobalM, %gpu.ConstM, GTs: «n; *», CTs: «m; *»]
+                  → [%mem.M 0, %gpu.GlobalM, %gpu.ConstM,
+                     «i: n; %nvptx.GlobalSymPtr (%core.bitcast Nat i, GTs#i)»,
+                     «j: m; %nvptx.ConstSymPtr  (%core.bitcast Nat j, CTs#j)»];
+///
+/// #### %%gpu.symptr2ptr
+///
+/// Get the pointer for a symbol pointer
+axm %nvptx.symptr2ptr: {id: Nat, T: *, a: Nat}
+                     → [%mem.M a, %nvptx.SymPtr (id, T, a)]
+                     → [%mem.M a, %mem.Ptr (T, a)];
+///
+/// #### %%nvptx.symbol_copy_to_device(block)
+///
+/// Copies data from host memory to a device symbol
+axm %nvptx.symbol_copy_to_device(block): {id: Nat, T: *, a: Nat}
+                                     → [%mem.M 0, %mem.M a, %mem.Ptr0 T, %nvptx.SymPtr (id, T, a)]
+                                     → [%mem.M 0, %mem.M a];
+///
+/// #### %%nvptx.symbol_copy_to_host(block)
+///
+/// Copies data from a device symbol to host memory
+axm %nvptx.symbol_copy_to_host(block): {id: Nat, T: *, a: Nat}
+                                   → [%mem.M 0, %mem.M a, %nvptx.SymPtr (id, T, a), %mem.Ptr0 T]
+                                   → [%mem.M 0, %mem.M a];
+///
+/// #### %%nvptx.symbol_copy_to_device(async)
+///
+/// Copies data from host memory to a device symbol
+axm %nvptx.symbol_copy_to_device(async): {id: Nat, T: *, a: Nat}
+                                     → [%mem.M 0, %mem.M a, %mem.Ptr0 T, %nvptx.SymPtr (id, T, a), %nvptx.Stream]
+                                     → [%mem.M 0, %mem.M a];
+///
+/// #### %%nvptx.symbol_copy_to_host(async)
+///
+/// Copies data from a device symbol to host memory
+axm %nvptx.symbol_copy_to_host(async): {id: Nat, T: *, a: Nat}
+                                   → [%mem.M 0, %mem.M a, %nvptx.SymPtr (id, T, a), %mem.Ptr0 T, %nvptx.Stream]
+                                   → [%mem.M 0, %mem.M a];
 ///
 /// ### Special Registers
 ///
@@ -61,6 +114,10 @@ axm %nvptx.fmaf(rd, rn, ru, rz): [%math.F32, %math.F32, %math.F32] → %math.F32
 /// ### Repls
 ///
 axm %nvptx.stream_impl_repl: %compile.Repl;
+///
+/// ### Phases
+///
+axm %nvptx.mem_checks_phase: %compile.Phase;
 ///
 /// ### Pipelines
 ///
