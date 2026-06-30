@@ -1,11 +1,11 @@
 
-#include "mim/plug/gpu/phase/setup4backend.h"
-
 #include <mim/driver.h>
+
+#include "mim/plug/gpu/phase/split_apply.h"
 
 namespace mim::plug::gpu::phase {
 
-// HACK: awkward way to run extendable pipelines as a phase inspired by optimize.cpp
+// run extendable pipelines as a phase inspired by optimize.cpp
 static void run_stage(World& world, flags_t annex) {
     const Def* stages = world.annex(annex);
     auto body         = stages->as<Lam>()->body();
@@ -23,7 +23,7 @@ static void run_stage(World& world, flags_t annex) {
     phase->run();
 }
 
-void Setup4Backend::start() {
+void SplitApply::start() {
     split_phase.run();
     swap(old_world(), split_phase.old_world());
     swap(new_world(), split_phase.new_world());
