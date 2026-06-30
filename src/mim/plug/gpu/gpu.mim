@@ -158,39 +158,39 @@ let %gpu.alloc_copy.block = lm {T: *}
 ///
 /// ### Asynchronous Memory Operations
 ///
-/// #### %%gpu.alloc(async)
+/// #### %%gpu.alloc(asyn)
 ///
 /// Asynchronously allocates memory on the device (in global address space)
-axm %gpu.alloc(async): [T: *] → [%gpu.GlobalM, %gpu.Stream] → [%gpu.GlobalM, %gpu.GlobalPtr T];
+axm %gpu.alloc(asyn): [T: *] → [%gpu.GlobalM, %gpu.Stream] → [%gpu.GlobalM, %gpu.GlobalPtr T];
 ///
-/// #### %%gpu.free(async)
+/// #### %%gpu.free(asyn)
 ///
 /// Asynchronously frees memory on the device (in global address space)
-axm %gpu.free(async): {T: *} → [%gpu.GlobalM, %gpu.GlobalPtr T, %gpu.Stream] → %gpu.GlobalM;
+axm %gpu.free(asyn): {T: *} → [%gpu.GlobalM, %gpu.GlobalPtr T, %gpu.Stream] → %gpu.GlobalM;
 ///
-/// #### %%gpu.copy_to_device(async)
+/// #### %%gpu.copy_to_device(asyn)
 ///
 /// Asynchronously copies data from host memory to device memory
-axm %gpu.copy_to_device(async): {T: *}
+axm %gpu.copy_to_device(asyn): {T: *}
                               → [%mem.M 0, %gpu.GlobalM, %mem.Ptr0 T, %gpu.GlobalPtr T, %gpu.Stream]
                               → [%mem.M 0, %gpu.GlobalM];
 ///
-/// #### %%gpu.copy_to_host(async)
+/// #### %%gpu.copy_to_host(asyn)
 ///
 /// Asynchronously copies data from device memory to host memory
-axm %gpu.copy_to_host(async): {T: *}
+axm %gpu.copy_to_host(asyn): {T: *}
                             → [%mem.M 0, %gpu.GlobalM, %gpu.GlobalPtr T, %mem.Ptr0 T, %gpu.Stream]
                             → [%mem.M 0, %gpu.GlobalM];
 ///
-/// #### %%gpu.alloc_copy(async)
+/// #### %%gpu.alloc_copy(asyn)
 ///
 /// Asynchronously allocates memory on the device (in global address space) for the provided host data
 /// and copies the host data to that memory
-let %gpu.alloc_copy.async = lm {T: *}
+let %gpu.alloc_copy.asyn = lm {T: *}
                                (m0: %mem.M 0, m1: %gpu.GlobalM, ptr: %mem.Ptr0 T, stream: %gpu.Stream)
                              : [%mem.M 0, %gpu.GlobalM, %gpu.GlobalPtr T] =
-    let (m1, d_ptr) = %gpu.alloc.async T (m1, stream);
-    let (m0, m1) = %gpu.copy_to_device.async (m0, m1, ptr, d_ptr, stream);
+    let (m1, d_ptr) = %gpu.alloc.asyn T (m1, stream);
+    let (m0, m1) = %gpu.copy_to_device.asyn (m0, m1, ptr, d_ptr, stream);
     (m0, m1, d_ptr);
 ///
 /// ### Kernel Launch
