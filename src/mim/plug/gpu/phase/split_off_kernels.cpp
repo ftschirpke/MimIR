@@ -20,7 +20,7 @@ bool SplitOffKernels::analyze() {
     for (auto def : old_world().externals().muts())
         analyze(def);
 
-    return false; // no fixed-point neccessary
+    return false; // no fixed-point necessary
 }
 
 void SplitOffKernels::analyze(const Def* def) {

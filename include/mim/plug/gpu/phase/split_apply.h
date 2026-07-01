@@ -12,7 +12,7 @@ class SplitApply : public RWPhase {
 public:
     SplitApply(World& world, flags_t annex)
         : RWPhase(world, annex)
-        , split_phase(world, "splitoff_kernels_in_setup4backend") {}
+        , split_phase(world, "splitoff_kernels_in_split_apply") {}
 
     void start() final;
 

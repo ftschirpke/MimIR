@@ -69,7 +69,7 @@ void MemChecks::rewrite_external(Def* def) {
             if (Lit::as(addr_space) != 0) error("The main function may not return any %mem.M n with a non-zero n");
         }
     }
-    return Super::rewrite_external(def);
+    Super::rewrite_external(def);
 }
 
 } // namespace mim::plug::gpu::phase
