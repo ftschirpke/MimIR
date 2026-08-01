@@ -37,13 +37,12 @@ protected:
     std::string convert(const Def*, bool simd = true) override;
 
 private:
-    static constexpr std::string_view mod_name_          = "@.mimir_cu_mod";
-    static constexpr std::string_view ctx_name_          = "@.mimir_cu_ctx";
-    static constexpr std::string_view fatbin_name_       = "@.fatbin";
-    static constexpr std::string_view kernel_array_name_ = "@.mimir_kernels";
-    static constexpr std::string_view kernel_name_prefix = "@.kname.";
-
-    void emit_cu_error_handling(ll::BB&, const std::string&, bool at_tail = false);
+    static constexpr std::string_view cu_module_              = "@.mimir_cu_mod";
+    static constexpr std::string_view cu_context_             = "@.mimir_cu_ctx";
+    static constexpr std::string_view fatbin_data_            = "@.fatbin";
+    static constexpr std::string_view kernel_name_prefix      = "@.kname.";
+    static constexpr std::string_view kernel_names_array_     = "@.mimir_kernel_names";
+    static constexpr std::string_view kernel_functions_array_ = "@.mimir_kernel_funcs";
 
     std::optional<std::string> device_fatbin_file_;
     LamMap<int> kernel_ids_;
@@ -93,12 +92,20 @@ void HostEmitter::start() {
     for (auto def : world().externals().muts())
         find_kernels(def);
 
+    std::stringstream kernel_names;
+    std::print(kernel_names, "{} = dso_local global [{} x ptr] [", kernel_names_array_, kernel_ids_.size());
+    auto sep = ""s;
     for (auto [kernel, kid] : kernel_ids_) {
         auto name = id(kernel).substr(1);
         std::print(vars_decls_, "{}{} = private constant [{} x i8] c\"{}\\00\"\n", kernel_name_prefix, kid,
                    name.size() + 1, name);
+        std::print(kernel_names, "{}ptr getelementptr ([{} x i8], ptr {}{}, i64 0, i64 0)", sep, name.size(),
+                   kernel_name_prefix, kid);
+        sep = ", "s;
     }
-    std::print(vars_decls_, "{} = dso_local global [{} x ptr] zeroinitializer\n", kernel_array_name_,
+    std::print(vars_decls_, "{}]\n", kernel_names.str());
+
+    std::print(vars_decls_, "{} = dso_local global [{} x ptr] zeroinitializer\n", kernel_functions_array_,
                kernel_ids_.size());
 
     Super::start();
@@ -117,36 +124,6 @@ void HostEmitter::find_kernels(const Def* def) {
         auto kid                = kernel_ids_.size();
         kernel_ids_[kernel_lam] = kid;
     }
-}
-
-constexpr auto Cu_Init                = "cuInit";
-constexpr auto Cu_Ctx_Create          = "cuCtxCreate_v4";
-constexpr auto Cu_Ctx_Destroy         = "cuCtxDestroy_v2";
-constexpr auto Cu_Device_Get          = "cuDeviceGet";
-constexpr auto Cu_Launch_Kernel       = "cuLaunchKernel_ptsz";
-constexpr auto Cu_Mem_Alloc           = "cuMemAlloc_v2";
-constexpr auto Cu_Mem_Alloc_Async     = "cuMemAllocAsync_ptsz";
-constexpr auto Cu_Mem_Free            = "cuMemFree_v2";
-constexpr auto Cu_Mem_Free_Async      = "cuMemFreeAsync_ptsz";
-constexpr auto Cu_Memcpy_Htod         = "cuMemcpyHtoD_v2";
-constexpr auto Cu_Memcpy_Htod_Async   = "cuMemcpyHtoDAsync_v2_ptsz";
-constexpr auto Cu_Memcpy_Dtoh         = "cuMemcpyDtoH_v2";
-constexpr auto Cu_Memcpy_Dtoh_Async   = "cuMemcpyDtoHAsync_v2_ptsz";
-constexpr auto Cu_Module_Load_Fatbin  = "cuModuleLoadFatBinary";
-constexpr auto Cu_Module_Get_Function = "cuModuleGetFunction";
-constexpr auto Cu_Module_Unload       = "cuModuleUnload";
-constexpr auto Cu_Stream_Create       = "cuStreamCreate";
-constexpr auto Cu_Stream_Destroy      = "cuStreamDestroy_v2";
-constexpr auto Cu_Stream_Sync         = "cuStreamSynchronize_ptsz";
-
-void HostEmitter::emit_cu_error_handling(ll::BB& bb, const std::string& cu_result, bool at_tail) {
-    // Offload the CUresult check to the C runtime wrapper `mim_cu_check` (see rt/mim_cuda_rt.c)
-    // instead of open-coding it here; showcases the C-runtime system on the ll_nvptx backend.
-    declare_rt("void @mim_cu_check(i32)");
-    if (at_tail)
-        bb.tail("call void @mim_cu_check(i32 {})", cu_result);
-    else
-        std::print(bb.body().emplace_back(), "call void @mim_cu_check(i32 {})", cu_result);
 }
 
 std::string HostEmitter::convert(const Def* type, bool simd) {
@@ -168,28 +145,11 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
     if (auto default_stream = Axm::isa<gpu::default_stream>(def)) {
         return "null";
     } else if (auto init = Axm::isa<gpu::init>(def)) {
-        auto dev_num   = 0; // TODO: consider parameterizing this
-        auto ctx_flags = 0; // TODO: consider parameterizing this
+        declare_rt("void @mim_cu_init(ptr, ptr, ptr, ptr, ptr, i32)");
 
-        declare("i32 @{}(i32)", Cu_Init);
-        auto init_res = bb.assign(name + "_init_res", "call i32 @{}(i32 0)", Cu_Init);
-        emit_cu_error_handling(bb, init_res);
+        std::print(vars_decls_, "{} = global ptr null\n", cu_context_);
+        std::print(vars_decls_, "{} = global ptr null\n", cu_module_);
 
-        declare("i32 @{}(ptr, i32)", Cu_Device_Get);
-        auto dev_ptr = bb.assign(name + "_dev_ptr", "alloca i32");
-        auto dev_get_res
-            = bb.assign(name + "_get_res", "call i32 @{}(ptr {}, i32 {})", Cu_Device_Get, dev_ptr, dev_num);
-        emit_cu_error_handling(bb, dev_get_res);
-
-        declare("i32 @{}(ptr, ptr, i32, i32)", Cu_Ctx_Create);
-        std::print(vars_decls_, "{} = global ptr null\n", ctx_name_);
-        auto dev     = bb.assign(name + "_dev", "load i32, ptr {}", dev_ptr);
-        auto ctx_res = bb.assign(name + "_ctx_res", "call i32 @{}(ptr {}, ptr null, i32 {}, i32 {})", Cu_Ctx_Create,
-                                 ctx_name_, ctx_flags, dev);
-        emit_cu_error_handling(bb, ctx_res);
-
-        declare("i32 @{}(ptr, ptr)", Cu_Module_Load_Fatbin);
-        std::print(vars_decls_, "{} = global ptr null\n", mod_name_);
         if (device_fatbin_file_.has_value()) {
             std::ifstream fatbin_file(device_fatbin_file_.value(), std::ios::binary);
             if (!fatbin_file) fe::throwf("Could not open {} as binary file", device_fatbin_file_.value());
@@ -198,7 +158,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
             auto end   = std::istreambuf_iterator<char>();
             std::vector<u8> fatbin_bytes(start, end);
 
-            std::print(vars_decls_, "{} = private constant [{} x i8] c\"", fatbin_name_, fatbin_bytes.size());
+            std::print(vars_decls_, "{} = private constant [{} x i8] c\"", fatbin_data_, fatbin_bytes.size());
             for (auto byte : fatbin_bytes) {
                 bool invalid_cstr_char = byte == '"' || byte == '\\';
                 if (std::isprint(byte) && !invalid_cstr_char) {
@@ -213,68 +173,51 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
             std::print(vars_decls_, "; Add the bytes of your compiled nvptx fatbin binary here:\n");
             std::print(vars_decls_,
                        "{} = private constant [YOUR_FATBIN_DATA_SIZE_GOES_HERE x i8] YOUR_FATBIN_DATA_GOES_HERE\n",
-                       fatbin_name_);
-        }
-        auto mod_res = bb.assign(name + "_mod_res", "call i32 @{}(ptr {}, ptr {})", Cu_Module_Load_Fatbin, mod_name_,
-                                 fatbin_name_);
-        emit_cu_error_handling(bb, mod_res);
-        auto mod_inner = bb.assign(name + "_mod_inner", "load ptr, ptr {}", mod_name_);
-
-        declare("i32 @{}(ptr, ptr, ptr)", Cu_Module_Get_Function);
-        for (auto [kernel, kid] : kernel_ids_) {
-            auto kname    = id(kernel).substr(1);
-            auto func_ptr = bb.assign("%" + kname + "_funcptr", "getelementptr inbounds ptr, ptr {}, i64 {}",
-                                      kernel_array_name_, kid);
-            auto func_res = bb.assign("%" + kname + "_getfuncres", "call i32 @{}(ptr {}, ptr {}, ptr {}{})",
-                                      Cu_Module_Get_Function, func_ptr, mod_inner, kernel_name_prefix, kid);
-            emit_cu_error_handling(bb, func_res);
+                       fatbin_data_);
         }
 
-        auto mem = init->arg();
-        return emit_unsafe(mem);
+        std::print(bb.body().emplace_back(), "call void @mim_cu_init(ptr {}, ptr {}, ptr {}, ptr {}, ptr {}, i32 {})",
+                   cu_context_, cu_module_, kernel_functions_array_, fatbin_data_, kernel_names_array_,
+                   kernel_ids_.size());
+
+        emit_unsafe(init->arg());
+        return "";
     } else if (auto deinit = Axm::isa<gpu::deinit>(def)) {
-        declare("i32 @{}(ptr)", Cu_Module_Unload);
-        bb.tail("{}_mod = load ptr, ptr {}", name, mod_name_);
-        bb.tail("{}_mod_unload_res = call i32 @{}(ptr {}_mod)", name, Cu_Module_Unload, name);
-        emit_cu_error_handling(bb, name + "_mod_unload_res", true);
-
-        declare("i32 @{}(ptr)", Cu_Ctx_Destroy);
-        bb.tail("{}_ctx = load ptr, ptr {}", name, ctx_name_);
-        bb.tail("{}_ctx_destroy_res = call i32 @{}(ptr {}_ctx)", name, Cu_Ctx_Destroy, name);
-        emit_cu_error_handling(bb, name + "_ctx_destroy_res", true);
+        declare_rt("void @mim_cu_deinit(ptr, ptr)");
 
         emit_unsafe(deinit->arg(0));
-        return emit_unsafe(deinit->arg(1));
+        emit_unsafe(deinit->arg(1));
+        emit_unsafe(deinit->arg(2));
+
+        std::print(bb.body().emplace_back(), "call void @mim_cu_deinit(ptr {}, ptr {})", cu_context_, cu_module_);
+        return "";
     } else if (auto stream_init = Axm::isa<gpu::stream_init>(def)) {
-        declare("i32 @{}(ptr, i32)", Cu_Stream_Create);
+        declare_rt("void @mim_cu_stream_create(ptr)");
 
         emit_unsafe(stream_init->arg(0));
         emit_unsafe(stream_init->arg(1));
         auto stream_ptr = emit(stream_init->arg(2));
 
-        auto res = bb.assign(name, "call i32 @{}(ptr {}, i32 0)", Cu_Stream_Create, stream_ptr);
-        emit_cu_error_handling(bb, res);
-        return res;
+        std::print(bb.body().emplace_back(), "call void @mim_cu_stream_create(ptr {})", stream_ptr);
+        return "";
     } else if (auto stream_deinit = Axm::isa<gpu::stream_deinit>(def)) {
-        declare("i32 @{}(ptr)", Cu_Stream_Destroy);
+        declare_rt("void @mim_cu_stream_destroy(ptr)");
 
         emit_unsafe(stream_deinit->arg(0));
         emit_unsafe(stream_deinit->arg(1));
         auto stream = emit(stream_deinit->arg(2));
 
-        auto res = bb.assign(name, "call i32 @{}(ptr {})", Cu_Stream_Destroy, stream);
-        emit_cu_error_handling(bb, res);
-        return res;
+        std::print(bb.body().emplace_back(), "call void @mim_cu_stream_destroy(ptr {})", stream);
+        return "";
     } else if (auto stream_sync = Axm::isa<gpu::stream_sync>(def)) {
-        declare("i32 @{}(ptr)", Cu_Stream_Sync);
+        declare_rt("void @mim_cu_stream_sync(ptr)");
 
         emit_unsafe(stream_sync->arg(0));
         emit_unsafe(stream_sync->arg(1));
         auto stream = emit(stream_sync->arg(2));
 
-        auto res = bb.assign(name, "call i32 @{}(ptr {})", Cu_Stream_Sync, stream);
-        emit_cu_error_handling(bb, res);
-        return res;
+        std::print(bb.body().emplace_back(), "call void @mim_cu_stream_sync(ptr {})", stream);
+        return "";
     } else if (auto alloc = Axm::isa<gpu::alloc>(def)) {
         bool is_async;
         switch (alloc.id()) {
@@ -284,9 +227,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
         }
 
         if (is_async)
-            declare("i32 @{}(ptr, i64, ptr)", Cu_Mem_Alloc_Async);
+            declare_rt("void @mim_cu_mem_alloc_async(ptr, i64, ptr)");
         else
-            declare("i32 @{}(ptr, i64)", Cu_Mem_Alloc);
+            declare_rt("void @mim_cu_mem_alloc(ptr, i64)");
 
         emit_unsafe(alloc->arg(0));
         auto alloc_t    = alloc->decurry()->arg();
@@ -297,16 +240,15 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
         auto ptr_t = convert(Axm::expect<mem::Ptr>(def->proj(1)->type(), "a %mem.Ptr"));
 
         auto alloc_ptr = bb.assign(name + "ptr", "alloca {}", ptr_t);
-        std::string alloc_res;
         if (is_async) {
             auto stream = emit(alloc->arg(1));
-            alloc_res   = bb.assign(name + "res", "call i32 @{}(ptr {}, i64 {}, ptr {})", Cu_Mem_Alloc_Async, alloc_ptr,
-                                    alloc_size, stream);
+            std::print(bb.body().emplace_back(), "call void @mim_cu_mem_alloc_async(ptr {}, i64 {}, ptr {})", alloc_ptr,
+                       alloc_size, stream);
         } else
-            alloc_res = bb.assign(name + "res", "call i32 @{}(ptr {}, i64 {})", Cu_Mem_Alloc, alloc_ptr, alloc_size);
+            std::print(bb.body().emplace_back(), "call void @mim_cu_mem_alloc(ptr {}, i64 {})", alloc_ptr, alloc_size);
 
-        emit_cu_error_handling(bb, alloc_res);
-        return bb.assign(name, "load {}, {} addrspace(0)* {}", ptr_t, ptr_t, alloc_ptr);
+        auto res = bb.assign(name, "load {}, {} addrspace(0)* {}", ptr_t, ptr_t, alloc_ptr);
+        return res;
     } else if (auto free = Axm::isa<gpu::free>(def)) {
         bool is_async;
         switch (free.id()) {
@@ -316,22 +258,20 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
         }
 
         if (is_async)
-            declare("i32 @{}(i64)", Cu_Mem_Free_Async);
+            declare_rt("void @mim_cu_mem_free_async(i64, ptr)");
         else
-            declare("i32 @{}(i64)", Cu_Mem_Free);
+            declare_rt("void @mim_cu_mem_free(i64)");
 
         emit_unsafe(free->arg(0));
         auto ptr = emit(free->arg(1));
 
-        std::string free_res;
         if (is_async) {
             auto stream = emit(free->arg(2));
-            free_res    = bb.assign(name + "res", "call i32 @{}(i64 {}, ptr {})", Cu_Mem_Free_Async, ptr, stream);
+            std::print(bb.body().emplace_back(), "call void @mim_cu_mem_free_async(i64 {}, ptr {})", ptr, stream);
         } else
-            free_res = bb.assign(name + "res", "call i32 @{}(i64 {})", Cu_Mem_Free, ptr);
+            std::print(bb.body().emplace_back(), "call void @mim_cu_mem_free(i64 {})", ptr);
 
-        emit_cu_error_handling(bb, free_res);
-        return free_res;
+        return "";
     } else if (auto copy_to_device = Axm::isa<gpu::copy_to_device>(def)) {
         bool is_async;
         switch (copy_to_device.id()) {
@@ -341,9 +281,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
         }
 
         if (is_async)
-            declare("i32 @{}(i64, ptr, i64, ptr)", Cu_Memcpy_Htod_Async);
+            declare_rt("void @mim_cu_memcpy_htod_async(i64, ptr, i64, ptr)");
         else
-            declare("i32 @{}(i64, ptr, i64)", Cu_Memcpy_Htod);
+            declare_rt("void @mim_cu_memcpy_htod(i64, ptr, i64)");
 
         auto type      = copy_to_device->decurry()->arg();
         World& w       = type->world();
@@ -355,17 +295,15 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
         auto dev_ptr  = emit(copy_to_device->arg(3));
         auto size     = emit(type_size);
 
-        std::string copy_res;
         if (is_async) {
             auto stream = emit(copy_to_device->arg(4));
-            copy_res    = bb.assign(name + "res", "call i32 @{}(i64 {}, ptr {}, i64 {}, ptr {})", Cu_Memcpy_Htod_Async,
-                                    dev_ptr, host_ptr, size, stream);
+            std::print(bb.body().emplace_back(), "call void @mim_cu_memcpy_htod_async(i64 {}, ptr {}, i64 {}, ptr {})",
+                       dev_ptr, host_ptr, size, stream);
         } else
-            copy_res = bb.assign(name + "res", "call i32 @{}(i64 {}, ptr {}, i64 {})", Cu_Memcpy_Htod, dev_ptr,
-                                 host_ptr, size);
+            std::print(bb.body().emplace_back(), "call void @mim_cu_memcpy_htod(i64 {}, ptr {}, i64 {})", dev_ptr,
+                       host_ptr, size);
 
-        emit_cu_error_handling(bb, copy_res);
-        return copy_res;
+        return "";
     } else if (auto copy_to_host = Axm::isa<gpu::copy_to_host>(def)) {
         bool is_async;
         switch (copy_to_host.id()) {
@@ -374,9 +312,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
             default: fe::throwf("ll_nvptx backend: unhandled %gpu.copy_to_host id in '{}'", def);
         }
         if (is_async)
-            declare("i32 @{}(ptr, i64, i64, ptr)", Cu_Memcpy_Dtoh_Async);
+            declare_rt("void @mim_cu_memcpy_dtoh_async(ptr, i64, i64, ptr)");
         else
-            declare("i32 @{}(ptr, i64, i64)", Cu_Memcpy_Dtoh);
+            declare_rt("void @mim_cu_memcpy_dtoh(ptr, i64, i64)");
 
         auto [type]    = copy_to_host->decurry()->args<1>();
         World& w       = type->world();
@@ -388,20 +326,17 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
         auto host_ptr = emit(copy_to_host->arg(3));
         auto size     = emit(type_size);
 
-        std::string copy_res;
         if (is_async) {
             auto stream = emit(copy_to_host->arg(4));
-            copy_res    = bb.assign(name + "res", "call i32 @{}(ptr {}, i64 {}, i64 {}, ptr {})", Cu_Memcpy_Dtoh_Async,
-                                    host_ptr, dev_ptr, size, stream);
+            std::print(bb.body().emplace_back(), "call void @mim_cu_memcpy_dtoh_async(ptr {}, i64 {}, i64 {}, ptr {})",
+                       host_ptr, dev_ptr, size, stream);
         } else
-            copy_res = bb.assign(name + "res", "call i32 @{}(ptr {}, i64 {}, i64 {})", Cu_Memcpy_Dtoh, host_ptr,
-                                 dev_ptr, size);
+            std::print(bb.body().emplace_back(), "call void @mim_cu_memcpy_dtoh(ptr {}, i64 {}, i64 {})", host_ptr,
+                       dev_ptr, size);
 
-        emit_cu_error_handling(bb, copy_res);
-        return copy_res;
+        return "";
     } else if (auto launch = Axm::isa<gpu::launch>(def)) {
-        // TODO: rewrite to use modern cuLaunchKernelEx instead
-        declare("i32 @{}(ptr, i32, i32, i32, i32, i32, i32, i32, ptr, ptr, ptr)", Cu_Launch_Kernel);
+        declare_rt("void @mim_cu_launch_kernel(ptr, i32, i32, i32, ptr, ptr)");
 
         auto [implicits, launch_config, kernel_def, arg_def, func_args] = launch->uncurry_args<5>();
         auto [n_groups_def, n_items_def, stream_def, m, MT]             = launch_config->projs<5>();
@@ -428,7 +363,7 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
         auto ret_lam  = emit(ret_lam_def);
 
         auto func_ptr = bb.assign(name + "_kernptr", "getelementptr inbounds [{} x ptr], [{} x ptr]* {}, i64 0, i64 {}",
-                                  kernel_ids_.size(), kernel_ids_.size(), kernel_array_name_, kid);
+                                  kernel_ids_.size(), kernel_ids_.size(), kernel_functions_array_, kid);
         auto func_inner = bb.assign(name + "_kernel", "load ptr, ptr {}", func_ptr);
 
         auto arg_wrap = bb.assign(name + "_arg_wrap", "alloca {}", arg_type);
@@ -438,12 +373,9 @@ std::optional<std::string> HostEmitter::isa_targetspecific_intrinsic(ll::BB& bb,
         std::print(bb.body().emplace_back(), "store ptr {}, ptr {}", arg_wrap, args_ptr);
         auto args_inner
             = bb.assign(name + "_args_inner", "getelementptr inbounds [1 x ptr], ptr {}, i64 0, i64 0", args_ptr);
-        auto launch_res
-            = bb.assign(name,
-                        "call i32 @{}(ptr {}, i32 {}, i32 1, i32 1, i32 {}, i32 1, i32 1, "
-                        "i32 {}, ptr {}, ptr {}, ptr null)",
-                        Cu_Launch_Kernel, func_inner, n_groups, n_items, shared_mem_bytes, stream, args_inner);
-        emit_cu_error_handling(bb, launch_res);
+        std::print(bb.body().emplace_back(),
+                   "call void @mim_cu_launch_kernel(ptr {}, i32 {}, i32 {}, i32 {}, ptr {}, ptr {})", func_inner,
+                   n_groups, n_items, shared_mem_bytes, stream, args_inner);
         return ret_lam;
     }
     return std::nullopt;

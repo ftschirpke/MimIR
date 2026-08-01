@@ -210,6 +210,7 @@ endfunction()
 ## \code{.cmake}
 ## add_mim_runtime(<plugin-name>
 ##     SOURCES <source>...
+##     [ARGS <arg>...]
 ##     [INSTALL])
 ## \endcode
 ##
@@ -234,7 +235,7 @@ function(add_mim_runtime)
         PARSED              # prefix of output variables
         "INSTALL"           # options
         ""                  # one-value keywords (none)
-        "SOURCES"           # multi-value keywords
+        "ARGS;SOURCES"      # multi-value keywords
     )
 
     if(NOT MIM_BUILD_LL_RUNTIME OR NOT MIM_CLANG)
@@ -254,7 +255,7 @@ function(add_mim_runtime)
     if(N_SOURCES EQUAL 1)
         add_custom_command(
             OUTPUT  ${RT_LL}
-            COMMAND ${MIM_CLANG} -S -emit-llvm -O2 ${ABS_SOURCES} -o ${RT_LL}
+            COMMAND ${MIM_CLANG} -S -emit-llvm -O2 ${ABS_SOURCES} -o ${RT_LL} ${PARSED_ARGS}
             DEPENDS ${ABS_SOURCES}
             COMMENT "Compiling MimIR runtime '${PLUGIN}' to LLVM IR"
             VERBATIM
@@ -272,7 +273,7 @@ function(add_mim_runtime)
             set(bc ${RT_DIR}/${PLUGIN}_${stem}.bc)
             add_custom_command(
                 OUTPUT  ${bc}
-                COMMAND ${MIM_CLANG} -emit-llvm -O2 -c ${CMAKE_CURRENT_LIST_DIR}/${src} -o ${bc}
+                COMMAND ${MIM_CLANG} -emit-llvm -O2 -c ${CMAKE_CURRENT_LIST_DIR}/${src} -o ${bc} ${PARSED_ARGS}
                 DEPENDS ${CMAKE_CURRENT_LIST_DIR}/${src}
                 COMMENT "Compiling MimIR runtime source '${src}' to LLVM bitcode"
                 VERBATIM
