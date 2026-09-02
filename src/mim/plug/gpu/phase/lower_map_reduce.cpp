@@ -152,9 +152,9 @@ struct Inputs {
 Inputs alloc_copy_inputs(World& w,
                          const Def* m0,
                          const Def* m1,
-                         const DefVec& ris,
-                         const DefVec& sis,
-                         const DefVec& tis,
+                         const Defs& ris,
+                         const Defs& sis,
+                         const Defs& tis,
                          const Def* inputs) {
     DefVec dptrs(ris.size());
     for (size_t i = 0; i != ris.size(); ++i) {
@@ -326,8 +326,8 @@ Lam* build_teardown(World& w,
                     const Def* Ro,
                     const Def* So,
                     const Def* Tp,
-                    const DefVec& dptrs,
-                    const DefVec& post_dptrs,
+                    const Defs& dptrs,
+                    const Defs& post_dptrs,
                     const Def* out_dptr,
                     const Def* cont) {
     auto global_ty = w.annex<gpu::GlobalM>();
@@ -344,12 +344,12 @@ Lam* build_teardown(World& w,
 
     auto cur_global = cb_global;
     for (auto dptr : dptrs)
-        cur_global = w.call(gpu::free::block, w.tuple({cur_global, dptr}));
+        cur_global = w.call(gpu::free::block, Defs{cur_global, dptr});
     for (auto dptr : post_dptrs)
-        cur_global = w.call(gpu::free::block, w.tuple({cur_global, dptr}));
+        cur_global = w.call(gpu::free::block, Defs{cur_global, dptr});
     cur_global = w.call(gpu::free::block, w.tuple({cur_global, out_dptr}));
 
-    auto final_mem = w.app(w.annex<gpu::auto_deinit>(), w.tuple({cb_mem, cur_global, post_const}));
+    auto final_mem = w.app(w.annex<gpu::auto_deinit>(), Defs{cb_mem, cur_global, post_const});
     after_launch->app(true, cont, w.tuple({final_mem, host_buf}));
     return after_launch;
 }
@@ -379,24 +379,22 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     auto c  = rewrite(app->callee())->as<App>();
 
     auto [nis_nps, meta, shapes, in_tys, comb_init, acc_out, accs_all] = c->uncurry_args<7>();
-    auto [nis, nps]                                                    = nis_nps->projs<2>();
-    auto [To, Tp, Ro, Rn, sched_ty]                                    = meta->projs<5>();
-    auto [So, Sr, sched]                                               = shapes->projs<3>();
-    auto [Tis, Ris, Sis, Tps, Rps, Sps]                                = in_tys->projs<6>();
-    auto [comb, init, post]                                            = comb_init->projs<3>();
-    auto [accs, post_accs]                                             = accs_all->projs<2>();
-    auto result_ty                                                     = rewrite(app->type());
+    auto [nis, nps]                     = nis_nps->projs<2>([](auto d) { return Lit::isa(d); });
+    auto [To, Tp, Ro, Rn, sched_ty]     = meta->projs<5>();
+    auto [So, Sr, sched]                = shapes->projs<3>();
+    auto [Tis, Ris, Sis, Tps, Rps, Sps] = in_tys->projs<6>();
+    auto [comb, init, post]             = comb_init->projs<3>();
+    auto [accs, post_accs]              = accs_all->projs<2>();
+    auto result_ty                      = rewrite(app->type());
 
-    auto nis_l = Lit::isa<nat_t>(nis);
-    auto nps_l = Lit::isa<nat_t>(nps);
-    auto ro_l  = Lit::isa<nat_t>(Ro);
-    auto rn_l  = Lit::isa<nat_t>(Rn);
-    if (!nis_l || !nps_l || !ro_l || !rn_l || *rn_l < *ro_l) {
+    auto ro_l = Lit::isa<nat_t>(Ro);
+    auto rn_l = Lit::isa<nat_t>(Rn);
+    if (!nis || !nps || !ro_l || !rn_l || *rn_l < *ro_l) {
         log().w("{} doesn't have lowering-time known rank counts (nis/nps/Ro/Rn)", app);
         return Super::rewrite_imm_App(app);
     }
-    auto nis_n = *nis_l;
-    auto nps_n = *nps_l;
+    auto nis_n = *nis;
+    auto nps_n = *nps;
     auto ro    = *ro_l;
     auto rr    = *rn_l - *ro_l;
 
