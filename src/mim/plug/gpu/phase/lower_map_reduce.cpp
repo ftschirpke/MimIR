@@ -79,6 +79,15 @@ bool reaches(Scheduler& sched, const Def* from, const Def* to, DefSet& seen) {
     return false;
 }
 
+/// `real_consumers` unwraps a *use*'s `Extract`/`Tuple` wrappers to find a real consumer; this unwraps the
+/// opposite direction, peeling the `Extract` that pulled a `map_reduce_post` call's buffer result out of
+/// its `[mem, %buffer.Buf ...]` pair back down to the call itself.
+const Def* peel_extract(const Def* def) {
+    while (auto ex = def->isa<Extract>())
+        def = ex->tuple();
+    return def;
+}
+
 /// Mirrors `btensor::phase::LowerMapReduce`'s helper of the same name: a counting `%affine.For` loop body
 std::pair<Lam*, const Def*> counting_for(const Def* bound, const Def* acc, const Def* exit, Sym name) {
     auto& w       = bound->world();
@@ -208,8 +217,12 @@ bool is_device_ptr(World& w, const Def* ty) {
     return as && *as == Lit::as(w.annex<gpu::addr_space_global>());
 }
 
-/// A producer classified `DeviceOnly` returns its output as a raw device pointer, not a `%buffer.Buf`;
-/// the ordinary rewrite substitution then hands it here as one of `inputs`'s slots.
+/// A producer classified `DeviceOnly` returns its output as a raw device pointer, not a `%buffer.Buf`.
+/// The caller resolves each slot of `ins` accordingly: the plain rewrite of the consumer's own argument
+/// tuple for an ordinary host input (still `%buffer.Buf`-typed, since `%buffer.lower_ptr` hasn't run yet),
+/// or the producer's own already-rewritten result for a device-resident one — only the latter carries
+/// its true (raw-pointer) type, since a wholesale rewrite of the argument tuple's declared type can't
+/// special-case one slot's producer the way rewriting that producer's call itself does.
 /// `stream`, if non-null, routes the upload through the asynchronous axiom variant on that stream.
 Inputs alloc_copy_inputs(World& w,
                          const Def* m0,
@@ -217,11 +230,11 @@ Inputs alloc_copy_inputs(World& w,
                          Defs ris,
                          Defs sis,
                          Defs tis,
-                         const Def* inputs,
+                         Defs ins,
                          const Def* stream) {
     DefVec dptrs(ris.size());
     for (size_t i = 0; i != ris.size(); ++i) {
-        auto in = inputs->proj(ris.size(), i);
+        auto in = ins[i];
         if (is_device_ptr(w, in->type())) {
             dptrs[i] = in; // already device-resident: no host round-trip needed
             continue;
@@ -458,11 +471,17 @@ Lam* build_teardown(World& w,
         result = out_dptr;
     }
 
+    // A device-resident producer's pointer may appear more than once among `dptrs`/`post_dptrs` (e.g. the
+    // same intermediate result read both as a mapped input and again in the epilogue): free each once.
+    DefSet freed;
+    auto free_once = [&](const Def* dptr) {
+        if (freed.emplace(dptr).second) cur_global = free_ptr(w, cur_global, dptr, stream);
+    };
     for (auto dptr : dptrs)
-        cur_global = free_ptr(w, cur_global, dptr, stream);
+        free_once(dptr);
     for (auto dptr : post_dptrs)
-        cur_global = free_ptr(w, cur_global, dptr, stream);
-    if (!consumer_frees_output) cur_global = free_ptr(w, cur_global, out_dptr, stream);
+        free_once(dptr);
+    if (!consumer_frees_output) free_once(out_dptr);
 
     if (stream) {
         if (materialize) {
@@ -640,12 +659,25 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     const Def* stream = nullptr;
     if (info.own_stream) std::tie(h_mem, h_global, stream) = create_stream(w, h_mem, h_global);
 
+    // A `DeviceOnly` producer's slot must be resolved by rewriting its own (old-world) call directly:
+    // `new_inputs`/`new_post_ins` only carry `fun`'s declared (still `%buffer.Buf`-shaped) parameter type.
+    auto [_old_mem_arg, old_ins, old_post_ins] = app->arg()->projs<3>();
+    auto resolve_slot                          = [&](const Def* old_slot, const Def* new_slot) {
+        auto mr = Axm::isa<btensor::map_reduce_post>(peel_extract(old_slot));
+        return (mr && call_info(mr).cls == Classification::DeviceOnly) ? rewrite(old_slot) : new_slot;
+    };
+    DefVec in_vals(nis_n), post_in_vals(nps_n);
+    for (nat_t i = 0; i != nis_n; ++i)
+        in_vals[i] = resolve_slot(old_ins->proj(nis_n, i), new_inputs->proj(nis_n, i));
+    for (nat_t j = 0; j != nps_n; ++j)
+        post_in_vals[j] = resolve_slot(old_post_ins->proj(nps_n, j), new_post_ins->proj(nps_n, j));
+
     auto in_desc = extract_input_desc(nis_n, Ris, Sis, Tis, accs);
-    auto inputs  = alloc_copy_inputs(w, h_mem, h_global, in_desc.rs, in_desc.ss, in_desc.ts, new_inputs, stream);
+    auto inputs  = alloc_copy_inputs(w, h_mem, h_global, in_desc.rs, in_desc.ss, in_desc.ts, in_vals, stream);
 
     auto post_desc   = extract_input_desc(nps_n, Rps, Sps, Tps, post_accs);
     auto post_inputs = alloc_copy_inputs(w, inputs.mem, inputs.global, post_desc.rs, post_desc.ss, post_desc.ts,
-                                         new_post_ins, stream);
+                                         post_in_vals, stream);
 
     auto [out_global, out_dptr] = alloc_output(w, post_inputs.global, out_arr_ty, stream);
 
