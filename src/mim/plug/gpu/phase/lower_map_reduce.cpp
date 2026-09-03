@@ -1,6 +1,7 @@
 #include "mim/plug/gpu/phase/lower_map_reduce.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 #include <fe/log.h>
 #include <fe/vector.h>
@@ -27,6 +28,54 @@ bool contains_gpu_init(const Def* def, DefSet& seen) {
     if (Axm::isa<gpu::init>(def)) return true;
     for (auto d : def->deps())
         if (contains_gpu_init(d, seen)) return true;
+    return false;
+}
+
+/// Bounds LowerMapReduce::classify_map_reduce_calls's forward use-walk; a chain longer than this is
+/// left un-classified (conservatively kept host-visible).
+constexpr int Max_Consumer_Hops = 128;
+
+struct Consumers {
+    DefSet defs;
+    bool overflowed = false;
+};
+
+/// The real (non-`Extract`/`Tuple`-wrapper) consumers of `def`, found via `sched`'s direct-use info.
+Consumers real_consumers(Scheduler& sched, const Def* def) {
+    Consumers res;
+    DefSet seen;
+    int hops = 0;
+    Vector<const Def*> stack{def};
+    while (!stack.empty()) {
+        auto d = stack.back();
+        stack.pop_back();
+        for (auto use : sched.uses(d)) {
+            if (++hops > Max_Consumer_Hops) {
+                res.overflowed = true;
+                return res;
+            }
+            auto u = use.def();
+            if (!seen.emplace(u).second) continue;
+            if (u->isa<Extract>() || u->isa<Tuple>())
+                stack.push_back(u);
+            else
+                res.defs.emplace(u);
+        }
+    }
+    return res;
+}
+
+/// Whether `to` is reachable from `from` by repeatedly following other `map_reduce_post` calls' real
+/// consumers — i.e. whether the two calls have a data dependency (in either direction is checked by the
+/// caller). Conservative: an overflowed walk anywhere along the way counts as "reaches".
+bool reaches(Scheduler& sched, const Def* from, const Def* to, DefSet& seen) {
+    if (!seen.emplace(from).second) return false;
+    auto consumers = real_consumers(sched, from);
+    if (consumers.overflowed) return true;
+    for (auto d : consumers.defs) {
+        if (d == to) return true;
+        if (Axm::isa<btensor::map_reduce_post>(d) && reaches(sched, d, to, seen)) return true;
+    }
     return false;
 }
 
@@ -149,11 +198,42 @@ struct Inputs {
     DefVec dptrs;
 };
 
-Inputs alloc_copy_inputs(World& w, const Def* m0, const Def* m1, Defs ris, Defs sis, Defs tis, const Def* inputs) {
+/// `%gpu.GlobalPtr` is a `lam` macro for `%mem.Ptr (T, %gpu.addr_space_global)` and reduces away on
+/// construction, so a constructed device pointer's type no longer carries a distinct `gpu::GlobalPtr` tag
+/// — check the underlying `%mem.Ptr`'s address space instead.
+bool is_device_ptr(World& w, const Def* ty) {
+    auto ptr = Axm::isa<mem::Ptr>(ty);
+    if (!ptr) return false;
+    auto as = Lit::isa<nat_t>(ptr->arg(1));
+    return as && *as == Lit::as(w.annex<gpu::addr_space_global>());
+}
+
+/// A producer classified `DeviceOnly` returns its output as a raw device pointer, not a `%buffer.Buf`;
+/// the ordinary rewrite substitution then hands it here as one of `inputs`'s slots.
+/// `stream`, if non-null, routes the upload through the asynchronous axiom variant on that stream.
+Inputs alloc_copy_inputs(World& w,
+                         const Def* m0,
+                         const Def* m1,
+                         Defs ris,
+                         Defs sis,
+                         Defs tis,
+                         const Def* inputs,
+                         const Def* stream) {
     DefVec dptrs(ris.size());
     for (size_t i = 0; i != ris.size(); ++i) {
-        auto alloc_copy    = w.app(w.app(w.annex<gpu::buf_alloc_copy>(), {ris[i], sis[i], tis[i]}),
-                                   {m0, m1, inputs->proj(ris.size(), i)});
+        auto in = inputs->proj(ris.size(), i);
+        if (is_device_ptr(w, in->type())) {
+            dptrs[i] = in; // already device-resident: no host round-trip needed
+            continue;
+        }
+        const Def* alloc_copy;
+        if (stream)
+            alloc_copy = w.app(w.app(w.annex<gpu::buf_alloc_copy>(gpu::buf_alloc_copy::asyn), {ris[i], sis[i], tis[i]}),
+                               {m0, m1, in, stream});
+        else
+            alloc_copy
+                = w.app(w.app(w.annex<gpu::buf_alloc_copy>(gpu::buf_alloc_copy::block), {ris[i], sis[i], tis[i]}),
+                        {m0, m1, in});
         auto [m2, g2, ptr] = alloc_copy->projs<3>();
         m0                 = m2;
         m1                 = g2;
@@ -162,11 +242,29 @@ Inputs alloc_copy_inputs(World& w, const Def* m0, const Def* m1, Defs ris, Defs 
     return {m0, m1, dptrs};
 }
 
-std::pair<const Def*, const Def*> alloc_output(World& w, const Def* m1, const Def* elem_ty, const Def* So, nat_t ro) {
+const Def* output_arr_ty(World& w, const Def* elem_ty, const Def* So, nat_t ro) {
     auto arr_ty = elem_ty;
     for (auto d = ro; d-- != 0;)
         arr_ty = w.arr(So->proj(ro, d), arr_ty);
+    return arr_ty;
+}
+
+std::pair<const Def*, const Def*> alloc_output(World& w, const Def* m1, const Def* arr_ty, const Def* stream) {
+    if (stream) return w.app(w.app(w.annex<gpu::alloc>(gpu::alloc::asyn), arr_ty), w.tuple({m1, stream}))->projs<2>();
     return w.app(w.app(w.annex<gpu::alloc>(gpu::alloc::block), arr_ty), m1)->projs<2>();
+}
+
+/// Creates and initializes a fresh `%gpu.Stream`, threading `(mem, global)`.
+std::tuple<const Def*, const Def*, const Def*> create_stream(World& w, const Def* mem, const Def* global) {
+    auto [m1, ptr]    = mem::op_alloc(w.annex<gpu::Stream>(), mem)->projs<2>();
+    auto [m2, g2]     = w.app(w.annex<gpu::stream_init>(), Defs{m1, global, ptr})->projs<2>();
+    auto [m3, stream] = w.call<mem::load>(Defs{m2, ptr})->projs<2>();
+    return {m3, g2, stream};
+}
+
+const Def* free_ptr(World& w, const Def* global, const Def* ptr, const Def* stream) {
+    if (stream) return w.call(gpu::free::asyn, Defs{global, ptr, stream});
+    return w.call(gpu::free::block, Defs{global, ptr});
 }
 
 struct Grid {
@@ -316,6 +414,12 @@ Lam* build_kernel(World& w,
     return kernel;
 }
 
+/// `materialize` copies the output back to a host `%buffer.Buf` (today's behavior); when false, the raw
+/// device pointer is handed to `cont` instead. `consumer_frees_output` is set for a `DeviceOnly` result
+/// whose single real consumer takes over freeing it once it has issued the kernel that reads it; otherwise
+/// (host-visible, or truly unused) this call frees it itself. `stream`, if non-null, is this call's own
+/// dedicated stream: the copy-back and every free run asynchronously on it, followed by a `stream_sync`
+/// before the result becomes host-observable (materialized) and a `stream_deinit` before `auto_deinit`.
 Lam* build_teardown(World& w,
                     const Def* Ro,
                     const Def* So,
@@ -323,7 +427,10 @@ Lam* build_teardown(World& w,
                     Defs dptrs,
                     Defs post_dptrs,
                     const Def* out_dptr,
-                    const Def* cont) {
+                    const Def* cont,
+                    bool materialize,
+                    bool consumer_frees_output,
+                    const Def* stream) {
     auto global_ty = w.annex<gpu::GlobalM>();
     auto const_ty  = w.annex<gpu::ConstM>();
     auto mem_ty    = w.call<mem::M>(0);
@@ -331,20 +438,46 @@ Lam* build_teardown(World& w,
     auto after_launch                        = w.mut_con(Defs{mem_ty, global_ty, const_ty})->set("afterLaunch");
     auto [post_mem, post_global, post_const] = after_launch->vars<3>();
 
-    auto [alloc_mem, host_buf] = buffer::op_alloc(Ro, So, Tp, post_mem)->projs<2>();
-    auto copy_back
-        = w.app(w.app(w.annex<gpu::buf_copy_to_host>(), {Ro, So, Tp}), {alloc_mem, post_global, out_dptr, host_buf});
-    auto [cb_mem, cb_global] = copy_back->projs<2>();
+    auto cur_mem    = post_mem;
+    auto cur_global = post_global;
+    const Def* result;
+    if (materialize) {
+        auto [alloc_mem, host_buf] = buffer::op_alloc(Ro, So, Tp, cur_mem)->projs<2>();
+        const Def* copy_back;
+        if (stream)
+            copy_back = w.app(w.app(w.annex<gpu::buf_copy_to_host>(gpu::buf_copy_to_host::asyn), {Ro, So, Tp}),
+                              {alloc_mem, cur_global, out_dptr, host_buf, stream});
+        else
+            copy_back = w.app(w.app(w.annex<gpu::buf_copy_to_host>(gpu::buf_copy_to_host::block), {Ro, So, Tp}),
+                              {alloc_mem, cur_global, out_dptr, host_buf});
+        auto [cb_mem, cb_global] = copy_back->projs<2>();
+        cur_mem                  = cb_mem;
+        cur_global               = cb_global;
+        result                   = host_buf;
+    } else {
+        result = out_dptr;
+    }
 
-    auto cur_global = cb_global;
     for (auto dptr : dptrs)
-        cur_global = w.call(gpu::free::block, Defs{cur_global, dptr});
+        cur_global = free_ptr(w, cur_global, dptr, stream);
     for (auto dptr : post_dptrs)
-        cur_global = w.call(gpu::free::block, Defs{cur_global, dptr});
-    cur_global = w.call(gpu::free::block, Defs{cur_global, out_dptr});
+        cur_global = free_ptr(w, cur_global, dptr, stream);
+    if (!consumer_frees_output) cur_global = free_ptr(w, cur_global, out_dptr, stream);
 
-    auto final_mem = w.app(w.annex<gpu::auto_deinit>(), Defs{cb_mem, cur_global, post_const});
-    after_launch->app(true, cont, Defs{final_mem, host_buf});
+    if (stream) {
+        if (materialize) {
+            // The async copy above doesn't block the host: sync before `result` becomes observable.
+            auto [sm, sg] = w.app(w.annex<gpu::stream_sync>(), Defs{cur_mem, cur_global, stream})->projs<2>();
+            cur_mem       = sm;
+            cur_global    = sg;
+        }
+        auto [dm, dg] = w.app(w.annex<gpu::stream_deinit>(), Defs{cur_mem, cur_global, stream})->projs<2>();
+        cur_mem       = dm;
+        cur_global    = dg;
+    }
+
+    auto final_mem = w.app(w.annex<gpu::auto_deinit>(), Defs{cur_mem, cur_global, post_const});
+    after_launch->app(true, cont, Defs{final_mem, result});
     return after_launch;
 }
 
@@ -358,7 +491,78 @@ void LowerMapReduce::start() {
         log().w("not lowering any map-reduce operations to GPU: the program already contains an explicit `%gpu.init`");
         return;
     }
+    classify_map_reduce_calls();
     Super::start();
+}
+
+/// Classifies every reachable `%btensor.map_reduce_post` call by how its result is consumed, so
+/// `lower_map_reduce_post` can skip the host round-trip for a result that only feeds another such call.
+void LowerMapReduce::classify_map_reduce_calls() {
+    auto& ow = old_world();
+    nest_    = std::make_unique<Nest>(ow);
+    sched_   = std::make_unique<Scheduler>(*nest_);
+
+    Vector<const App*> calls;
+    DefSet seen;
+    auto roots = ow.roots();
+    Vector<const Def*> stack(roots.begin(), roots.end());
+    while (!stack.empty()) {
+        auto def = stack.back();
+        stack.pop_back();
+        if (auto [_, ins] = seen.emplace(def); !ins) continue;
+        if (auto app = Axm::isa<btensor::map_reduce_post>(def)) calls.push_back(app);
+        for (auto d : def->deps())
+            stack.push_back(d);
+    }
+
+    for (auto call : calls) {
+        auto consumers = real_consumers(*sched_, call);
+        CallInfo info;
+        if (consumers.overflowed) {
+            info.cls = Classification::HostVisible;
+        } else if (consumers.defs.empty()) {
+            info.cls = Classification::Dead;
+        } else if (consumers.defs.size() == 1) {
+            if (auto mr = Axm::isa<btensor::map_reduce_post>(*consumers.defs.begin())) {
+                info.cls             = Classification::DeviceOnly;
+                info.single_consumer = mr;
+            } else {
+                info.cls = Classification::HostVisible;
+            }
+        } else {
+            info.cls = Classification::HostVisible;
+        }
+        call_info_.emplace(call, info);
+    }
+
+    // Within one straight-line block (same `early` node, no loop/recursion), a second `HostVisible` call
+    // provably independent of another one gets its own stream so the two launches can overlap.
+    std::unordered_map<const Nest::Node*, Vector<const App*>> by_node;
+    for (auto call : calls) {
+        auto& info = call_info_.at(call);
+        if (info.cls != Classification::HostVisible) continue;
+        auto node = sched_->early(call);
+        if (node->loop_depth() != 0 || node->is_recursive()) continue;
+        by_node[node].push_back(call);
+    }
+    for (auto& [node, group] : by_node) {
+        if (group.size() < 2) continue;
+        auto a = group[0];
+        for (size_t i = 1; i != group.size(); ++i) {
+            auto b = group[i];
+            DefSet seen_ab, seen_ba;
+            if (!reaches(*sched_, a, b, seen_ab) && !reaches(*sched_, b, a, seen_ba)) {
+                call_info_.at(b).own_stream = true;
+                break;
+            }
+        }
+    }
+}
+
+const LowerMapReduce::CallInfo& LowerMapReduce::call_info(const App* app) const {
+    static const CallInfo default_info{};
+    auto i = call_info_.find(app);
+    return i != call_info_.end() ? i->second : default_info;
 }
 
 const Def* LowerMapReduce::rewrite_imm_App(const App* app) {
@@ -379,7 +583,6 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     auto [Tis, Ris, Sis, Tps, Rps, Sps] = in_tys->projs<6>();
     auto [comb, init, post]             = comb_init->projs<3>();
     auto [accs, post_accs]              = accs_all->projs<2>();
-    auto result_ty                      = rewrite(app->type());
 
     auto ro_l = Lit::isa<nat_t>(Ro);
     auto rn_l = Lit::isa<nat_t>(Rn);
@@ -415,25 +618,36 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
         return Super::rewrite_imm_App(app);
     }
 
-    auto mem_ty                                    = w.call<mem::M>(0);
+    auto& info                 = call_info(app);
+    bool materialize           = info.cls == Classification::HostVisible;
+    bool consumer_frees_output = info.cls == Classification::DeviceOnly;
+    auto out_arr_ty            = output_arr_ty(w, Tp, So, ro);
+    auto mem_ty                = w.call<mem::M>(0);
+    // `%btensor.map_reduce_post` is mem-threaded (`[%mem.M 0, %buffer.Buf ...]`); a `DeviceOnly` result
+    // keeps that same `[mem, value]` shape, just with a raw device pointer instead of a host buffer.
+    auto result_ty = materialize ? rewrite(app->type()) : w.sigma({mem_ty, w.call<gpu::GlobalPtr>(out_arr_ty)});
+
     auto rewritten_arg                             = rewrite(app->arg());
     auto [_, rewritten_inputs, rewritten_post_ins] = rewritten_arg->projs<3>();
-    auto fun  = w.mut_fun(w.sigma({mem_ty, rewritten_inputs->type(), rewritten_post_ins->type()}), result_ty)
-                    ->set("mapReduceAffGpu");
-    auto call = w.app(cps::op_cps2ds_dep(fun), rewritten_arg);
+    auto fun = w.mut_fun(w.sigma({mem_ty, rewritten_inputs->type(), rewritten_post_ins->type()}), result_ty)
+                   ->set("mapReduceAffGpu");
+    auto call                                = w.app(cps::op_cps2ds_dep(fun), rewritten_arg);
     auto [fun_mem, new_inputs, new_post_ins] = fun->var(0_n)->projs<3>();
     auto cont                                = fun->var(1);
 
     auto [h_mem, h_global, h_const] = w.app(w.annex<gpu::auto_init>(), fun_mem)->projs<3>();
 
+    const Def* stream = nullptr;
+    if (info.own_stream) std::tie(h_mem, h_global, stream) = create_stream(w, h_mem, h_global);
+
     auto in_desc = extract_input_desc(nis_n, Ris, Sis, Tis, accs);
-    auto inputs  = alloc_copy_inputs(w, h_mem, h_global, in_desc.rs, in_desc.ss, in_desc.ts, new_inputs);
+    auto inputs  = alloc_copy_inputs(w, h_mem, h_global, in_desc.rs, in_desc.ss, in_desc.ts, new_inputs, stream);
 
-    auto post_desc = extract_input_desc(nps_n, Rps, Sps, Tps, post_accs);
-    auto post_inputs
-        = alloc_copy_inputs(w, inputs.mem, inputs.global, post_desc.rs, post_desc.ss, post_desc.ts, new_post_ins);
+    auto post_desc   = extract_input_desc(nps_n, Rps, Sps, Tps, post_accs);
+    auto post_inputs = alloc_copy_inputs(w, inputs.mem, inputs.global, post_desc.rs, post_desc.ss, post_desc.ts,
+                                         new_post_ins, stream);
 
-    auto [out_global, out_dptr] = alloc_output(w, post_inputs.global, Tp, So, ro);
+    auto [out_global, out_dptr] = alloc_output(w, post_inputs.global, out_arr_ty, stream);
 
     auto global_comb = rebuild_lam_global_mem(comb_lam, To, w.sym("combGlobal"));
     auto global_post = rebuild_lam_global_mem(post_lam, Tp, w.sym("postGlobal"));
@@ -453,8 +667,8 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     kernel_arg_tys[nis_n + nps_n] = out_dptr->type();
 
     auto launch = w.app(w.annex<gpu::launch>(), Defs{w.lit_nat(nis_n + nps_n + 1), w.tuple(kernel_arg_tys)});
-    launch      = w.app(launch, Defs{w.lit_nat(grid.n_groups), w.lit_nat(grid.n_items), w.annex<gpu::default_stream>(),
-                                     w.lit_ff(), w.tuple()});
+    launch      = w.app(launch, Defs{w.lit_nat(grid.n_groups), w.lit_nat(grid.n_items),
+                                stream ? stream : w.annex<gpu::default_stream>(), w.lit_ff(), w.tuple()});
     launch      = w.app(launch, kernel);
 
     DefVec kernel_args = inputs.dptrs;
@@ -462,7 +676,8 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     kernel_args.push_back(out_dptr);
     launch = w.app(launch, kernel_args);
 
-    auto after_launch = build_teardown(w, Ro, So, Tp, inputs.dptrs, post_inputs.dptrs, out_dptr, cont);
+    auto after_launch = build_teardown(w, Ro, So, Tp, inputs.dptrs, post_inputs.dptrs, out_dptr, cont, materialize,
+                                       consumer_frees_output, stream);
     auto launch_call  = w.app(launch, Defs{w.tuple({post_inputs.mem, out_global, h_const}), after_launch});
     fun->set(true, launch_call);
 

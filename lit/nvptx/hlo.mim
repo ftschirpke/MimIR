@@ -2,3 +2,9 @@
 // RUN: %mim -p opt -p gpu %S/../tensor/%{s:stem}.mim -p ll_nvptx
 // RUN: %if system-linux && cuda %{ clang++ -std=c++23 %S/../tensor/hlo_step_aux.cpp %{s:stem}.ll -lcuda -o %t -Wno-override-module %}
 // RUN: %if system-linux && cuda %{ %t %}
+// This program chains many map-reduce ops (forward + backward pass); most intermediate results stay
+// device-resident instead of round-tripping through a host buffer (23 device->host, one per launch).
+// RUN: FileCheck %s --check-prefix=COPIES < %{s:stem}.ll
+
+// COPIES-COUNT-17: call {{.*}}cuMemcpyDtoH
+// COPIES-NOT: call {{.*}}cuMemcpyDtoH

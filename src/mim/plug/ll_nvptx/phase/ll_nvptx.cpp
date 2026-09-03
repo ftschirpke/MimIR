@@ -126,6 +126,8 @@ void HostEmitter::start() {
     std::print(vars_decls_, "{} = dso_local global [{} x ptr] zeroinitializer\n", kernel_array_name_,
                kernel_ids_.size());
 
+    // TODO: this O(N^2) re-scan (and lower_map_reduce.cpp's identical contains_gpu_init) could become a
+    // one-time Nest+Scheduler-based pass instead of a fresh reaches_if DFS per external.
     LamSet gpu_touching;
     for (auto mut : world().externals().muts()) {
         auto lam = mut->isa_mut<Lam>();

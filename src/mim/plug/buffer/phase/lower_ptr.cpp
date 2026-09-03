@@ -108,12 +108,20 @@ const Def* LowerPtr::rewrite_imm_App(const App* app) {
         auto m0  = rewrite(buf_alloc_copy->arg(0));
         auto m1  = rewrite(buf_alloc_copy->arg(1));
         auto ptr = rewrite(buf_alloc_copy->arg(2));
+        if (buf_alloc_copy.id() == gpu::buf_alloc_copy::asyn) {
+            auto stream = rewrite(buf_alloc_copy->arg(3));
+            return w.call(gpu::alloc_copy::asyn, w.tuple({m0, m1, ptr, stream}));
+        }
         return w.call(gpu::alloc_copy::block, w.tuple({m0, m1, ptr}));
     } else if (auto buf_copy_to_host = Axm::isa<gpu::buf_copy_to_host>(app)) {
         auto m0    = rewrite(buf_copy_to_host->arg(0));
         auto m1    = rewrite(buf_copy_to_host->arg(1));
         auto d_ptr = rewrite(buf_copy_to_host->arg(2));
         auto h_ptr = rewrite(buf_copy_to_host->arg(3));
+        if (buf_copy_to_host.id() == gpu::buf_copy_to_host::asyn) {
+            auto stream = rewrite(buf_copy_to_host->arg(4));
+            return w.call(gpu::copy_to_host::asyn, w.tuple({m0, m1, d_ptr, h_ptr, stream}));
+        }
         return w.call(gpu::copy_to_host::block, w.tuple({m0, m1, d_ptr, h_ptr}));
     }
 

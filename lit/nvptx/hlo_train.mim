@@ -2,3 +2,9 @@
 // RUN: %mim -p opt -p gpu %S/../tensor/%{s:stem}.mim -p ll_nvptx
 // RUN: %if system-linux && cuda %{ clang++ -std=c++23 %S/../tensor/hlo_train_aux.cpp %{s:stem}.ll -lcuda -o %t -Wno-override-module %}
 // RUN: %if system-linux && cuda %{ %t %}
+// A chained map-reduce's intermediate result stays device-resident: fewer device<->host copies than
+// %mim would emit if every call round-tripped through a host buffer (10 device->host, one per launch).
+// RUN: FileCheck %s --check-prefix=COPIES < %{s:stem}.ll
+
+// COPIES-COUNT-7: call {{.*}}cuMemcpyDtoH
+// COPIES-NOT: call {{.*}}cuMemcpyDtoH

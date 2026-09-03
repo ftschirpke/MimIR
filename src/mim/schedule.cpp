@@ -18,7 +18,8 @@ Scheduler::Scheduler(const Nest& nest)
         }
     };
 
-    queue.push(nest.muts());
+    for (auto mut : nest.muts())
+        if (mut) queue.push(mut); // skip the virtual root's own null entry for a multi-root Nest
 
     while (!queue.empty()) {
         auto def = queue.pop();

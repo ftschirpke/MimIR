@@ -167,20 +167,34 @@ let %gpu.alloc_copy.block = lm {T: *}
 ///
 /// ### Buffer Operations
 ///
-/// #### %%gpu.buf_alloc_copy
+/// #### %%gpu.buf_alloc_copy(block)
 ///
 /// Placeholder for copying a host-side `%buffer.Buf` to the device.
 /// Unlike `%gpu.alloc_copy(block)`, this operates directly on the still-abstract `%buffer.Buf`
-axm %gpu.buf_alloc_copy: {r: Nat, s: «r; Nat», T: *}
+axm %gpu.buf_alloc_copy(block): {r: Nat, s: «r; Nat», T: *}
                        → [%mem.M 0, %gpu.GlobalM, %buffer.Buf (r, s, T)]
                        → [%mem.M 0, %gpu.GlobalM, %gpu.GlobalPtr «s; T»];
 ///
-/// #### %%gpu.buf_copy_to_host
+/// #### %%gpu.buf_alloc_copy(asyn)
+///
+/// The `%gpu.Stream`-taking, asynchronous counterpart of `%gpu.buf_alloc_copy(block)`.
+axm %gpu.buf_alloc_copy(asyn): {r: Nat, s: «r; Nat», T: *}
+                       → [%mem.M 0, %gpu.GlobalM, %buffer.Buf (r, s, T), %gpu.Stream]
+                       → [%mem.M 0, %gpu.GlobalM, %gpu.GlobalPtr «s; T»];
+///
+/// #### %%gpu.buf_copy_to_host(block)
 ///
 /// Placeholder for copying device data to a host-side `%buffer.Buf`.
 /// Unlike `%gpu.copy_to_host(block)`, this operates directly on the still-abstract `%buffer.Buf`
-axm %gpu.buf_copy_to_host: {r: Nat, s: «r; Nat», T: *}
+axm %gpu.buf_copy_to_host(block): {r: Nat, s: «r; Nat», T: *}
                        → [%mem.M 0, %gpu.GlobalM, %gpu.GlobalPtr «s; T», %buffer.Buf (r, s, T)]
+                       → [%mem.M 0, %gpu.GlobalM];
+///
+/// #### %%gpu.buf_copy_to_host(asyn)
+///
+/// The `%gpu.Stream`-taking, asynchronous counterpart of `%gpu.buf_copy_to_host(block)`.
+axm %gpu.buf_copy_to_host(asyn): {r: Nat, s: «r; Nat», T: *}
+                       → [%mem.M 0, %gpu.GlobalM, %gpu.GlobalPtr «s; T», %buffer.Buf (r, s, T), %gpu.Stream]
                        → [%mem.M 0, %gpu.GlobalM];
 ///
 /// ### Async Memory Operations
