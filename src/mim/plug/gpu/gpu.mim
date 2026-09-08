@@ -44,6 +44,14 @@ lam %gpu.LocalPtr(T: *): *  = %mem.Ptr (T, %gpu.addr_space_local);
 axm %gpu.Stream: *;
 axm %gpu.default_stream: %gpu.Stream;
 ///
+/// ### Scheduling
+///
+/// A neutral `%%tensor.mk_sched`-shaped builder: applying a `%%btensor.map_reduce_post` op's `sched`
+/// chooser to this recovers the frontend's `(vdim, unroll)` choice without binding it to any target's
+/// nest, so a C++ lowering can read the decision `%%tensor.dot_product_impl` already made instead of
+/// rediscovering it.
+lam %gpu.sched_probe (vdim unroll: Nat): [Nat, Nat] = (vdim, unroll);
+///
 /// ## Operations
 ///
 /// ### Context

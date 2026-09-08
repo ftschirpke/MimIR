@@ -30,6 +30,40 @@ bool contains_gpu_init(const Def* def, DefSet& seen) {
     return false;
 }
 
+/// Recovers the frontend's `(vdim, unroll)` schedule choice by applying `sched` to `%gpu.sched_probe`
+/// instead of binding it to a nest, so the decision `%tensor.dot_product_impl` already made can be
+/// read rather than rediscovered from the op's operands.
+std::optional<std::pair<nat_t, nat_t>> probe_schedule(const Def* sched) {
+    auto& w      = sched->world();
+    auto probe   = w.annex<gpu::sched_probe>();
+    auto pair_ty = probe->type()->as<Pi>()->codom();
+    auto pair    = w.app(w.app(sched, pair_ty), probe);
+    auto [vdim, unroll] = pair->projs<2>();
+    auto vdim_l   = Lit::isa<nat_t>(vdim);
+    auto unroll_l = Lit::isa<nat_t>(unroll);
+    if (!vdim_l || !unroll_l) return std::nullopt;
+    return std::pair{*vdim_l, *unroll_l};
+}
+
+/// `acc`'s own `ris` coordinates, each reflected as the (0-based) loop axis it reads, by evaluating
+/// `acc` on distinct `%affine.lit` markers -- the same technique `%tensor.fastest_axis`'s normalizer
+/// uses to reflect an access map's structure without assuming which op produced it. A slot that is
+/// not a pure permutation of one loop axis (e.g. an affine combination) answers `nullopt`.
+Vector<std::optional<nat_t>> probe_axes(const Def* acc, nat_t rn, nat_t ris) {
+    auto& w = acc->world();
+    DefVec markers(rn);
+    for (nat_t i = 0; i != rn; ++i)
+        markers[i] = w.call<affine::lit>(w.lit_nat(i + 1));
+    auto result = w.app(acc, w.tuple(markers));
+    Vector<std::optional<nat_t>> axes(ris);
+    for (nat_t j = 0; j != ris; ++j) {
+        auto lit = Axm::isa<affine::lit>(result->proj(ris, j));
+        auto v   = lit ? Lit::isa<nat_t>(lit->arg()) : std::nullopt;
+        axes[j]  = (v && *v >= 1 && *v <= rn) ? std::optional<nat_t>{*v - 1} : std::nullopt;
+    }
+    return axes;
+}
+
 /// Mirrors `btensor::phase::LowerMapReduce`'s helper of the same name: a counting `%affine.For` loop body
 std::pair<Lam*, const Def*> counting_for(const Def* bound, const Def* acc, const Def* exit, Sym name) {
     auto& w       = bound->world();
@@ -128,6 +162,13 @@ std::pair<const Def*, DefVec> unflatten_index(World& w, const Def* flat, const V
     return {mem, coords};
 }
 
+/// Row-major 2-way split of a flat I64 index into `(outer, inner)` via a single div/mod by `inner_extent`.
+std::tuple<const Def*, const Def*, const Def*> divmod_i64(World& w, const Def* mem, const Def* flat, nat_t inner_extent) {
+    auto [m1, q] = w.call(core::div::udiv, Defs{mem, w.tuple({flat, w.lit_i64(inner_extent)})})->projs<2>();
+    auto [m2, r] = w.call(core::div::urem, Defs{m1, w.tuple({flat, w.lit_i64(inner_extent)})})->projs<2>();
+    return {m2, q, r};
+}
+
 struct InputDesc {
     DefVec rs, ss, ts, accs;
 };
@@ -187,6 +228,32 @@ struct Mapped {
     DefVec rs, ss, dptrs, accs;
     nat_t n() const { return dptrs.size(); }
 };
+
+/// The recognized shape of a 2-input, single-reduction-dim contraction (a GEMM/BMM-style op, of which
+/// `%tensor.dot_product`/`product_2d`/`bmm` are the frontend's only current producers -- but detected
+/// structurally, not by axiom identity, so any future producer of the same shape is picked up too).
+struct GemmShape {
+    nat_t par0, par1; ///< which of the `ro` loop positions each input's non-reduction axis is
+};
+
+std::optional<GemmShape> detect_gemm(const Mapped& ins, nat_t ro, nat_t rr, nat_t rn) {
+    if (ins.n() != 2 || rr != 1 || ro != 2) return std::nullopt;
+    auto k_pos = ro;
+    auto match = [&](const Def* acc, const Def* r_def) -> std::optional<nat_t> {
+        auto r = Lit::isa<nat_t>(r_def);
+        if (!r || *r != 2) return std::nullopt;
+        auto axes = probe_axes(acc, rn, 2);
+        if (!axes[0] || !axes[1]) return std::nullopt;
+        auto a0 = *axes[0], a1 = *axes[1];
+        if (a0 == k_pos && a1 != k_pos && a1 < ro) return a1;
+        if (a1 == k_pos && a0 != k_pos && a0 < ro) return a0;
+        return std::nullopt;
+    };
+    auto par0 = match(ins.accs[0], ins.rs[0]);
+    auto par1 = match(ins.accs[1], ins.rs[1]);
+    if (!par0 || !par1 || *par0 == *par1) return std::nullopt;
+    return GemmShape{*par0, *par1};
+}
 
 /// Builds the kernel: one thread per output point, reducing sequentially over the `rr` reduction dims.
 Lam* build_kernel(World& w,
@@ -316,6 +383,317 @@ Lam* build_kernel(World& w,
     return kernel;
 }
 
+/// Thread-block edge length for `build_kernel_gemm_tiled`'s shared-memory tiles.
+constexpr nat_t Gemm_Tile = 16;
+
+/// A shared-memory-tiled kernel for a detected 2-input, single-reduction-dim contraction (`GemmShape`):
+/// each `Gemm_Tile`x`Gemm_Tile` thread block covers a tile of the two parallel dims and streams the
+/// reduction dim through cooperative loads into shared memory `Gemm_Tile` elements at a time, instead
+/// of every thread re-reading the same rows/columns from global memory independently. Requires both
+/// parallel dims and the reduction dim to be exact multiples of `Gemm_Tile` -- the caller falls back
+/// to `build_kernel` otherwise. Reuses the same write-back/epilogue shape as `build_kernel`, just fed
+/// by the tiled reduction instead of the sequential one, so an existing epilogue fusion (e.g. bias +
+/// activation) keeps working unchanged.
+std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
+                             const Def* Ro,
+                             const Vector<nat_t>& out_dims,
+                             const Def* Sr,
+                             const Def* So,
+                             const Mapped& ins,
+                             const GemmShape& shape,
+                             const Def* To,
+                             const Def* acc_out,
+                             const Def* init,
+                             Lam* global_comb,
+                             const Mapped& post_ins,
+                             Lam* global_post,
+                             const Def* Tp,
+                             const Def* out_dptr) {
+    auto nis  = ins.n();
+    auto nps  = post_ins.n();
+    auto ro   = out_dims.size();
+    auto rn   = ro + 1;
+    auto n    = w.lit_nat(rn);
+    auto dim0 = out_dims[0];
+    auto dim1 = out_dims[1];
+    auto dimk = *Lit::isa<nat_t>(Sr->proj(rn, ro));
+
+    auto tile      = Gemm_Tile;
+    auto n_blocks0 = dim0 / tile;
+    auto n_blocks1 = dim1 / tile;
+    auto n_ktiles  = dimk / tile;
+    Grid grid{n_blocks0 * n_blocks1, tile * tile, dim0 * dim1};
+
+    auto global_ty = w.annex<gpu::GlobalM>();
+    auto shared_ty = w.annex<gpu::SharedM>();
+    auto const_ty  = w.annex<gpu::ConstM>();
+    auto local_ty  = w.annex<gpu::LocalM>();
+
+    auto elem_ty0       = Axm::as<mem::Ptr>(ins.dptrs[0]->type())->arg(0);
+    auto elem_ty1       = Axm::as<mem::Ptr>(ins.dptrs[1]->type())->arg(0);
+    auto tile_ty        = [&](const Def* elem_ty) { return w.arr(w.lit_nat(tile), w.arr(w.lit_nat(tile), elem_ty)); };
+    auto shared_pack_ty = w.sigma({tile_ty(elem_ty0), tile_ty(elem_ty1)});
+    auto shared_ptr_ty  = w.call<gpu::SharedPtr>(shared_pack_ty);
+
+    DefVec arg_tys(nis + nps + 1);
+    for (size_t i = 0; i != nis; ++i)
+        arg_tys[i] = ins.dptrs[i]->type();
+    for (size_t j = 0; j != nps; ++j)
+        arg_tys[nis + j] = post_ins.dptrs[j]->type();
+    arg_tys[nis + nps] = out_dptr->type();
+
+    auto kernel
+        = w.mut_con(Defs{global_ty, shared_ty, const_ty, local_ty, w.type_idx(grid.n_groups), w.type_idx(grid.n_items),
+                         w.sigma({shared_ptr_ty}), w.sigma(arg_tys), w.cn({global_ty, shared_ty, const_ty, local_ty})})
+              ->set("gemmTiledKernel");
+    auto [k_global, k_shared, k_const, k_local, group_id, item_id, k_shared_ptrs, k_args, k_ret] = kernel->vars<9>();
+
+    DefVec k_dptrs(nis);
+    for (size_t i = 0; i != nis; ++i)
+        k_dptrs[i] = k_args->proj(nis + nps + 1, i);
+    DefVec k_post_dptrs(nps);
+    for (size_t j = 0; j != nps; ++j)
+        k_post_dptrs[j] = k_args->proj(nis + nps + 1, nis + j);
+    auto k_out_dptr = k_args->proj(nis + nps + 1, nis + nps);
+
+    auto shared_pack_ptr = k_shared_ptrs->proj(1, 0);
+    auto shared0_ptr      = mem::op_lea_unsafe(shared_pack_ptr, u64{0});
+    auto shared1_ptr      = mem::op_lea_unsafe(shared_pack_ptr, u64{1});
+
+    // --- Decompose (group_id, item_id) into (block0, block1, ty, tx). ---
+    auto entry = w.mut_con(w.sigma(Defs{}))->set("gemmEntry");
+    kernel->set(true, w.app(entry, w.tuple()));
+
+    auto group_i64 = grid.n_groups == 1 ? w.lit_i64(0) : w.call(core::conv::u, w.lit_nat_0(), group_id);
+    auto item_i64  = grid.n_items == 1 ? w.lit_i64(0) : w.call(core::conv::u, w.lit_nat_0(), item_id);
+
+    auto [m_bt, block0_i64, block1_i64] = divmod_i64(w, k_global, group_i64, n_blocks1);
+    auto [m_tt, ty_i64, tx_i64]         = divmod_i64(w, m_bt, item_i64, tile);
+
+    auto par_local0_i64 = shape.par0 == 0 ? ty_i64 : tx_i64;
+    auto par_local1_i64 = shape.par1 == 0 ? ty_i64 : tx_i64;
+    auto k_local0_i64    = shape.par0 == 0 ? tx_i64 : ty_i64;
+    auto k_local1_i64    = shape.par1 == 0 ? tx_i64 : ty_i64;
+    auto par_local0_idx = w.call(core::conv::u, w.lit_nat(tile), par_local0_i64);
+    auto par_local1_idx = w.call(core::conv::u, w.lit_nat(tile), par_local1_i64);
+    auto k_local0_idx    = w.call(core::conv::u, w.lit_nat(tile), k_local0_i64);
+    auto k_local1_idx    = w.call(core::conv::u, w.lit_nat(tile), k_local1_i64);
+
+    auto mul_i64 = [&](const Def* a, const Def* b) { return w.call(core::wrap::mul, core::Mode::none, Defs{a, b}); };
+    auto add_i64 = [&](const Def* a, const Def* b) { return w.call(core::wrap::add, core::Mode::none, Defs{a, b}); };
+
+    auto block_for_par0 = shape.par0 == 0 ? block0_i64 : block1_i64;
+    auto block_for_par1 = shape.par1 == 0 ? block0_i64 : block1_i64;
+    auto par0_global     = add_i64(mul_i64(block_for_par0, w.lit_i64(tile)), par_local0_i64);
+    auto par1_global     = add_i64(mul_i64(block_for_par1, w.lit_i64(tile)), par_local1_i64);
+    auto pos0_global      = add_i64(mul_i64(block0_i64, w.lit_i64(tile)), ty_i64);
+    auto pos1_global      = add_i64(mul_i64(block1_i64, w.lit_i64(tile)), tx_i64);
+
+    /// The full `rn`-length loop-vector for reading input `par_pos`/`k` at the given global indices --
+    /// the other loop position is unused by this input's access map (checked by `detect_gemm`), so any
+    /// in-bounds value is fine.
+    auto build_iters = [&](nat_t par_pos, const Def* par_global_i64, const Def* k_global_i64) {
+        DefVec iv(rn);
+        for (nat_t p = 0; p != rn; ++p) {
+            auto val = p == par_pos ? par_global_i64 : (p == ro ? k_global_i64 : w.lit_i64(0));
+            iv[p]    = w.call(core::conv::u, Sr->proj(rn, p), val);
+        }
+        return w.tuple(iv);
+    };
+
+    // --- Write-back (reused verbatim in shape from `build_kernel`, just carrying `shared` too). ---
+    auto write_back           = w.mut_con(Defs{global_ty, shared_ty, To})->set("gemmWriteBack");
+    auto [wb_mem, wb_shared, acc_final] = write_back->vars<3>();
+    DefVec wb_idx(rn);
+    wb_idx[0] = w.call(core::conv::u, Sr->proj(rn, 0), pos0_global);
+    wb_idx[1] = w.call(core::conv::u, Sr->proj(rn, 1), pos1_global);
+    wb_idx[ro] = w.call(core::conv::u, Sr->proj(rn, ro), w.lit_i64(0));
+    auto [wc_mem, write_coords] = affine_map(acc_out, Ro, n, Sr, So, w.tuple(wb_idx), wb_mem);
+
+    auto pcur = wc_mem;
+    DefVec post_elems(nps);
+    for (size_t j = 0; j != nps; ++j) {
+        auto [pc_mem, pcoords]
+            = affine_map(post_ins.accs[j], post_ins.rs[j], Ro, So, post_ins.ss[j], write_coords, pcur);
+        pcur = pc_mem;
+        auto [rd_mem, rd_val]
+            = w.call<mem::load>(Defs{pcur, op_lea_tuple(k_post_dptrs[j], fold_index(post_ins.ss[j], pcoords))})
+                  ->projs<2>();
+        pcur          = rd_mem;
+        post_elems[j] = rd_val;
+    }
+
+    auto after_post                        = w.mut_con(Defs{global_ty, Tp})->set("gemmAfterPost");
+    auto [post_mem, elem_post]             = after_post->vars<2>();
+    auto final_mem
+        = w.call<mem::store>(Defs{post_mem, op_lea_tuple(k_out_dptr, fold_index(So, write_coords)), elem_post});
+    after_post->app(true, k_ret, Defs{final_mem, wb_shared, k_const, k_local});
+    apply_cps(w, write_back, global_post, {pcur, acc_final, w.tuple(post_elems)}, after_post);
+
+    // --- after_inner: barrier once the tile's reduction is folded, then continue the k-tile loop. ---
+    auto after_inner = w.mut_con(Defs{global_ty, To})->set("gemmAfterInner");
+    auto [ai_mem, ai_acc] = after_inner->vars<2>();
+
+    // --- Outer k-tile loop: cooperative load, barrier, tiled reduction, barrier. ---
+    const Def* outer_init             = w.tuple({k_global, k_shared, init});
+    auto [outer_body, outer_for_call] = counting_for(w.lit_i64(n_ktiles), outer_init, write_back, w.sym("gemmKTile"));
+    entry->set(true, outer_for_call);
+    auto [kt_iter, outer_acc, outer_yield] = outer_body->vars<3>();
+    auto [g0, s0, accval0]                 = outer_acc->projs<3>();
+
+    auto k_tile_base = mul_i64(kt_iter, w.lit_i64(tile));
+    auto k0_global   = add_i64(k_tile_base, k_local0_i64);
+    auto k1_global   = add_i64(k_tile_base, k_local1_i64);
+
+    auto [g1, coords0]   = affine_map(ins.accs[0], ins.rs[0], n, Sr, ins.ss[0], build_iters(shape.par0, par0_global, k0_global), g0);
+    auto [rd0, val0]      = w.call<mem::load>(Defs{g1, op_lea_tuple(k_dptrs[0], fold_index(ins.ss[0], coords0))})->projs<2>();
+    auto [g2, coords1]   = affine_map(ins.accs[1], ins.rs[1], n, Sr, ins.ss[1], build_iters(shape.par1, par1_global, k1_global), rd0);
+    auto [rd1, val1]      = w.call<mem::load>(Defs{g2, op_lea_tuple(k_dptrs[1], fold_index(ins.ss[1], coords1))})->projs<2>();
+
+    auto s1 = w.call<mem::store>(Defs{s0, op_lea_tuple(shared0_ptr, w.tuple({par_local0_idx, k_local0_idx})), val0});
+    auto s2 = w.call<mem::store>(Defs{s1, op_lea_tuple(shared1_ptr, w.tuple({par_local1_idx, k_local1_idx})), val1});
+
+    auto [g3, s3] = w.app(w.annex<gpu::sync_work_items>(), Defs{rd1, s2})->projs<2>();
+
+    auto [g4, s4] = w.app(w.annex<gpu::sync_work_items>(), Defs{ai_mem, s3})->projs<2>();
+    after_inner->app(true, outer_yield, Defs{g4, s4, ai_acc});
+
+    auto [inner_body, inner_for_call] = counting_for(w.lit_i64(tile), w.tuple({g3, accval0}), after_inner, w.sym("gemmInnerK"));
+    outer_body->set(true, inner_for_call);
+    auto [kk_iter, inner_acc, inner_yield] = inner_body->vars<3>();
+    auto [g_in, accval_in]                 = inner_acc->projs<2>();
+    auto kk_idx                             = w.call(core::conv::u, w.lit_nat(tile), kk_iter);
+
+    auto [rm0, v0] = w.call<mem::load>(Defs{s3, op_lea_tuple(shared0_ptr, w.tuple({par_local0_idx, kk_idx}))})->projs<2>();
+    auto [rm1, v1] = w.call<mem::load>(Defs{rm0, op_lea_tuple(shared1_ptr, w.tuple({par_local1_idx, kk_idx}))})->projs<2>();
+
+    apply_cps(w, inner_body, global_comb, {g_in, accval_in, w.tuple({v0, v1})}, inner_yield);
+
+    return {kernel, shared_pack_ty};
+}
+
+bool is_pow2(nat_t n) { return n != 0 && (n & (n - 1)) == 0; }
+
+/// A shared-memory tree-reduction kernel for a pure reduction (`ro == 0`, no epilogue inputs): up to
+/// 1024 threads each fold one element via `comb`, then combine pairwise in shared memory, instead of a
+/// single thread sequentially folding the whole range. Requires the flattened reduction size to be an
+/// exact power of two and at most 1024 -- the caller falls back to `build_kernel` otherwise; scaling
+/// beyond one block (a cross-block combine) is a natural follow-up, not attempted here.
+std::pair<Lam*, const Def*> build_kernel_reduction(World& w,
+                            const Def* Sr,
+                            nat_t rr,
+                            const Mapped& ins,
+                            const Def* To,
+                            Lam* global_comb,
+                            const Def* init,
+                            const Def* out_dptr,
+                            nat_t total_k) {
+    auto nis = ins.n();
+    auto n   = w.lit_nat(rr);
+
+    auto global_ty = w.annex<gpu::GlobalM>();
+    auto shared_ty = w.annex<gpu::SharedM>();
+    auto const_ty  = w.annex<gpu::ConstM>();
+    auto local_ty  = w.annex<gpu::LocalM>();
+
+    auto shared_pack_ty = w.arr(w.lit_nat(total_k), To);
+    auto shared_ptr_ty  = w.call<gpu::SharedPtr>(shared_pack_ty);
+
+    DefVec arg_tys(nis + 1);
+    for (size_t i = 0; i != nis; ++i)
+        arg_tys[i] = ins.dptrs[i]->type();
+    arg_tys[nis] = out_dptr->type();
+
+    Grid grid{1, total_k, total_k};
+    auto kernel
+        = w.mut_con(Defs{global_ty, shared_ty, const_ty, local_ty, w.type_idx(grid.n_groups), w.type_idx(grid.n_items),
+                         w.sigma({shared_ptr_ty}), w.sigma(arg_tys), w.cn({global_ty, shared_ty, const_ty, local_ty})})
+              ->set("reduceKernel");
+    auto [k_global, k_shared, k_const, k_local, group_id, item_id, k_shared_ptrs, k_args, k_ret] = kernel->vars<9>();
+
+    DefVec k_dptrs(nis);
+    for (size_t i = 0; i != nis; ++i)
+        k_dptrs[i] = k_args->proj(nis + 1, i);
+    auto k_out_dptr = k_args->proj(nis + 1, nis);
+    auto shared_ptr = k_shared_ptrs->proj(1, 0);
+
+    auto tid_i64 = total_k == 1 ? w.lit_i64(0) : w.call(core::conv::u, w.lit_nat_0(), item_id);
+
+    // --- Each thread folds exactly one k-index (`rr`-dim coordinates unflattened from `tid`). ---
+    Vector<nat_t> red_dims(rr);
+    for (nat_t d = 0; d != rr; ++d)
+        red_dims[d] = *Lit::isa<nat_t>(Sr->proj(rr, d));
+    auto [mem1, coords] = unflatten_index(w, tid_i64, red_dims, k_global);
+    auto iters           = w.tuple(coords);
+
+    auto cur = mem1;
+    DefVec input_elems(nis);
+    for (size_t i = 0; i != nis; ++i) {
+        auto [mc_mem, ecoords] = affine_map(ins.accs[i], ins.rs[i], n, Sr, ins.ss[i], iters, cur);
+        cur                    = mc_mem;
+        auto [rd_mem, rd_val]
+            = w.call<mem::load>(Defs{cur, op_lea_tuple(k_dptrs[i], fold_index(ins.ss[i], ecoords))})->projs<2>();
+        cur            = rd_mem;
+        input_elems[i] = rd_val;
+    }
+
+    auto after_fold       = w.mut_con(Defs{global_ty, To})->set("reduceAfterFold");
+    auto [af_mem, af_val] = after_fold->vars<2>();
+    apply_cps(w, kernel, global_comb, {cur, init, w.tuple(input_elems)}, after_fold);
+
+    auto stored0                 = w.call<mem::store>(Defs{k_shared, mem::op_lea_unsafe(shared_ptr, tid_i64), af_val});
+    auto [bar0_mem, bar0_shared] = w.app(w.annex<gpu::sync_work_items>(), Defs{af_mem, stored0})->projs<2>();
+    auto tree_entry               = w.mut_con(w.sigma(Defs{}))->set("reduceTree");
+    after_fold->set(true, w.app(tree_entry, w.tuple()));
+
+    // --- Tree reduction: each round halves the active range, guarded by a real branch (only threads
+    // with `tid < stride` have an in-bounds partner) so every thread still reaches the barrier. ---
+    Lam* current          = tree_entry;
+    const Def* shared_tok = bar0_shared;
+    for (nat_t stride = total_k / 2; stride >= 1; stride /= 2) {
+        auto is_active = w.call(core::icmp::ul, Defs{tid_i64, w.lit_i64(stride)});
+        auto do_update = w.mut_con(w.sigma(Defs{}))->set("reduceActive");
+        auto skip      = w.mut_con(w.sigma(Defs{}))->set("reduceInactive");
+        auto join      = w.mut_con(shared_ty)->set("reduceJoin");
+        current->set(true, w.app(w.extract(w.tuple({skip, do_update}), is_active), w.tuple()));
+
+        auto partner          = w.call(core::wrap::add, core::Mode::none, Defs{tid_i64, w.lit_i64(stride)});
+        auto [m1, lo]         = w.call<mem::load>(Defs{shared_tok, mem::op_lea_unsafe(shared_ptr, tid_i64)})->projs<2>();
+        auto [m2, hi]         = w.call<mem::load>(Defs{m1, mem::op_lea_unsafe(shared_ptr, partner)})->projs<2>();
+        auto write_cont       = w.mut_con(Defs{global_ty, To})->set("reduceCombined");
+        auto [wc_mem, wc_val] = write_cont->vars<2>();
+        auto m3               = w.call<mem::store>(Defs{m2, mem::op_lea_unsafe(shared_ptr, tid_i64), wc_val});
+        write_cont->app(true, join, Defs{m3});
+        apply_cps(w, do_update, global_comb, {af_mem, lo, w.tuple({lo, hi})}, write_cont);
+        skip->app(true, join, Defs{shared_tok});
+
+        auto after_barrier         = w.mut_con(shared_ty)->set("reduceBarrier");
+        auto [bar_mem, bar_shared] = w.app(w.annex<gpu::sync_work_items>(), Defs{af_mem, join->var()})->projs<2>();
+        join->set(true, w.app(after_barrier, bar_shared));
+
+        current    = after_barrier;
+        shared_tok = after_barrier->var();
+        if (stride == 1) break; // unsigned `stride /= 2` never reaches below 1
+    }
+
+    // --- Only thread 0 writes the fully-reduced result (no epilogue inputs: `nps == 0` is required by the caller). ---
+    auto is_zero     = w.call(core::icmp::e, Defs{tid_i64, w.lit_i64(0)});
+    auto do_write    = w.mut_con(w.sigma(Defs{}))->set("reduceWrite");
+    auto skip_write  = w.mut_con(w.sigma(Defs{}))->set("reduceSkipWrite");
+    auto after_write = w.mut_con(Defs{global_ty, shared_ty})->set("reduceAfterWrite");
+    current->set(true, w.app(w.extract(w.tuple({skip_write, do_write}), is_zero), w.tuple()));
+
+    auto [rd_mem, total_val] = w.call<mem::load>(Defs{shared_tok, mem::op_lea_unsafe(shared_ptr, u64{0})})->projs<2>();
+    auto write_mem            = w.call<mem::store>(Defs{af_mem, k_out_dptr, total_val});
+    do_write->app(true, after_write, Defs{write_mem, rd_mem});
+    skip_write->app(true, after_write, Defs{af_mem, shared_tok});
+
+    auto [aw_mem, aw_shared] = after_write->vars<2>();
+    after_write->app(true, k_ret, Defs{aw_mem, aw_shared, k_const, k_local});
+
+    return {kernel, shared_pack_ty};
+}
+
 Lam* build_teardown(World& w,
                     const Def* Ro,
                     const Def* So,
@@ -438,12 +816,50 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     auto global_comb = rebuild_lam_global_mem(comb_lam, To, w.sym("combGlobal"));
     auto global_post = rebuild_lam_global_mem(post_lam, Tp, w.sym("postGlobal"));
 
-    auto grid = grid_layout(out_dims);
+    Mapped mapped_ins{in_desc.rs, in_desc.ss, inputs.dptrs, in_desc.accs};
+    Mapped mapped_post{post_desc.rs, post_desc.ss, post_inputs.dptrs, post_desc.accs};
 
-    auto kernel = build_kernel(w, Ro, rr, out_dims, Sr, So, Mapped{in_desc.rs, in_desc.ss, inputs.dptrs, in_desc.accs},
-                               To, acc_out, init, global_comb,
-                               Mapped{post_desc.rs, post_desc.ss, post_inputs.dptrs, post_desc.accs}, global_post, Tp,
-                               out_dptr, grid);
+    // `sched` names the schedule `%tensor.dot_product_impl` already picked for this op (see
+    // `probe_schedule`): `vdim` in the reduction range means it chose the reduction-vectorized nest,
+    // i.e. a genuine contraction along that axis -- exactly the structure a specialized kernel below
+    // wants, read off rather than rediscovered from the op's operands.
+    auto sched_vu  = probe_schedule(sched);
+    bool is_redvec = sched_vu && sched_vu->first >= ro && sched_vu->first < ro + rr;
+
+    Lam* kernel = nullptr;
+    const Def* shared_pack_ty = nullptr;
+    nat_t launch_groups = 0, launch_items = 0;
+
+    if (is_redvec && ro == 0 && nps_n == 0 && rr >= 1) {
+        nat_t total_k = 1;
+        for (nat_t d = 0; d != rr; ++d)
+            total_k *= *Lit::isa<nat_t>(Sr->proj(ro + rr, d));
+        if (is_pow2(total_k) && total_k <= 1024) {
+            std::tie(kernel, shared_pack_ty)
+                = build_kernel_reduction(w, Sr, rr, mapped_ins, To, global_comb, init, out_dptr, total_k);
+            launch_groups = 1;
+            launch_items  = total_k;
+        }
+    }
+    if (!kernel && is_redvec) {
+        if (auto shape = detect_gemm(mapped_ins, ro, rr, ro + rr)) {
+            auto dimk = *Lit::isa<nat_t>(Sr->proj(ro + rr, ro));
+            if (out_dims[0] % Gemm_Tile == 0 && out_dims[1] % Gemm_Tile == 0 && dimk % Gemm_Tile == 0) {
+                std::tie(kernel, shared_pack_ty)
+                    = build_kernel_gemm_tiled(w, Ro, out_dims, Sr, So, mapped_ins, *shape, To, acc_out, init,
+                                              global_comb, mapped_post, global_post, Tp, out_dptr);
+                launch_groups = (out_dims[0] / Gemm_Tile) * (out_dims[1] / Gemm_Tile);
+                launch_items  = Gemm_Tile * Gemm_Tile;
+            }
+        }
+    }
+    if (!kernel) {
+        auto grid = grid_layout(out_dims);
+        kernel = build_kernel(w, Ro, rr, out_dims, Sr, So, mapped_ins, To, acc_out, init, global_comb, mapped_post,
+                              global_post, Tp, out_dptr, grid);
+        launch_groups = grid.n_groups;
+        launch_items  = grid.n_items;
+    }
 
     DefVec kernel_arg_tys(nis_n + nps_n + 1);
     for (nat_t i = 0; i != nis_n; ++i)
@@ -453,8 +869,9 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     kernel_arg_tys[nis_n + nps_n] = out_dptr->type();
 
     auto launch = w.app(w.annex<gpu::launch>(), Defs{w.lit_nat(nis_n + nps_n + 1), w.tuple(kernel_arg_tys)});
-    launch      = w.app(launch, Defs{w.lit_nat(grid.n_groups), w.lit_nat(grid.n_items), w.annex<gpu::default_stream>(),
-                                     w.lit_ff(), w.tuple()});
+    launch      = w.app(launch, Defs{w.lit_nat(launch_groups), w.lit_nat(launch_items), w.annex<gpu::default_stream>(),
+                                     shared_pack_ty ? w.lit_tt() : w.lit_ff(),
+                                     shared_pack_ty ? w.tuple({shared_pack_ty}) : w.tuple()});
     launch      = w.app(launch, kernel);
 
     DefVec kernel_args = inputs.dptrs;
