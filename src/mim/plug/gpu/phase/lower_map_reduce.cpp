@@ -211,10 +211,13 @@ std::pair<const Def*, const Def*> alloc_output(World& w, const Def* m1, const De
 /// `dptr`'s pointee is the *whole* rank-`rank_def` array (`GlobalPtr «Sis[i]; Tis[i]»`, per
 /// `%gpu.buf_alloc_copy`'s result type) -- peel that many array levels to reach the scalar type a
 /// shared-memory tile cell actually holds.
-const Def* scalar_elem_ty(const Def* dptr, const Def* rank_def) {
+/// `World::seq` folds an extent-1 level away entirely (`«1; T»` is built as plain `T`), so a
+/// dimension of `shape_def` that is literally `1` contributes no `Seq` to peel.
+const Def* scalar_elem_ty(const Def* dptr, const Def* rank_def, const Def* shape_def) {
     auto ty = Axm::as<mem::Ptr>(dptr->type())->arg(0);
-    for (nat_t i = 0, r = *Lit::isa<nat_t>(rank_def); i != r; ++i)
-        ty = ty->as<Seq>()->body();
+    auto r  = *Lit::isa<nat_t>(rank_def);
+    for (nat_t i = 0; i != r; ++i)
+        if (*Lit::isa<nat_t>(shape_def->proj(r, i)) != 1) ty = ty->as<Seq>()->body();
     return ty;
 }
 
@@ -519,8 +522,8 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto const_ty  = w.annex<gpu::ConstM>();
     auto local_ty  = w.annex<gpu::LocalM>();
 
-    auto elem_ty0       = scalar_elem_ty(ins.dptrs[0], ins.rs[0]);
-    auto elem_ty1       = scalar_elem_ty(ins.dptrs[1], ins.rs[1]);
+    auto elem_ty0       = scalar_elem_ty(ins.dptrs[0], ins.rs[0], ins.ss[0]);
+    auto elem_ty1       = scalar_elem_ty(ins.dptrs[1], ins.rs[1], ins.ss[1]);
     auto tile_ty        = [&](const Def* elem_ty) { return w.arr(w.lit_nat(tile), w.arr(w.lit_nat(tile), elem_ty)); };
     auto shared_pack_ty = w.sigma({tile_ty(elem_ty0), tile_ty(elem_ty1)});
     auto shared_ptr_ty  = w.call<gpu::SharedPtr>(shared_pack_ty);
@@ -758,7 +761,7 @@ std::pair<Lam*, const Def*> build_kernel_conv_tiled(World& w,
     auto const_ty  = w.annex<gpu::ConstM>();
     auto local_ty  = w.annex<gpu::LocalM>();
 
-    auto weight_elem_ty = scalar_elem_ty(ins.dptrs[shape.weight_idx], ins.rs[shape.weight_idx]);
+    auto weight_elem_ty = scalar_elem_ty(ins.dptrs[shape.weight_idx], ins.rs[shape.weight_idx], ins.ss[shape.weight_idx]);
     auto shared_pack_ty = w.arr(w.lit_nat(padded_total), weight_elem_ty);
     auto shared_ptr_ty  = w.call<gpu::SharedPtr>(shared_pack_ty);
 
