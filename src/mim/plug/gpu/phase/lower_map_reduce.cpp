@@ -1,6 +1,7 @@
 #include "mim/plug/gpu/phase/lower_map_reduce.h"
 
 #include <algorithm>
+#include <numeric>
 
 #include <fe/log.h>
 #include <fe/vector.h>
@@ -45,23 +46,20 @@ std::optional<std::pair<nat_t, nat_t>> probe_schedule(const Def* sched) {
     return std::pair{*vdim_l, *unroll_l};
 }
 
-/// `acc`'s own `ris` coordinates, each reflected as the (0-based) loop axis it reads, by evaluating
-/// `acc` on distinct `%affine.lit` markers -- the same technique `%tensor.fastest_axis`'s normalizer
-/// uses to reflect an access map's structure without assuming which op produced it. A slot that is
-/// not a pure permutation of one loop axis (e.g. an affine combination) answers `nullopt`.
-Vector<std::optional<nat_t>> probe_axes(const Def* acc, nat_t rn, nat_t ris) {
+/// Whether `acc`'s read coordinates depend on loop position `pos`: evaluate it on two loop-vectors
+/// that differ only at `pos` (via distinct `%affine.lit` markers -- the same technique
+/// `%tensor.fastest_axis`'s normalizer uses to reflect an access map's structure without assuming
+/// which op produced it) and check whether the result changes. General enough to recognize a
+/// strip-mined axis, whose read is an affine combination of two positions (`o#d · ts + o#(d+1)`, per
+/// `tensor.mim`'s `split_iota`), not just a pure single-axis permutation.
+bool depends_on_axis(const Def* acc, nat_t rn, nat_t pos) {
     auto& w = acc->world();
-    DefVec markers(rn);
+    DefVec base(rn);
     for (nat_t i = 0; i != rn; ++i)
-        markers[i] = w.call<affine::lit>(w.lit_nat(i + 1));
-    auto result = w.app(acc, w.tuple(markers));
-    Vector<std::optional<nat_t>> axes(ris);
-    for (nat_t j = 0; j != ris; ++j) {
-        auto lit = Axm::isa<affine::lit>(result->proj(ris, j));
-        auto v   = lit ? Lit::isa<nat_t>(lit->arg()) : std::nullopt;
-        axes[j]  = (v && *v >= 1 && *v <= rn) ? std::optional<nat_t>{*v - 1} : std::nullopt;
-    }
-    return axes;
+        base[i] = w.call<affine::lit>(w.lit_nat(i + 1));
+    auto varied = base;
+    varied[pos] = w.call<affine::lit>(w.lit_nat(rn + 1));
+    return w.app(acc, w.tuple(base)) != w.app(acc, w.tuple(varied));
 }
 
 /// Mirrors `btensor::phase::LowerMapReduce`'s helper of the same name: a counting `%affine.For` loop body
@@ -232,27 +230,44 @@ struct Mapped {
 /// The recognized shape of a 2-input, single-reduction-dim contraction (a GEMM/BMM-style op, of which
 /// `%tensor.dot_product`/`product_2d`/`bmm` are the frontend's only current producers -- but detected
 /// structurally, not by axiom identity, so any future producer of the same shape is picked up too).
+/// The recognized shape of a 2-input, single-reduction-dim contraction, generalized over however many
+/// loop positions each input's own (non-reduction) axis was split into: a schedule like
+/// `dot_schedule_kvec` strip-mines the two logical output dims into (block, within-block) pairs
+/// *before* GPU ever sees the op, so a real redvec call typically shows up with `m_positions`/
+/// `n_positions` of size 2 each, not size 1 -- reflected from the access maps, not assumed.
 struct GemmShape {
-    nat_t par0, par1; ///< which of the `ro` loop positions each input's non-reduction axis is
+    Vector<nat_t> m_positions; ///< ascending loop positions (within `[0, ro)`) forming input0's own axis
+    Vector<nat_t> n_positions; ///< ditto for input1; together with `m_positions` partitions `[0, ro)`
 };
 
 std::optional<GemmShape> detect_gemm(const Mapped& ins, nat_t ro, nat_t rr, nat_t rn) {
-    if (ins.n() != 2 || rr != 1 || ro != 2) return std::nullopt;
+    if (ins.n() != 2 || rr != 1 || ro < 2) return std::nullopt;
     auto k_pos = ro;
-    auto match = [&](const Def* acc, const Def* r_def) -> std::optional<nat_t> {
-        auto r = Lit::isa<nat_t>(r_def);
-        if (!r || *r != 2) return std::nullopt;
-        auto axes = probe_axes(acc, rn, 2);
-        if (!axes[0] || !axes[1]) return std::nullopt;
-        auto a0 = *axes[0], a1 = *axes[1];
-        if (a0 == k_pos && a1 != k_pos && a1 < ro) return a1;
-        if (a1 == k_pos && a0 != k_pos && a0 < ro) return a0;
-        return std::nullopt;
+    auto positions_of = [&](const Def* acc) -> std::optional<Vector<nat_t>> {
+        if (!depends_on_axis(acc, rn, k_pos)) return std::nullopt;
+        Vector<nat_t> pos;
+        for (nat_t p = 0; p != ro; ++p)
+            if (depends_on_axis(acc, rn, p)) pos.push_back(p);
+        if (pos.empty()) return std::nullopt;
+        return pos;
     };
-    auto par0 = match(ins.accs[0], ins.rs[0]);
-    auto par1 = match(ins.accs[1], ins.rs[1]);
-    if (!par0 || !par1 || *par0 == *par1) return std::nullopt;
-    return GemmShape{*par0, *par1};
+    auto m_pos = positions_of(ins.accs[0]);
+    auto n_pos = positions_of(ins.accs[1]);
+    if (!m_pos || !n_pos) return std::nullopt;
+
+    Vector<bool> covered(ro, false);
+    for (auto p : *m_pos) {
+        if (covered[p]) return std::nullopt;
+        covered[p] = true;
+    }
+    for (auto p : *n_pos) {
+        if (covered[p]) return std::nullopt;
+        covered[p] = true;
+    }
+    for (auto c : covered)
+        if (!c) return std::nullopt;
+
+    return GemmShape{*m_pos, *n_pos};
 }
 
 /// Builds the kernel: one thread per output point, reducing sequentially over the `rr` reduction dims.
@@ -396,11 +411,13 @@ constexpr nat_t Gemm_Tile = 16;
 /// activation) keeps working unchanged.
 std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
                              const Def* Ro,
-                             const Vector<nat_t>& out_dims,
+                             nat_t ro,
                              const Def* Sr,
                              const Def* So,
                              const Mapped& ins,
                              const GemmShape& shape,
+                             const Vector<nat_t>& m_extents,
+                             const Vector<nat_t>& n_extents,
                              const Def* To,
                              const Def* acc_out,
                              const Def* init,
@@ -411,26 +428,34 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
                              const Def* out_dptr) {
     auto nis  = ins.n();
     auto nps  = post_ins.n();
-    auto ro   = out_dims.size();
     auto rn   = ro + 1;
     auto n    = w.lit_nat(rn);
-    auto dim0 = out_dims[0];
-    auto dim1 = out_dims[1];
+    auto m_total = std::accumulate(m_extents.begin(), m_extents.end(), nat_t{1}, std::multiplies<>{});
+    auto n_total = std::accumulate(n_extents.begin(), n_extents.end(), nat_t{1}, std::multiplies<>{});
     auto dimk = *Lit::isa<nat_t>(Sr->proj(rn, ro));
 
     auto tile      = Gemm_Tile;
-    auto n_blocks0 = dim0 / tile;
-    auto n_blocks1 = dim1 / tile;
+    auto n_blocks0 = m_total / tile;
+    auto n_blocks1 = n_total / tile;
     auto n_ktiles  = dimk / tile;
-    Grid grid{n_blocks0 * n_blocks1, tile * tile, dim0 * dim1};
+    Grid grid{n_blocks0 * n_blocks1, tile * tile, m_total * n_total};
 
     auto global_ty = w.annex<gpu::GlobalM>();
     auto shared_ty = w.annex<gpu::SharedM>();
     auto const_ty  = w.annex<gpu::ConstM>();
     auto local_ty  = w.annex<gpu::LocalM>();
 
-    auto elem_ty0       = Axm::as<mem::Ptr>(ins.dptrs[0]->type())->arg(0);
-    auto elem_ty1       = Axm::as<mem::Ptr>(ins.dptrs[1]->type())->arg(0);
+    // `ins.dptrs[i]`'s pointee is the *whole* rank-`Ris[i]` array (`GlobalPtr «Sis[i]; Tis[i]»`, per
+    // `%gpu.buf_alloc_copy`'s result type) -- peel that many array levels to reach the scalar type a
+    // shared-memory tile cell actually holds.
+    auto scalar_elem_ty = [&](const Def* dptr, const Def* rank_def) {
+        auto ty = Axm::as<mem::Ptr>(dptr->type())->arg(0);
+        for (nat_t i = 0, r = *Lit::isa<nat_t>(rank_def); i != r; ++i)
+            ty = ty->as<Seq>()->body();
+        return ty;
+    };
+    auto elem_ty0       = scalar_elem_ty(ins.dptrs[0], ins.rs[0]);
+    auto elem_ty1       = scalar_elem_ty(ins.dptrs[1], ins.rs[1]);
     auto tile_ty        = [&](const Def* elem_ty) { return w.arr(w.lit_nat(tile), w.arr(w.lit_nat(tile), elem_ty)); };
     auto shared_pack_ty = w.sigma({tile_ty(elem_ty0), tile_ty(elem_ty1)});
     auto shared_ptr_ty  = w.call<gpu::SharedPtr>(shared_pack_ty);
@@ -460,7 +485,8 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto shared0_ptr      = mem::op_lea_unsafe(shared_pack_ptr, u64{0});
     auto shared1_ptr      = mem::op_lea_unsafe(shared_pack_ptr, u64{1});
 
-    // --- Decompose (group_id, item_id) into (block0, block1, ty, tx). ---
+    // --- Decompose (group_id, item_id) into (block0, block1, ty, tx); input0 always owns the `ty`
+    // (row) role and input1 the `tx` (col) role -- fixed by construction, not derived from the op. ---
     auto entry = w.mut_con(w.sigma(Defs{}))->set("gemmEntry");
     kernel->set(true, w.app(entry, w.tuple()));
 
@@ -470,34 +496,39 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto [m_bt, block0_i64, block1_i64] = divmod_i64(w, k_global, group_i64, n_blocks1);
     auto [m_tt, ty_i64, tx_i64]         = divmod_i64(w, m_bt, item_i64, tile);
 
-    auto par_local0_i64 = shape.par0 == 0 ? ty_i64 : tx_i64;
-    auto par_local1_i64 = shape.par1 == 0 ? ty_i64 : tx_i64;
-    auto k_local0_i64    = shape.par0 == 0 ? tx_i64 : ty_i64;
-    auto k_local1_i64    = shape.par1 == 0 ? tx_i64 : ty_i64;
-    auto par_local0_idx = w.call(core::conv::u, w.lit_nat(tile), par_local0_i64);
-    auto par_local1_idx = w.call(core::conv::u, w.lit_nat(tile), par_local1_i64);
-    auto k_local0_idx    = w.call(core::conv::u, w.lit_nat(tile), k_local0_i64);
-    auto k_local1_idx    = w.call(core::conv::u, w.lit_nat(tile), k_local1_i64);
+    auto par_local0_idx = w.call(core::conv::u, w.lit_nat(tile), ty_i64);
+    auto par_local1_idx = w.call(core::conv::u, w.lit_nat(tile), tx_i64);
+    auto k_local0_idx    = w.call(core::conv::u, w.lit_nat(tile), tx_i64);
+    auto k_local1_idx    = w.call(core::conv::u, w.lit_nat(tile), ty_i64);
+    auto k_local0_i64    = tx_i64;
+    auto k_local1_i64    = ty_i64;
 
     auto mul_i64 = [&](const Def* a, const Def* b) { return w.call(core::wrap::mul, core::Mode::none, Defs{a, b}); };
     auto add_i64 = [&](const Def* a, const Def* b) { return w.call(core::wrap::add, core::Mode::none, Defs{a, b}); };
 
-    auto block_for_par0 = shape.par0 == 0 ? block0_i64 : block1_i64;
-    auto block_for_par1 = shape.par1 == 0 ? block0_i64 : block1_i64;
-    auto par0_global     = add_i64(mul_i64(block_for_par0, w.lit_i64(tile)), par_local0_i64);
-    auto par1_global     = add_i64(mul_i64(block_for_par1, w.lit_i64(tile)), par_local1_i64);
-    auto pos0_global      = add_i64(mul_i64(block0_i64, w.lit_i64(tile)), ty_i64);
-    auto pos1_global      = add_i64(mul_i64(block1_i64, w.lit_i64(tile)), tx_i64);
+    // `m_flat`/`n_flat` are this thread's own (global, tile-relative) logical M/N coordinate; each was
+    // split into `m_extents`/`n_extents` many loop positions by the schedule's own strip-mining, so
+    // decompose them the same way (most-significant position first) rather than assuming just one.
+    auto m_flat_global = add_i64(mul_i64(block0_i64, w.lit_i64(tile)), ty_i64);
+    auto n_flat_global = add_i64(mul_i64(block1_i64, w.lit_i64(tile)), tx_i64);
+    auto [m_after, m_sub_coords] = unflatten_index(w, m_flat_global, m_extents, m_tt);
+    auto [n_after, n_sub_coords] = unflatten_index(w, n_flat_global, n_extents, m_after);
 
-    /// The full `rn`-length loop-vector for reading input `par_pos`/`k` at the given global indices --
-    /// the other loop position is unused by this input's access map (checked by `detect_gemm`), so any
-    /// in-bounds value is fine.
-    auto build_iters = [&](nat_t par_pos, const Def* par_global_i64, const Def* k_global_i64) {
+    /// The full `rn`-length loop-vector for reading one input at the given global indices: `own_pos`'s
+    /// positions get `own_coords` (already `Idx`-typed, from `unflatten_index`), `ro` gets `k`, and any
+    /// remaining position (belonging to the *other* input's own axis) is unused by this input's access
+    /// map (checked by `detect_gemm`), so any in-bounds value is fine.
+    auto build_iters = [&](const Vector<nat_t>& own_pos, const DefVec& own_coords, const Def* k_val_i64) {
         DefVec iv(rn);
-        for (nat_t p = 0; p != rn; ++p) {
-            auto val = p == par_pos ? par_global_i64 : (p == ro ? k_global_i64 : w.lit_i64(0));
-            iv[p]    = w.call(core::conv::u, Sr->proj(rn, p), val);
+        Vector<bool> filled(rn, false);
+        for (size_t j = 0; j != own_pos.size(); ++j) {
+            iv[own_pos[j]]    = own_coords[j];
+            filled[own_pos[j]] = true;
         }
+        iv[ro]     = w.call(core::conv::u, Sr->proj(rn, ro), k_val_i64);
+        filled[ro] = true;
+        for (nat_t p = 0; p != ro; ++p)
+            if (!filled[p]) iv[p] = w.call(core::conv::u, Sr->proj(rn, p), w.lit_i64(0));
         return w.tuple(iv);
     };
 
@@ -505,8 +536,10 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto write_back           = w.mut_con(Defs{global_ty, shared_ty, To})->set("gemmWriteBack");
     auto [wb_mem, wb_shared, acc_final] = write_back->vars<3>();
     DefVec wb_idx(rn);
-    wb_idx[0] = w.call(core::conv::u, Sr->proj(rn, 0), pos0_global);
-    wb_idx[1] = w.call(core::conv::u, Sr->proj(rn, 1), pos1_global);
+    for (size_t j = 0; j != shape.m_positions.size(); ++j)
+        wb_idx[shape.m_positions[j]] = m_sub_coords[j];
+    for (size_t j = 0; j != shape.n_positions.size(); ++j)
+        wb_idx[shape.n_positions[j]] = n_sub_coords[j];
     wb_idx[ro] = w.call(core::conv::u, Sr->proj(rn, ro), w.lit_i64(0));
     auto [wc_mem, write_coords] = affine_map(acc_out, Ro, n, Sr, So, w.tuple(wb_idx), wb_mem);
 
@@ -535,7 +568,7 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto [ai_mem, ai_acc] = after_inner->vars<2>();
 
     // --- Outer k-tile loop: cooperative load, barrier, tiled reduction, barrier. ---
-    const Def* outer_init             = w.tuple({k_global, k_shared, init});
+    const Def* outer_init             = w.tuple({n_after, k_shared, init});
     auto [outer_body, outer_for_call] = counting_for(w.lit_i64(n_ktiles), outer_init, write_back, w.sym("gemmKTile"));
     entry->set(true, outer_for_call);
     auto [kt_iter, outer_acc, outer_yield] = outer_body->vars<3>();
@@ -545,10 +578,12 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto k0_global   = add_i64(k_tile_base, k_local0_i64);
     auto k1_global   = add_i64(k_tile_base, k_local1_i64);
 
-    auto [g1, coords0]   = affine_map(ins.accs[0], ins.rs[0], n, Sr, ins.ss[0], build_iters(shape.par0, par0_global, k0_global), g0);
-    auto [rd0, val0]      = w.call<mem::load>(Defs{g1, op_lea_tuple(k_dptrs[0], fold_index(ins.ss[0], coords0))})->projs<2>();
-    auto [g2, coords1]   = affine_map(ins.accs[1], ins.rs[1], n, Sr, ins.ss[1], build_iters(shape.par1, par1_global, k1_global), rd0);
-    auto [rd1, val1]      = w.call<mem::load>(Defs{g2, op_lea_tuple(k_dptrs[1], fold_index(ins.ss[1], coords1))})->projs<2>();
+    auto [g1, coords0]
+        = affine_map(ins.accs[0], ins.rs[0], n, Sr, ins.ss[0], build_iters(shape.m_positions, m_sub_coords, k0_global), g0);
+    auto [rd0, val0] = w.call<mem::load>(Defs{g1, op_lea_tuple(k_dptrs[0], fold_index(ins.ss[0], coords0))})->projs<2>();
+    auto [g2, coords1]
+        = affine_map(ins.accs[1], ins.rs[1], n, Sr, ins.ss[1], build_iters(shape.n_positions, n_sub_coords, k1_global), rd0);
+    auto [rd1, val1] = w.call<mem::load>(Defs{g2, op_lea_tuple(k_dptrs[1], fold_index(ins.ss[1], coords1))})->projs<2>();
 
     auto s1 = w.call<mem::store>(Defs{s0, op_lea_tuple(shared0_ptr, w.tuple({par_local0_idx, k_local0_idx})), val0});
     auto s2 = w.call<mem::store>(Defs{s1, op_lea_tuple(shared1_ptr, w.tuple({par_local1_idx, k_local1_idx})), val1});
@@ -844,11 +879,18 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     if (!kernel && is_redvec) {
         if (auto shape = detect_gemm(mapped_ins, ro, rr, ro + rr)) {
             auto dimk = *Lit::isa<nat_t>(Sr->proj(ro + rr, ro));
-            if (out_dims[0] % Gemm_Tile == 0 && out_dims[1] % Gemm_Tile == 0 && dimk % Gemm_Tile == 0) {
+            Vector<nat_t> m_extents, n_extents;
+            for (auto p : shape->m_positions)
+                m_extents.push_back(out_dims[p]);
+            for (auto p : shape->n_positions)
+                n_extents.push_back(out_dims[p]);
+            auto m_total = std::accumulate(m_extents.begin(), m_extents.end(), nat_t{1}, std::multiplies<>{});
+            auto n_total = std::accumulate(n_extents.begin(), n_extents.end(), nat_t{1}, std::multiplies<>{});
+            if (m_total % Gemm_Tile == 0 && n_total % Gemm_Tile == 0 && dimk % Gemm_Tile == 0) {
                 std::tie(kernel, shared_pack_ty)
-                    = build_kernel_gemm_tiled(w, Ro, out_dims, Sr, So, mapped_ins, *shape, To, acc_out, init,
-                                              global_comb, mapped_post, global_post, Tp, out_dptr);
-                launch_groups = (out_dims[0] / Gemm_Tile) * (out_dims[1] / Gemm_Tile);
+                    = build_kernel_gemm_tiled(w, Ro, ro, Sr, So, mapped_ins, *shape, m_extents, n_extents, To, acc_out,
+                                              init, global_comb, mapped_post, global_post, Tp, out_dptr);
+                launch_groups = (m_total / Gemm_Tile) * (n_total / Gemm_Tile);
                 launch_items  = Gemm_Tile * Gemm_Tile;
             }
         }
