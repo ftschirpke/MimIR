@@ -35,9 +35,6 @@ public:
     void start() final;
     void find_kernels(const Def*);
 
-    std::string prepare() override;
-    void emit_epilogue(Lam*) override;
-
     std::optional<std::string> isa_targetspecific_intrinsic(ll::BB&, const Def*) final;
 
 protected:
@@ -49,18 +46,18 @@ private:
     static constexpr std::string_view fatbin_name_       = "@.fatbin";
     static constexpr std::string_view kernel_array_name_ = "@.mimir_kernels";
     static constexpr std::string_view kernel_name_prefix = "@.kname.";
+    static constexpr std::string_view ctor_name_         = "@.mimir_gpu_ctor";
 
     void emit_cu_error_handling(ll::BB&, const std::string&);
     void emit_gpu_setup(ll::BB&, const std::string& name);
     void emit_gpu_teardown(ll::BB&, const std::string& name);
+    void emit_gpu_lifecycle_ctor_dtor();
 
     std::optional<std::string> device_fatbin_file_;
     LamMap<int> kernel_ids_;
     bool cu_globals_declared_ = false;
 
     DefSet analyzed_;
-    /// Externals wrapped in their own GPU setup/teardown - see HostEmitter::start().
-    LamSet gpu_externals_;
 };
 
 class DeviceEmitter : public ll::Emitter {
@@ -126,23 +123,13 @@ void HostEmitter::start() {
     std::print(vars_decls_, "{} = dso_local global [{} x ptr] zeroinitializer\n", kernel_array_name_,
                kernel_ids_.size());
 
-    LamSet gpu_touching;
-    for (auto mut : world().externals().muts()) {
+    bool touches_gpu = std::ranges::any_of(world().externals().muts(), [&](Def* mut) {
         auto lam = mut->isa_mut<Lam>();
-        if (!lam || !lam->ret_pi()) continue;
+        if (!lam || !lam->ret_pi()) return false;
         DefSet seen;
-        if (reaches_if(lam, seen, is_gpu_auto_init)) gpu_touching.emplace(lam);
-    }
-    // Only wrap the ones not themselves called by another GPU-touching external: a caller's own
-    // setup/teardown already covers whatever GPU-touching external(s) it calls.
-    for (auto lam : gpu_touching) {
-        auto called_by_other = std::ranges::any_of(gpu_touching, [&](auto other) {
-            if (other == lam) return false;
-            DefSet seen;
-            return reaches_if(other, seen, [lam](const Def* d) { return d == lam; });
-        });
-        if (!called_by_other) gpu_externals_.emplace(lam);
-    }
+        return reaches_if(lam, seen, is_gpu_auto_init);
+    });
+    if (touches_gpu) emit_gpu_lifecycle_ctor_dtor();
 
     Super::start();
 }
@@ -268,21 +255,35 @@ void HostEmitter::emit_gpu_teardown(ll::BB& bb, const std::string& name) {
     emit_cu_error_handling(bb, name + "_ctx_destroy_res");
 }
 
-std::string HostEmitter::prepare() {
-    auto name = Super::prepare();
-    // Append to root()'s own BB, not func_impls_: Emitter::finalize_impl writes it out only once.
-    if (gpu_externals_.contains(root())) emit_gpu_setup(lam2bb_[root()], "%" + root()->unique_name());
-    return name;
-}
+/// `%%gpu.auto_init`/`%%gpu.auto_deinit` (see gpu.mim) exist precisely so a backend can collapse the
+/// sessions it creates into one process-lifetime context + module instead of a create/destroy pair
+/// on every call to an exported function. Rather than inlining setup into each gpu-touching
+/// external's own prologue, emit it as a standalone `void()` function registered via
+/// `@llvm.global_ctors`, so the C runtime that starts up the process runs it once before any
+/// exported function can be called.
+/// No matching teardown is emitted: measured directly, an explicit `cuCtxDestroy` at process exit
+/// (via `@llvm.global_dtors` or a plain `__attribute__((destructor))`) races the CUDA driver's own
+/// exit-time context cleanup and reliably loses (`CUresult 4`, `CUDA_ERROR_DEINITIALIZED`) -- the
+/// driver already tears the context down itself once the process exits, so there is nothing left
+/// for us to safely destroy by then.
+void HostEmitter::emit_gpu_lifecycle_ctor_dtor() {
+    ll::BB bb;
+    emit_gpu_setup(bb, "%.mimir_gpu_ctor");
 
-void HostEmitter::emit_epilogue(Lam* lam) {
-    // Must run first to force emission of the return value's own dependencies (e.g. %gpu.free) into bb.body().
-    Super::emit_epilogue(lam);
-    if (gpu_externals_.contains(root())) {
-        // lam, not root(): a function can have several return blocks, and LLVM names are function-scoped.
-        if (auto app = lam->body()->isa<App>(); app && app->callee() == root()->ret_var())
-            emit_gpu_teardown(lam2bb_[lam], "%" + lam->unique_name());
-    }
+    std::print(func_impls_, "define internal void {}() {{\n", ctor_name_);
+    std::print(func_impls_, "entry:\n");
+    ++tab;
+    for (const auto& part : bb.parts)
+        for (const auto& line : part)
+            std::println(func_impls_, "{}{}", tab, line.str());
+    std::println(func_impls_, "{}ret void", tab);
+    --tab;
+    std::print(func_impls_, "}}\n\n");
+
+    std::print(vars_decls_,
+               "@llvm.global_ctors = appending global [1 x {{ i32, ptr, ptr }}] "
+               "[{{ i32, ptr, ptr }} {{ i32 65535, ptr {}, ptr null }}]\n",
+               ctor_name_);
 }
 
 std::string HostEmitter::convert(const Def* type, bool simd) {
