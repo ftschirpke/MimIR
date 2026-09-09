@@ -56,6 +56,38 @@ const App* chainable_producer(const Def* d, const DefMap<nat_t>& uses) {
     return app;
 }
 
+/// True iff `producer`'s buffer output is exactly one of `consumer`'s own `is`/`post_is` arguments
+/// AND singly used program-wide -- i.e. `producer` is genuinely absorbed into `consumer`'s body by
+/// `lower_map_reduce_chained`, not merely a mem-chain-adjacent predecessor that happens to feed some
+/// unrelated node's data (e.g. a sibling branch of a `%%tensor.concat` sharing the same mem chain).
+bool chains_into(const App* producer, const App* consumer, const DefMap<nat_t>& uses) {
+    auto d = producer->proj(2, 1);
+    if (chainable_producer(d, uses) != producer) return false;
+    auto [mem, is_t, post_t] = consumer->arg()->projs<3>();
+    for (auto e : is_t->projs())
+        if (e == d) return true;
+    for (auto e : post_t->projs())
+        if (e == d) return true;
+    return false;
+}
+
+/// Walks a call's `mem` input back through any `%btensor.map_reduce_post` producer that
+/// `chains_into` confirms is genuinely absorbed into `consumer`'s own body, all the way to the
+/// genuine predecessor outside the chain. Needed because that producer is getting absorbed into the
+/// consumer's own body rather than materialized as a separate call: calling the generic `rewrite()`
+/// on its `mem` output (as if it were an ordinary boundary value) would independently trigger its
+/// *other*, host-round-tripping lowering too, duplicating the whole call. `consumer` is updated to
+/// each newly found producer as the walk recurses, since deeper hops are absorbed into that
+/// producer's own body, not into the original top-level call.
+const Def* find_root_mem(const Def* mem_def, const App* consumer, const DefMap<nat_t>& uses) {
+    auto ex = mem_def->isa<Extract>();
+    if (!ex) return mem_def;
+    auto app = ex->tuple()->isa<App>();
+    if (!app || !Axm::isa<btensor::map_reduce_post>(app)) return mem_def;
+    if (!chains_into(app, consumer, uses)) return mem_def;
+    return find_root_mem(app->arg()->proj(3, 0), app, uses);
+}
+
 /// Recovers the frontend's `(vdim, unroll)` schedule choice by applying `sched` to `%gpu.sched_probe`
 /// instead of binding it to a nest, so the decision `%tensor.dot_product_impl` already made can be
 /// read rather than rediscovered from the op's operands.
@@ -1427,15 +1459,8 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     for (nat_t j = 0; j != nps_n; ++j)
         if (!chain_post[j]) host_post_is.push_back(rewrite(old_post_is->proj(nps_n, j)));
 
-    auto mem_ty = w.call<mem::M>(0);
-    // Deliberately plain `rewrite()`, never skipped past a chained producer sitting on the `mem`
-    // chain: `old_mem` can be that producer's mem output purely coincidentally (e.g. in a
-    // %%tensor.concat-style op, where an unrelated sibling branch's own mem chain must still observe
-    // it through the ordinary, memoized `rewrite()` path), so skipping past it here can silently
-    // drop its effect for whoever its real mem-successor is. The only cost of not skipping is an
-    // occasional redundant (but still correct) extra lowering of a producer whose mem and chained
-    // data outputs happen to both be read by this same call.
-    auto rewritten_mem      = rewrite(old_mem);
+    auto mem_ty             = w.call<mem::M>(0);
+    auto rewritten_mem      = rewrite(find_root_mem(old_mem, app, use_count_));
     auto rewritten_inputs   = w.tuple(host_is);
     auto rewritten_post_ins = w.tuple(host_post_is);
     auto rewritten_arg      = w.tuple({rewritten_mem, rewritten_inputs, rewritten_post_ins});
