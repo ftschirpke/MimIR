@@ -208,6 +208,16 @@ std::pair<const Def*, const Def*> alloc_output(World& w, const Def* m1, const De
     return w.app(w.app(w.annex<gpu::alloc>(gpu::alloc::block), arr_ty), m1)->projs<2>();
 }
 
+/// `dptr`'s pointee is the *whole* rank-`rank_def` array (`GlobalPtr «Sis[i]; Tis[i]»`, per
+/// `%gpu.buf_alloc_copy`'s result type) -- peel that many array levels to reach the scalar type a
+/// shared-memory tile cell actually holds.
+const Def* scalar_elem_ty(const Def* dptr, const Def* rank_def) {
+    auto ty = Axm::as<mem::Ptr>(dptr->type())->arg(0);
+    for (nat_t i = 0, r = *Lit::isa<nat_t>(rank_def); i != r; ++i)
+        ty = ty->as<Seq>()->body();
+    return ty;
+}
+
 struct Grid {
     nat_t n_groups, n_items, total;
 };
@@ -230,7 +240,7 @@ struct Mapped {
 /// The recognized shape of a 2-input, single-reduction-dim contraction (a GEMM/BMM-style op, of which
 /// `%tensor.dot_product`/`product_2d`/`bmm` are the frontend's only current producers -- but detected
 /// structurally, not by axiom identity, so any future producer of the same shape is picked up too).
-/// The recognized shape of a 2-input, single-reduction-dim contraction, generalized over however many
+/// Generalized over however many
 /// loop positions each input's own (non-reduction) axis was split into: a schedule like
 /// `dot_schedule_kvec` strip-mines the two logical output dims into (block, within-block) pairs
 /// *before* GPU ever sees the op, so a real redvec call typically shows up with `m_positions`/
@@ -268,6 +278,59 @@ std::optional<GemmShape> detect_gemm(const Mapped& ins, nat_t ro, nat_t rr, nat_
         if (!c) return std::nullopt;
 
     return GemmShape{*m_pos, *n_pos};
+}
+
+/// The recognized shape of a 2-input, multi-reduction-dim contraction where one input's own
+/// (non-reduction) axis is a single position (`weight_position` -- e.g. `cout`) and the other's is
+/// one or more positions (`data_positions` -- e.g. `n, oh, ow`), detected the same way `GemmShape` is
+/// (structurally, via `depends_on_axis`) but generalized to `rr >= 2` shared reduction positions (e.g.
+/// `cin, kh, kw`) instead of exactly one. This is convolution's shape (and would match any future op
+/// with the same structure), distinguished from a GEMM/BMM by having more than one reduction position
+/// and an asymmetric (1 vs many) split of the parallel positions -- `conv_schedule` never picks a
+/// reduction-range `vdim` the way `dot_schedule`/`dot_schedule_kvec` do, so unlike `GemmShape` this
+/// isn't gated on `probe_schedule`'s redvec signal at all, only on this structural check.
+struct ConvShape {
+    nat_t weight_idx, data_idx;      ///< which of the two inputs is which
+    nat_t weight_position;           ///< the single loop position (within `[0, ro)`) the weight reads
+    Vector<nat_t> data_positions;    ///< ascending loop positions the data input reads; the *last* one
+                                      ///< is treated as the fastest-varying (coalesced) axis, since a
+                                      ///< schedule only ever strip-mines a *lower*-numbered position,
+                                      ///< inserting new ones without reordering the rest (see `tensor.mim`'s
+                                      ///< `strip_mine_par`/`split_iota`), so the highest original position
+                                      ///< (`ow`) always sorts last regardless of how much splitting happened
+};
+
+std::optional<ConvShape> detect_conv(const Mapped& ins, nat_t ro, nat_t rr, nat_t rn) {
+    if (ins.n() != 2 || rr < 2 || ro < 2) return std::nullopt;
+    for (nat_t i = 0; i != 2; ++i)
+        for (nat_t p = ro; p != ro + rr; ++p)
+            if (!depends_on_axis(ins.accs[i], rn, p)) return std::nullopt;
+
+    auto parallel_positions_of = [&](const Def* acc) {
+        Vector<nat_t> pos;
+        for (nat_t p = 0; p != ro; ++p)
+            if (depends_on_axis(acc, rn, p)) pos.push_back(p);
+        return pos;
+    };
+    auto pos0 = parallel_positions_of(ins.accs[0]);
+    auto pos1 = parallel_positions_of(ins.accs[1]);
+    if (pos0.empty() || pos1.empty()) return std::nullopt;
+
+    Vector<bool> covered(ro, false);
+    for (auto p : pos0) {
+        if (covered[p]) return std::nullopt;
+        covered[p] = true;
+    }
+    for (auto p : pos1) {
+        if (covered[p]) return std::nullopt;
+        covered[p] = true;
+    }
+    for (auto c : covered)
+        if (!c) return std::nullopt;
+
+    if (pos0.size() == 1 && pos1.size() != 1) return ConvShape{0, 1, pos0[0], pos1};
+    if (pos1.size() == 1 && pos0.size() != 1) return ConvShape{1, 0, pos1[0], pos0};
+    return std::nullopt; // ambiguous (both size 1, i.e. rr>=2 GEMM-shaped -- doesn't happen for conv/pool)
 }
 
 /// Builds the kernel: one thread per output point, reducing sequentially over the `rr` reduction dims.
@@ -445,15 +508,6 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto const_ty  = w.annex<gpu::ConstM>();
     auto local_ty  = w.annex<gpu::LocalM>();
 
-    // `ins.dptrs[i]`'s pointee is the *whole* rank-`Ris[i]` array (`GlobalPtr «Sis[i]; Tis[i]»`, per
-    // `%gpu.buf_alloc_copy`'s result type) -- peel that many array levels to reach the scalar type a
-    // shared-memory tile cell actually holds.
-    auto scalar_elem_ty = [&](const Def* dptr, const Def* rank_def) {
-        auto ty = Axm::as<mem::Ptr>(dptr->type())->arg(0);
-        for (nat_t i = 0, r = *Lit::isa<nat_t>(rank_def); i != r; ++i)
-            ty = ty->as<Seq>()->body();
-        return ty;
-    };
     auto elem_ty0       = scalar_elem_ty(ins.dptrs[0], ins.rs[0]);
     auto elem_ty1       = scalar_elem_ty(ins.dptrs[1], ins.rs[1]);
     auto tile_ty        = [&](const Def* elem_ty) { return w.arr(w.lit_nat(tile), w.arr(w.lit_nat(tile), elem_ty)); };
@@ -603,6 +657,238 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto [rm1, v1] = w.call<mem::load>(Defs{rm0, op_lea_tuple(shared1_ptr, w.tuple({par_local1_idx, kk_idx}))})->projs<2>();
 
     apply_cps(w, inner_body, global_comb, {g_in, accval_in, w.tuple({v0, v1})}, inner_yield);
+
+    return {kernel, shared_pack_ty};
+}
+
+/// Cap on `build_kernel_conv_tiled`'s thread-block size (the `ow` extent): a CUDA block is at most 1024
+/// threads.
+constexpr nat_t Conv_Max_Ow = 1024;
+
+/// A shared-memory kernel for a detected convolution-shaped reduction (`ConvShape`): the whole weight
+/// filter for one thread block's `cout` is cooperatively loaded into shared memory once (`filter_total`
+/// elements, `n_items` at a time) and read from there by every thread in the block instead of every
+/// thread re-reading it independently from global memory -- the classic conv reuse opportunity, since
+/// the same filter is read by every output pixel of that `(n, cout, ...)` slice. The data input is
+/// still read through the generic (global-memory) access-map machinery, but threads are laid out so
+/// that `ow` -- the fastest-varying axis by construction, since a schedule only ever strip-mines a
+/// *lower*-numbered position (see `ConvShape::data_positions`) -- maps directly onto the thread index,
+/// so adjacent threads read adjacent (stride-1) addresses: coalesced access without any extra work.
+/// Reuses the same write-back/epilogue shape as `build_kernel`.
+std::pair<Lam*, const Def*> build_kernel_conv_tiled(World& w,
+                             const Def* Ro,
+                             nat_t ro,
+                             nat_t rr,
+                             const Def* Sr,
+                             const Def* So,
+                             const Mapped& ins,
+                             const ConvShape& shape,
+                             const Vector<nat_t>& out_dims,
+                             const Def* To,
+                             const Def* acc_out,
+                             const Def* init,
+                             Lam* global_comb,
+                             const Mapped& post_ins,
+                             Lam* global_post,
+                             const Def* Tp,
+                             const Def* out_dptr) {
+    auto nis = ins.n();
+    auto nps = post_ins.n();
+    auto rn  = ro + rr;
+    auto n   = w.lit_nat(rn);
+
+    auto ow_pos    = shape.data_positions.back();
+    auto ow_extent = out_dims[ow_pos];
+
+    Vector<nat_t> outer_positions{shape.weight_position};
+    for (auto p : shape.data_positions)
+        if (p != ow_pos) outer_positions.push_back(p);
+    std::sort(outer_positions.begin(), outer_positions.end());
+    Vector<nat_t> outer_extents;
+    for (auto p : outer_positions)
+        outer_extents.push_back(out_dims[p]);
+    auto n_groups = std::accumulate(outer_extents.begin(), outer_extents.end(), nat_t{1}, std::multiplies<>{});
+
+    Vector<nat_t> filter_extents(rr);
+    for (nat_t j = 0; j != rr; ++j)
+        filter_extents[j] = *Lit::isa<nat_t>(Sr->proj(rn, ro + j));
+    auto filter_total   = std::accumulate(filter_extents.begin(), filter_extents.end(), nat_t{1}, std::multiplies<>{});
+    auto filter_strides = row_major_strides(filter_extents);
+
+    Grid grid{n_groups, ow_extent, n_groups * ow_extent};
+
+    // The cache is padded up to an exact multiple of the block size so the cooperative load below can
+    // run unconditionally every round instead of needing a per-iteration bounds branch (see there).
+    auto max_load_iters = (filter_total + grid.n_items - 1) / grid.n_items;
+    auto padded_total    = max_load_iters * grid.n_items;
+
+    auto global_ty = w.annex<gpu::GlobalM>();
+    auto shared_ty = w.annex<gpu::SharedM>();
+    auto const_ty  = w.annex<gpu::ConstM>();
+    auto local_ty  = w.annex<gpu::LocalM>();
+
+    auto weight_elem_ty = scalar_elem_ty(ins.dptrs[shape.weight_idx], ins.rs[shape.weight_idx]);
+    auto shared_pack_ty = w.arr(w.lit_nat(padded_total), weight_elem_ty);
+    auto shared_ptr_ty  = w.call<gpu::SharedPtr>(shared_pack_ty);
+
+    DefVec arg_tys(nis + nps + 1);
+    for (size_t i = 0; i != nis; ++i)
+        arg_tys[i] = ins.dptrs[i]->type();
+    for (size_t j = 0; j != nps; ++j)
+        arg_tys[nis + j] = post_ins.dptrs[j]->type();
+    arg_tys[nis + nps] = out_dptr->type();
+
+    auto kernel
+        = w.mut_con(Defs{global_ty, shared_ty, const_ty, local_ty, w.type_idx(grid.n_groups), w.type_idx(grid.n_items),
+                         w.sigma({shared_ptr_ty}), w.sigma(arg_tys), w.cn({global_ty, shared_ty, const_ty, local_ty})})
+              ->set("convTiledKernel");
+    auto [k_global, k_shared, k_const, k_local, group_id, item_id, k_shared_ptrs, k_args, k_ret] = kernel->vars<9>();
+
+    DefVec k_dptrs(nis);
+    for (size_t i = 0; i != nis; ++i)
+        k_dptrs[i] = k_args->proj(nis + nps + 1, i);
+    DefVec k_post_dptrs(nps);
+    for (size_t j = 0; j != nps; ++j)
+        k_post_dptrs[j] = k_args->proj(nis + nps + 1, nis + j);
+    auto k_out_dptr = k_args->proj(nis + nps + 1, nis + nps);
+    auto shared_ptr = k_shared_ptrs->proj(1, 0);
+
+    auto mul_i64 = [&](const Def* a, const Def* b) { return w.call(core::wrap::mul, core::Mode::none, Defs{a, b}); };
+    auto add_i64 = [&](const Def* a, const Def* b) { return w.call(core::wrap::add, core::Mode::none, Defs{a, b}); };
+
+    // --- Entry: decompose (group_id, item_id) into every "outer" position's own coordinate plus `ow`. ---
+    auto entry = w.mut_con(w.sigma(Defs{}))->set("convEntry");
+    kernel->set(true, w.app(entry, w.tuple()));
+
+    auto group_i64           = grid.n_groups == 1 ? w.lit_i64(0) : w.call(core::conv::u, w.lit_nat_0(), group_id);
+    auto item_i64             = grid.n_items == 1 ? w.lit_i64(0) : w.call(core::conv::u, w.lit_nat_0(), item_id);
+    auto [entry_mem, outer_coords] = unflatten_index(w, group_i64, outer_extents, k_global);
+    auto ow_idx               = w.call(core::conv::u, Sr->proj(rn, ow_pos), item_i64);
+
+    DefVec pos_val(ro);
+    for (size_t j = 0; j != outer_positions.size(); ++j)
+        pos_val[outer_positions[j]] = outer_coords[j];
+    pos_val[ow_pos] = ow_idx;
+
+    /// The full `rn`-length loop-vector for reading either input at the given reduction coordinates:
+    /// `pos_val` (fixed for the whole kernel invocation) covers every parallel position, and the
+    /// caller-supplied `reduction_vals` cover the trailing `rr` reduction positions.
+    auto build_full_iters = [&](const DefVec& reduction_vals) {
+        DefVec iv(rn);
+        for (nat_t p = 0; p != ro; ++p)
+            iv[p] = pos_val[p];
+        for (nat_t j = 0; j != rr; ++j)
+            iv[ro + j] = reduction_vals[j];
+        return w.tuple(iv);
+    };
+
+    // --- Write-back (reused verbatim in shape from `build_kernel`): shared memory is only written
+    // during the cooperative load below, so no updated token needs to flow back out here. ---
+    auto write_back          = w.mut_con(Defs{global_ty, To})->set("convWriteBack");
+    auto [wb_mem, acc_final] = write_back->vars<2>();
+    DefVec wb_idx(rn);
+    for (nat_t p = 0; p != ro; ++p)
+        wb_idx[p] = pos_val[p];
+    for (nat_t j = 0; j != rr; ++j)
+        wb_idx[ro + j] = w.call(core::conv::u, Sr->proj(rn, ro + j), w.lit_i64(0));
+    auto [wc_mem, write_coords] = affine_map(acc_out, Ro, n, Sr, So, w.tuple(wb_idx), wb_mem);
+
+    auto pcur = wc_mem;
+    DefVec post_elems(nps);
+    for (size_t j = 0; j != nps; ++j) {
+        auto [pc_mem, pcoords]
+            = affine_map(post_ins.accs[j], post_ins.rs[j], Ro, So, post_ins.ss[j], write_coords, pcur);
+        pcur = pc_mem;
+        auto [rd_mem, rd_val]
+            = w.call<mem::load>(Defs{pcur, op_lea_tuple(k_post_dptrs[j], fold_index(post_ins.ss[j], pcoords))})
+                  ->projs<2>();
+        pcur          = rd_mem;
+        post_elems[j] = rd_val;
+    }
+
+    auto after_post             = w.mut_con(Defs{global_ty, Tp})->set("convAfterPost");
+    auto [post_mem, elem_post]  = after_post->vars<2>();
+    auto final_mem
+        = w.call<mem::store>(Defs{post_mem, op_lea_tuple(k_out_dptr, fold_index(So, write_coords)), elem_post});
+    after_post->app(true, k_ret, Defs{final_mem, k_shared, k_const, k_local});
+    apply_cps(w, write_back, global_post, {pcur, acc_final, w.tuple(post_elems)}, after_post);
+
+    // --- Cooperative weight-filter load: `max_load_iters` rounds of `n_items` threads each loading
+    // one element, unconditionally (see `padded_total` above) -- an out-of-range round's flat index
+    // still wraps into a valid (if redundant) weight coordinate via `unflatten_index`'s modular
+    // arithmetic, and lands in a cache slot >= `filter_total` that is never read back below.
+    //
+    // Uses `%affine.For`/`counting_for` (unlike a hand-rolled self-recursive mutable, which turned out
+    // to send `World::app` into unbounded eager expansion), but with only *one* `%mem.M`-typed
+    // component in the accumulator: `%affine.lower_for`'s rewrite (see
+    // `affine::phase::LowerFor::rewrite_imm_App`) collapses every phi whose type is *any* `%mem.M`
+    // address space onto one shared "bb mem" var, so a `[GlobalM, SharedM]` accumulator silently
+    // merges the two (observed as `sync_work_items` receiving `«2; GlobalM»` instead of
+    // `[GlobalM, SharedM]`). Side-stepped by never threading a per-iteration GlobalM at all: every
+    // round's weight read uses the same fixed `entry_mem` (safe -- unlike the shared-memory *write*
+    // below, a read's own "after" token needs no downstream use for the read itself to stay live).
+    auto after_load          = w.mut_con(shared_ty)->set("convAfterLoad");
+    auto load_init            = k_shared;
+    auto [load_body, load_for_call]
+        = counting_for(w.lit_i64(max_load_iters), load_init, after_load, w.sym("convWeightLoad"));
+    entry->set(true, load_for_call);
+    auto [load_iter, load_shared, load_yield] = load_body->vars<3>();
+
+    auto load_flat_i64        = add_i64(mul_i64(load_iter, w.lit_i64(grid.n_items)), item_i64);
+    auto [fm, filter_coords]  = unflatten_index(w, load_flat_i64, filter_extents, entry_mem);
+    auto weight_iters         = build_full_iters(filter_coords);
+    auto [wg, wcoords]        = affine_map(ins.accs[shape.weight_idx], ins.rs[shape.weight_idx], n, Sr,
+                                           ins.ss[shape.weight_idx], weight_iters, fm);
+    auto [rd_mem_, rd_val]    = w.call<mem::load>(
+                                Defs{wg, op_lea_tuple(k_dptrs[shape.weight_idx], fold_index(ins.ss[shape.weight_idx], wcoords))})
+                                ->projs<2>();
+    auto load_flat_idx = w.call(core::conv::u, w.lit_nat(padded_total), load_flat_i64);
+    auto stored        = w.call<mem::store>(Defs{load_shared, mem::op_lea_unsafe(shared_ptr, load_flat_idx), rd_val});
+    load_body->app(true, load_yield, stored);
+
+    auto reduction_entry        = w.mut_con(w.sigma(Defs{}))->set("convReductionEntry");
+    auto [bar_mem, bar_shared] = w.app(w.annex<gpu::sync_work_items>(), Defs{entry_mem, after_load->var()})->projs<2>();
+    after_load->set(true, w.app(reduction_entry, w.tuple()));
+
+    // --- Per-thread reduction over the `rr` window dims: data comes from global memory (generic,
+    // coalesced by construction), weight from the shared cache filled above. ---
+    const Def* acc    = w.tuple({bar_mem, init});
+    const Def* cont    = write_back;
+    Lam* current_mut  = reduction_entry;
+    DefVec red_idx, red_i64;
+    red_idx.reserve(rr);
+    red_i64.reserve(rr);
+    for (nat_t j = 0; j != rr; ++j) {
+        auto dim                    = Sr->proj(rn, ro + j);
+        auto bound                  = w.call<core::bitcast>(w.type_i64(), dim);
+        auto [rbody, for_call]      = counting_for(bound, acc, cont, w.sym("convRed_" + std::to_string(j)));
+        auto [iter, new_acc, yield] = rbody->vars<3>();
+        cont                        = yield;
+        red_idx.push_back(w.call(core::conv::u, dim, iter));
+        red_i64.push_back(iter);
+        acc         = new_acc;
+        current_mut->set(true, for_call);
+        current_mut = rbody;
+    }
+    auto [red_mem, elem_acc] = acc->projs<2>();
+
+    auto data_iters     = build_full_iters(red_idx);
+    auto [dg, dcoords]  = affine_map(ins.accs[shape.data_idx], ins.rs[shape.data_idx], n, Sr, ins.ss[shape.data_idx],
+                                     data_iters, red_mem);
+    auto [dm, dval]     = w.call<mem::load>(
+                            Defs{dg, op_lea_tuple(k_dptrs[shape.data_idx], fold_index(ins.ss[shape.data_idx], dcoords))})
+                            ->projs<2>();
+
+    const Def* wflat = w.lit_i64(0);
+    for (nat_t j = 0; j != rr; ++j)
+        wflat = add_i64(wflat, mul_i64(red_i64[j], w.lit_i64(filter_strides[j])));
+    auto wflat_idx      = w.call(core::conv::u, w.lit_nat(filter_total), wflat);
+    auto [wm, wval]     = w.call<mem::load>(Defs{bar_shared, mem::op_lea_unsafe(shared_ptr, wflat_idx)})->projs<2>();
+
+    DefVec input_elems(2);
+    input_elems[shape.data_idx]   = dval;
+    input_elems[shape.weight_idx] = wval;
+    apply_cps(w, current_mut, global_comb, {dm, elem_acc, w.tuple(input_elems)}, cont);
 
     return {kernel, shared_pack_ty};
 }
@@ -892,6 +1178,27 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
                                               init, global_comb, mapped_post, global_post, Tp, out_dptr);
                 launch_groups = (m_total / Gemm_Tile) * (n_total / Gemm_Tile);
                 launch_items  = Gemm_Tile * Gemm_Tile;
+            }
+        }
+    }
+    // Convolution never picks a reduction-range `vdim` (unlike GEMM's `dot_schedule_kvec`), so this
+    // path isn't gated on `is_redvec` -- `detect_conv`'s own structural check (2 inputs, >=2 shared
+    // reduction positions, a 1-vs-many parallel split) is the only signal it needs.
+    if (!kernel) {
+        if (auto shape = detect_conv(mapped_ins, ro, rr, ro + rr)) {
+            auto ow_extent = out_dims[shape->data_positions.back()];
+            if (ow_extent <= Conv_Max_Ow) {
+                std::tie(kernel, shared_pack_ty) = build_kernel_conv_tiled(
+                    w, Ro, ro, rr, Sr, So, mapped_ins, *shape, out_dims, To, acc_out, init, global_comb, mapped_post,
+                    global_post, Tp, out_dptr);
+                Vector<nat_t> outer_positions{shape->weight_position};
+                for (auto p : shape->data_positions)
+                    if (p != shape->data_positions.back()) outer_positions.push_back(p);
+                nat_t n_groups = 1;
+                for (auto p : outer_positions)
+                    n_groups *= out_dims[p];
+                launch_groups = n_groups;
+                launch_items  = ow_extent;
             }
         }
     }
