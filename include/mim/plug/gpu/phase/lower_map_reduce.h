@@ -17,10 +17,14 @@ public:
 
 private:
     /// What to build once a (sub-)call's kernel launch has produced its device output: given the
-    /// post-launch `[mem, GlobalM, ConstM]` and the device pointer to that call's result, returns
-    /// the Def the launch's continuation should reduce to.
+    /// post-launch `[mem, GlobalM, ConstM]`, the device pointer to that call's result, and that
+    /// call's own rank/shape (`ro`/`So`, i.e. its *actual* output layout -- which a consumer must
+    /// index by instead of trusting its own declared `Ris`/`Sis` for that slot to match, since a
+    /// schedule can pack a producer's output differently than a fresh host allocation of the same
+    /// logical tensor would be shaped), returns the Def the launch's continuation should reduce to.
     using DeviceCont = std::function<const Def*(const Def* mem, const Def* global, const Def* const_tok,
-                                                 const Def* out_dptr)>;
+                                                 const Def* out_dptr, const Def* producer_ro,
+                                                 const Def* producer_So)>;
 
     /// Skips the whole phase if the program already contains an explicit `%gpu.init`.
     // TODO: consider different solution to %gpu.init vs %gpu.auto_init problem

@@ -1202,8 +1202,17 @@ std::optional<const Def*> LowerMapReduce::lower_map_reduce_chained(const App* ap
             if (auto producer = chainable_producer(old_j, use_count_)) {
                 auto sub = lower_map_reduce_chained(
                     producer, mem, global, const_tok, to_free,
-                    [&, j](const Def* m2, const Def* g2, const Def* c2, const Def* out) -> const Def* {
+                    [&, j](const Def* m2, const Def* g2, const Def* c2, const Def* out, const Def* p_ro,
+                           const Def* p_So) -> const Def* {
                         post_dptrs[j] = out;
+                        // A schedule can pack a producer's output differently than a fresh host
+                        // allocation of the same logical tensor would be shaped -- index by its
+                        // *actual* shape, not this slot's declared (and now stale) `Sps`. Only when
+                        // the rank agrees: a rank mismatch means `post_accs[j]` itself already
+                        // reshapes between the producer's coordinate space and its own declared
+                        // `Rps[j]`-dimensional one, and `Sps[j]` is what that reshaped output
+                        // actually indexes into.
+                        if (Lit::isa<nat_t>(p_ro) == Lit::isa<nat_t>(post_desc.rs[j])) post_desc.ss[j] = p_So;
                         to_free.push_back(out);
                         return self(j + 1, m2, g2, c2);
                     });
@@ -1330,7 +1339,7 @@ std::optional<const Def*> LowerMapReduce::lower_map_reduce_chained(const App* ap
         auto mem_ty    = w.call<mem::M>(0);
         auto after_launch                  = w.mut_con(Defs{mem_ty, global_ty, const_ty})->set("afterLaunch");
         auto [al_mem, al_global, al_const] = after_launch->vars<3>();
-        after_launch->set(true, cont(al_mem, al_global, al_const, out_dptr));
+        after_launch->set(true, cont(al_mem, al_global, al_const, out_dptr, w.lit_nat(ro), So));
 
         return w.app(launch, Defs{w.tuple({mem, global, const_tok}), after_launch});
     };
@@ -1343,8 +1352,16 @@ std::optional<const Def*> LowerMapReduce::lower_map_reduce_chained(const App* ap
         if (auto producer = chainable_producer(old_i, use_count_)) {
             auto sub = lower_map_reduce_chained(
                 producer, mem, global, const_tok, to_free,
-                [&, i](const Def* m2, const Def* g2, const Def* c2, const Def* out) -> const Def* {
+                [&, i](const Def* m2, const Def* g2, const Def* c2, const Def* out, const Def* p_ro,
+                       const Def* p_So) -> const Def* {
                     input_dptrs[i] = out;
+                    // A schedule can pack a producer's output differently than a fresh host
+                    // allocation of the same logical tensor would be shaped -- index by its
+                    // *actual* shape, not this slot's declared (and now stale) `Sis`. Only when the
+                    // rank agrees: a rank mismatch means `accs[i]` itself already reshapes between
+                    // the producer's coordinate space and its own declared `Ris[i]`-dimensional one,
+                    // and `Sis[i]` is what that reshaped output actually indexes into.
+                    if (Lit::isa<nat_t>(p_ro) == Lit::isa<nat_t>(in_desc.rs[i])) in_desc.ss[i] = p_So;
                     to_free.push_back(out);
                     return self(i + 1, m2, g2, c2);
                 });
@@ -1446,8 +1463,8 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     auto [h_mem, h_global, h_const] = w.app(w.annex<gpu::auto_init>(), fun_mem)->projs<3>();
 
     DefVec to_free;
-    auto top_cont = [&](const Def* mem, const Def* global, const Def* const_tok,
-                       const Def* out_dptr) -> const Def* {
+    auto top_cont = [&](const Def* mem, const Def* global, const Def* const_tok, const Def* out_dptr,
+                       const Def*, const Def*) -> const Def* {
         return build_teardown(w, Ro, So, Tp, mem, global, const_tok, to_free, out_dptr, cont);
     };
 
