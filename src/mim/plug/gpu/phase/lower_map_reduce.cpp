@@ -31,6 +31,46 @@ bool contains_gpu_init(const Def* def, DefSet& seen) {
     return false;
 }
 
+/// Counts, for every Def reachable from `def`, how many times it appears as an operand of some
+/// other reachable Def -- lets `chainable_producer` tell whether a `%btensor.map_reduce_post`
+/// result is consumed only by the one call chaining into it (safe to keep device-resident) or also
+/// needed elsewhere (must go through the usual host round-trip).
+void count_uses(const Def* def, DefMap<nat_t>& uses, DefSet& seen) {
+    if (auto [_, ins] = seen.emplace(def); !ins) return;
+    for (auto d : def->deps()) {
+        ++uses[d];
+        count_uses(d, uses, seen);
+    }
+}
+
+/// If `d` is exactly the `%buffer.Buf` result of a `%btensor.map_reduce_post` application used
+/// nowhere else, returns that application so its output can be chained device-resident into the
+/// call reading `d` instead of round-tripping through host memory.
+const App* chainable_producer(const Def* d, const DefMap<nat_t>& uses) {
+    auto it = uses.find(d);
+    if (it == uses.end() || it->second != 1) return nullptr;
+    auto ex = d->isa<Extract>();
+    if (!ex) return nullptr;
+    auto app = ex->tuple()->isa<App>();
+    if (!app || !Axm::isa<btensor::map_reduce_post>(app)) return nullptr;
+    return app;
+}
+
+/// Walks a call's `mem` input back through any `%btensor.map_reduce_post` producer that
+/// `chainable_producer` would ALSO chain in via its buffer result, all the way to the genuine
+/// predecessor outside the chain. Needed because that producer is getting absorbed into the
+/// consumer's own body rather than materialized as a separate call: calling the generic `rewrite()`
+/// on its `mem` output (as if it were an ordinary boundary value) would independently trigger its
+/// *other*, host-round-tripping lowering too, duplicating the whole call.
+const Def* find_root_mem(const Def* mem_def, const DefMap<nat_t>& uses) {
+    auto ex = mem_def->isa<Extract>();
+    if (!ex) return mem_def;
+    auto app = ex->tuple()->isa<App>();
+    if (!app || !Axm::isa<btensor::map_reduce_post>(app)) return mem_def;
+    if (!chainable_producer(app->proj(2, 1), uses)) return mem_def;
+    return find_root_mem(app->arg()->proj(3, 0), uses);
+}
+
 /// Recovers the frontend's `(vdim, unroll)` schedule choice by applying `sched` to `%gpu.sched_probe`
 /// instead of binding it to a nest, so the decision `%tensor.dot_product_impl` already made can be
 /// read rather than rediscovered from the op's operands.
@@ -182,25 +222,6 @@ InputDesc extract_input_desc(nat_t n, const Def* Rs, const Def* Ss, const Def* T
     return desc;
 }
 
-struct Inputs {
-    const Def* mem;
-    const Def* global;
-    DefVec dptrs;
-};
-
-Inputs alloc_copy_inputs(World& w, const Def* m0, const Def* m1, Defs ris, Defs sis, Defs tis, const Def* inputs) {
-    DefVec dptrs(ris.size());
-    for (size_t i = 0; i != ris.size(); ++i) {
-        auto alloc_copy    = w.app(w.app(w.annex<gpu::buf_alloc_copy>(), {ris[i], sis[i], tis[i]}),
-                                   {m0, m1, inputs->proj(ris.size(), i)});
-        auto [m2, g2, ptr] = alloc_copy->projs<3>();
-        m0                 = m2;
-        m1                 = g2;
-        dptrs[i]           = ptr;
-    }
-    return {m0, m1, dptrs};
-}
-
 std::pair<const Def*, const Def*> alloc_output(World& w, const Def* m1, const Def* elem_ty, const Def* So, nat_t ro) {
     auto arr_ty = elem_ty;
     for (auto d = ro; d-- != 0;)
@@ -234,7 +255,7 @@ Grid grid_layout(const Vector<nat_t>& out_dims) {
     return {n_groups, n_items, total};
 }
 
-/// Per-input state for `build_kernel`: `InputDesc`'s shapes/access-functions plus `alloc_copy_inputs`'s pointers.
+/// Per-input state for `build_kernel`: `InputDesc`'s shapes/access-functions plus each input's resolved device pointer.
 struct Mapped {
     DefVec rs, ss, dptrs, accs;
     nat_t n() const { return dptrs.size(); }
@@ -1051,36 +1072,31 @@ std::pair<Lam*, const Def*> build_kernel_reduction(World& w,
     return {kernel, shared_pack_ty};
 }
 
-Lam* build_teardown(World& w,
-                    const Def* Ro,
-                    const Def* So,
-                    const Def* Tp,
-                    Defs dptrs,
-                    Defs post_dptrs,
-                    const Def* out_dptr,
-                    const Def* cont) {
-    auto global_ty = w.annex<gpu::GlobalM>();
-    auto const_ty  = w.annex<gpu::ConstM>();
-    auto mem_ty    = w.call<mem::M>(0);
-
-    auto after_launch                        = w.mut_con(Defs{mem_ty, global_ty, const_ty})->set("afterLaunch");
-    auto [post_mem, post_global, post_const] = after_launch->vars<3>();
-
-    auto [alloc_mem, host_buf] = buffer::op_alloc(Ro, So, Tp, post_mem)->projs<2>();
+/// Materializes `out_dptr` to a fresh host buffer, frees every device pointer this call (and
+/// whatever it chained into) allocated, closes the session, and hands the result to `cont` (the
+/// enclosing function's own return continuation).
+const Def* build_teardown(World& w,
+                          const Def* Ro,
+                          const Def* So,
+                          const Def* Tp,
+                          const Def* mem,
+                          const Def* global,
+                          const Def* const_tok,
+                          const DefVec& to_free,
+                          const Def* out_dptr,
+                          const Def* cont) {
+    auto [alloc_mem, host_buf] = buffer::op_alloc(Ro, So, Tp, mem)->projs<2>();
     auto copy_back
-        = w.app(w.app(w.annex<gpu::buf_copy_to_host>(), {Ro, So, Tp}), {alloc_mem, post_global, out_dptr, host_buf});
+        = w.app(w.app(w.annex<gpu::buf_copy_to_host>(), {Ro, So, Tp}), {alloc_mem, global, out_dptr, host_buf});
     auto [cb_mem, cb_global] = copy_back->projs<2>();
 
     auto cur_global = cb_global;
-    for (auto dptr : dptrs)
-        cur_global = w.call(gpu::free::block, Defs{cur_global, dptr});
-    for (auto dptr : post_dptrs)
+    for (auto dptr : to_free)
         cur_global = w.call(gpu::free::block, Defs{cur_global, dptr});
     cur_global = w.call(gpu::free::block, Defs{cur_global, out_dptr});
 
-    auto final_mem = w.app(w.annex<gpu::auto_deinit>(), Defs{cb_mem, cur_global, post_const});
-    after_launch->app(true, cont, Defs{final_mem, host_buf});
-    return after_launch;
+    auto final_mem = w.app(w.annex<gpu::auto_deinit>(), Defs{cb_mem, cur_global, const_tok});
+    return w.app(cont, Defs{final_mem, host_buf});
 }
 
 } // namespace
@@ -1093,12 +1109,255 @@ void LowerMapReduce::start() {
         log().w("not lowering any map-reduce operations to GPU: the program already contains an explicit `%gpu.init`");
         return;
     }
+
+    DefSet use_seen;
+    for (auto def : old_world().roots())
+        count_uses(def, use_count_, use_seen);
+
     Super::start();
 }
 
 const Def* LowerMapReduce::rewrite_imm_App(const App* app) {
     if (Axm::isa<btensor::map_reduce_post>(app)) return lower_map_reduce_post(app);
     return Super::rewrite_imm_App(app);
+}
+
+/// Destructures `app` (the same axiom-arg unpacking `lower_map_reduce_post` does) and builds
+/// everything from input resolution through the kernel launch, sharing `mem`/`global`/`const_tok`
+/// with whatever already-open session the caller is in -- either the top-level call's own fresh
+/// `%%gpu.auto_init` session, or a consumer chaining this app's output in device-resident.
+///
+/// Each primary/post input is resolved by `resolve_is`: if the OLD (pre-rewrite) value at that
+/// position is itself a `%btensor.map_reduce_post` application used nowhere else
+/// (`chainable_producer`), this recurses into `lower_map_reduce_chained` for it instead of the
+/// generic `rewrite()` path, so its result never leaves the device -- the recursive call's own
+/// launch gets threaded in as "what happens before the rest of resolving *this* app's inputs" via
+/// `cont`. A non-chainable input falls back to the ordinary alloc + host-to-device copy.
+///
+/// `resolved_is`/`resolved_post_is`, when given, override a non-chained slot's resolved value with
+/// the caller's own already-rewritten Def (used by the top-level call so a genuinely host-resident
+/// input flows through `fun`'s real formal parameter, matching `%%cps.cps2ds_dep`'s calling
+/// convention, rather than a second, redundant free-variable reference to the same rewritten Def).
+///
+/// Returns `std::nullopt` if `app` itself doesn't have lowering-time known metadata (mirrors
+/// `lower_map_reduce_post`'s own early bail-outs) -- only possible when called recursively for a
+/// chained producer, in which case the caller falls back to treating that input as non-chained.
+std::optional<const Def*> LowerMapReduce::lower_map_reduce_chained(const App* app, const Def* mem,
+                                                                    const Def* global, const Def* const_tok,
+                                                                    DefVec& to_free, const DeviceCont& cont,
+                                                                    const DefVec* resolved_is,
+                                                                    const DefVec* resolved_post_is) {
+    auto& w = new_world();
+    auto c  = rewrite(app->callee())->as<App>();
+
+    auto [nis_nps, meta, shapes, in_tys, comb_init, acc_out, accs_all] = c->uncurry_args<7>();
+    auto [nis, nps]                     = nis_nps->projs<2>([](auto d) { return Lit::isa(d); });
+    auto [To, Tp, Ro, Rn, sched_ty]     = meta->projs<5>();
+    auto [So, Sr, sched]                = shapes->projs<3>();
+    auto [Tis, Ris, Sis, Tps, Rps, Sps] = in_tys->projs<6>();
+    auto [comb, init, post]             = comb_init->projs<3>();
+    auto [accs, post_accs]              = accs_all->projs<2>();
+
+    auto ro_l = Lit::isa<nat_t>(Ro);
+    auto rn_l = Lit::isa<nat_t>(Rn);
+    if (!nis || !nps || !ro_l || !rn_l || *rn_l < *ro_l) return std::nullopt;
+    auto nis_n = *nis;
+    auto nps_n = *nps;
+    auto ro    = *ro_l;
+    auto rr    = *rn_l - *ro_l;
+
+    Vector<nat_t> out_dims(ro);
+    nat_t out_total = 1;
+    for (nat_t d = 0; d != ro; ++d) {
+        auto l = Lit::isa<nat_t>(Sr->proj(ro + rr, d));
+        if (!l) return std::nullopt;
+        out_dims[d] = *l;
+        out_total *= *l;
+    }
+    if (out_total == 0) return std::nullopt;
+
+    auto comb_lam = comb->isa_mut<Lam>();
+    auto post_lam = post->isa_mut<Lam>();
+    if (!comb_lam || !post_lam) return std::nullopt;
+
+    auto in_desc   = extract_input_desc(nis_n, Ris, Sis, Tis, accs);
+    auto post_desc = extract_input_desc(nps_n, Rps, Sps, Tps, post_accs);
+
+    auto [old_mem, old_is, old_post_is] = app->arg()->projs<3>();
+
+    DefVec input_dptrs(nis_n), post_dptrs(nps_n);
+
+    auto alloc_one = [&](const Def* mem, const Def* global, const Def* r, const Def* s, const Def* t,
+                        const Def* host_val) {
+        auto alloc_copy = w.app(w.app(w.annex<gpu::buf_alloc_copy>(), {r, s, t}), {mem, global, host_val});
+        return alloc_copy->projs<3>();
+    };
+
+    // Resolves post_dptrs[j..nps_n), then builds and launches this app's own kernel, then hands the
+    // result to `cont`. Defined before `resolve_in` since `resolve_in`'s base case starts it.
+    auto resolve_post = [&](this auto&& self, nat_t j, const Def* mem, const Def* global,
+                            const Def* const_tok) -> const Def* {
+        if (j != nps_n) {
+            auto old_j = old_post_is->proj(nps_n, j);
+            if (auto producer = chainable_producer(old_j, use_count_)) {
+                auto sub = lower_map_reduce_chained(
+                    producer, mem, global, const_tok, to_free,
+                    [&, j](const Def* m2, const Def* g2, const Def* c2, const Def* out) -> const Def* {
+                        post_dptrs[j] = out;
+                        to_free.push_back(out);
+                        return self(j + 1, m2, g2, c2);
+                    });
+                if (sub) return *sub;
+                // `producer`'s own metadata wasn't lowering-time known after all -- fall back below.
+            }
+            auto host_val = resolved_post_is ? (*resolved_post_is)[j] : rewrite(old_j);
+            auto [m2, g2, ptr] = alloc_one(mem, global, post_desc.rs[j], post_desc.ss[j], post_desc.ts[j], host_val);
+            post_dptrs[j] = ptr;
+            to_free.push_back(ptr);
+            return self(j + 1, m2, g2, const_tok);
+        }
+
+        auto [out_global, out_dptr] = alloc_output(w, global, Tp, So, ro);
+        global                       = out_global;
+
+        auto global_comb = rebuild_lam_global_mem(comb_lam, To, w.sym("combGlobal"));
+        auto global_post = rebuild_lam_global_mem(post_lam, Tp, w.sym("postGlobal"));
+
+        Mapped mapped_ins{in_desc.rs, in_desc.ss, input_dptrs, in_desc.accs};
+        Mapped mapped_post{post_desc.rs, post_desc.ss, post_dptrs, post_desc.accs};
+
+        // `sched` names the schedule `%tensor.dot_product_impl` already picked for this op (see
+        // `probe_schedule`): `vdim` in the reduction range means it chose the reduction-vectorized
+        // nest, i.e. a genuine contraction along that axis -- exactly the structure a specialized
+        // kernel below wants, read off rather than rediscovered from the op's operands.
+        auto sched_vu  = probe_schedule(sched);
+        bool is_redvec = sched_vu && sched_vu->first >= ro && sched_vu->first < ro + rr;
+
+        Lam* kernel               = nullptr;
+        const Def* shared_pack_ty = nullptr;
+        nat_t launch_groups = 0, launch_items = 0;
+
+        if (is_redvec && ro == 0 && nps_n == 0 && rr >= 1) {
+            nat_t total_k = 1;
+            for (nat_t d = 0; d != rr; ++d)
+                total_k *= *Lit::isa<nat_t>(Sr->proj(ro + rr, d));
+            if (is_pow2(total_k) && total_k <= 1024) {
+                std::tie(kernel, shared_pack_ty)
+                    = build_kernel_reduction(w, Sr, rr, mapped_ins, To, global_comb, init, out_dptr, total_k);
+                launch_groups = 1;
+                launch_items  = total_k;
+            }
+        }
+        // `build_kernel_gemm_tiled` flattens the whole reduction group into one GEMM "K" and tiles
+        // it; for `rr > 1` (convolution's shape) that flattening measured slower than caching the
+        // whole filter once (`detect_conv`/`build_kernel_conv_tiled` below), so restrict this path
+        // to true single-axis GEMM/BMM shapes.
+        if (!kernel && rr == 1) {
+            if (auto shape = detect_gemm(mapped_ins, ro, rr, ro + rr)) {
+                Vector<nat_t> k_extents;
+                for (nat_t j2 = 0; j2 != rr; ++j2)
+                    k_extents.push_back(*Lit::isa<nat_t>(Sr->proj(ro + rr, ro + j2)));
+                auto dimk = std::accumulate(k_extents.begin(), k_extents.end(), nat_t{1}, std::multiplies<>{});
+                Vector<nat_t> m_extents, n_extents;
+                for (auto p : shape->m_positions)
+                    m_extents.push_back(out_dims[p]);
+                for (auto p : shape->n_positions)
+                    n_extents.push_back(out_dims[p]);
+                auto m_total = std::accumulate(m_extents.begin(), m_extents.end(), nat_t{1}, std::multiplies<>{});
+                auto n_total = std::accumulate(n_extents.begin(), n_extents.end(), nat_t{1}, std::multiplies<>{});
+                if (m_total % Gemm_Tile == 0 && n_total % Gemm_Tile == 0 && dimk % Gemm_Tile == 0) {
+                    std::tie(kernel, shared_pack_ty) = build_kernel_gemm_tiled(
+                        w, Ro, ro, rr, Sr, So, mapped_ins, *shape, m_extents, n_extents, To, acc_out, init,
+                        global_comb, mapped_post, global_post, Tp, out_dptr);
+                    launch_groups = (m_total / Gemm_Tile) * (n_total / Gemm_Tile);
+                    launch_items  = Gemm_Tile * Gemm_Tile;
+                }
+            }
+        }
+        // Falls back further to a conv-specific kernel (weight cached whole, no K-tiling) for
+        // shapes the tiled-GEMM path above declines -- chiefly a reduction extent that isn't a
+        // multiple of `Gemm_Tile` (e.g. VGG16's first layer, `cin = 3`, filter 27).
+        if (!kernel) {
+            if (auto shape = detect_conv(mapped_ins, ro, rr, ro + rr)) {
+                auto ow_extent      = out_dims[shape->data_positions.back()];
+                nat_t filter_total = 1;
+                for (nat_t j2 = 0; j2 != rr; ++j2)
+                    filter_total *= *Lit::isa<nat_t>(Sr->proj(ro + rr, ro + j2));
+                auto max_load_iters = ow_extent == 0 ? 0 : (filter_total + ow_extent - 1) / ow_extent;
+                if (ow_extent <= Conv_Max_Ow && max_load_iters <= Conv_Max_Load_Iters) {
+                    std::tie(kernel, shared_pack_ty) = build_kernel_conv_tiled(
+                        w, Ro, ro, rr, Sr, So, mapped_ins, *shape, out_dims, To, acc_out, init, global_comb,
+                        mapped_post, global_post, Tp, out_dptr);
+                    Vector<nat_t> outer_positions{shape->weight_position};
+                    for (auto p : shape->data_positions)
+                        if (p != shape->data_positions.back()) outer_positions.push_back(p);
+                    nat_t n_groups = 1;
+                    for (auto p : outer_positions)
+                        n_groups *= out_dims[p];
+                    launch_groups = n_groups;
+                    launch_items  = ow_extent;
+                }
+            }
+        }
+        if (!kernel) {
+            auto grid = grid_layout(out_dims);
+            kernel = build_kernel(w, Ro, rr, out_dims, Sr, So, mapped_ins, To, acc_out, init, global_comb,
+                                  mapped_post, global_post, Tp, out_dptr, grid);
+            launch_groups = grid.n_groups;
+            launch_items  = grid.n_items;
+        }
+
+        DefVec kernel_arg_tys(nis_n + nps_n + 1);
+        for (nat_t i2 = 0; i2 != nis_n; ++i2)
+            kernel_arg_tys[i2] = input_dptrs[i2]->type();
+        for (nat_t j2 = 0; j2 != nps_n; ++j2)
+            kernel_arg_tys[nis_n + j2] = post_dptrs[j2]->type();
+        kernel_arg_tys[nis_n + nps_n] = out_dptr->type();
+
+        auto launch = w.app(w.annex<gpu::launch>(), Defs{w.lit_nat(nis_n + nps_n + 1), w.tuple(kernel_arg_tys)});
+        launch      = w.app(launch, Defs{w.lit_nat(launch_groups), w.lit_nat(launch_items),
+                                         w.annex<gpu::default_stream>(), shared_pack_ty ? w.lit_tt() : w.lit_ff(),
+                                         shared_pack_ty ? w.tuple({shared_pack_ty}) : w.tuple()});
+        launch      = w.app(launch, kernel);
+
+        DefVec kernel_args = input_dptrs;
+        kernel_args.insert(kernel_args.end(), post_dptrs.begin(), post_dptrs.end());
+        kernel_args.push_back(out_dptr);
+        launch = w.app(launch, kernel_args);
+
+        auto global_ty = w.annex<gpu::GlobalM>();
+        auto const_ty  = w.annex<gpu::ConstM>();
+        auto mem_ty    = w.call<mem::M>(0);
+        auto after_launch                  = w.mut_con(Defs{mem_ty, global_ty, const_ty})->set("afterLaunch");
+        auto [al_mem, al_global, al_const] = after_launch->vars<3>();
+        after_launch->set(true, cont(al_mem, al_global, al_const, out_dptr));
+
+        return w.app(launch, Defs{w.tuple({mem, global, const_tok}), after_launch});
+    };
+
+    // Resolves input_dptrs[i..nis_n), continuing into resolve_post once done.
+    auto resolve_in = [&](this auto&& self, nat_t i, const Def* mem, const Def* global,
+                          const Def* const_tok) -> const Def* {
+        if (i == nis_n) return resolve_post(0, mem, global, const_tok);
+        auto old_i = old_is->proj(nis_n, i);
+        if (auto producer = chainable_producer(old_i, use_count_)) {
+            auto sub = lower_map_reduce_chained(
+                producer, mem, global, const_tok, to_free,
+                [&, i](const Def* m2, const Def* g2, const Def* c2, const Def* out) -> const Def* {
+                    input_dptrs[i] = out;
+                    to_free.push_back(out);
+                    return self(i + 1, m2, g2, c2);
+                });
+            if (sub) return *sub;
+        }
+        auto host_val       = resolved_is ? (*resolved_is)[i] : rewrite(old_i);
+        auto [m2, g2, ptr] = alloc_one(mem, global, in_desc.rs[i], in_desc.ss[i], in_desc.ts[i], host_val);
+        input_dptrs[i] = ptr;
+        to_free.push_back(ptr);
+        return self(i + 1, m2, g2, const_tok);
+    };
+
+    return resolve_in(0, mem, global, const_tok);
 }
 
 const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
@@ -1127,7 +1386,6 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
     auto ro    = *ro_l;
     auto rr    = *rn_l - *ro_l;
 
-    Vector<nat_t> out_dims(ro);
     nat_t out_total = 1;
     for (nat_t d = 0; d != ro; ++d) {
         auto l = Lit::isa<nat_t>(Sr->proj(ro + rr, d));
@@ -1135,7 +1393,6 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
             log().w("{} doesn't have a lowering-time known output (grid) shape", app);
             return Super::rewrite_imm_App(app);
         }
-        out_dims[d] = *l;
         out_total *= *l;
     }
     if (out_total == 0) {
@@ -1150,134 +1407,59 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
         return Super::rewrite_imm_App(app);
     }
 
-    auto mem_ty                                    = w.call<mem::M>(0);
-    auto rewritten_arg                             = rewrite(app->arg());
-    auto [_, rewritten_inputs, rewritten_post_ins] = rewritten_arg->projs<3>();
+    // Only the primary/post inputs that AREN'T themselves an in-chain producer become `fun`'s
+    // actual formal parameters -- a chained input's whole subgraph (further map_reduce_post calls)
+    // gets built directly into `fun`'s body by `lower_map_reduce_chained`, its device output
+    // flowing straight into this call's kernel without ever crossing back through host memory.
+    auto [old_mem, old_is, old_post_is] = app->arg()->projs<3>();
+
+    Vector<const App*> chain_in(nis_n), chain_post(nps_n);
+    for (nat_t i = 0; i != nis_n; ++i)
+        chain_in[i] = chainable_producer(old_is->proj(nis_n, i), use_count_);
+    for (nat_t j = 0; j != nps_n; ++j)
+        chain_post[j] = chainable_producer(old_post_is->proj(nps_n, j), use_count_);
+
+    DefVec host_is, host_post_is;
+    for (nat_t i = 0; i != nis_n; ++i)
+        if (!chain_in[i]) host_is.push_back(rewrite(old_is->proj(nis_n, i)));
+    for (nat_t j = 0; j != nps_n; ++j)
+        if (!chain_post[j]) host_post_is.push_back(rewrite(old_post_is->proj(nps_n, j)));
+
+    auto mem_ty             = w.call<mem::M>(0);
+    auto rewritten_mem      = rewrite(find_root_mem(old_mem, use_count_));
+    auto rewritten_inputs   = w.tuple(host_is);
+    auto rewritten_post_ins = w.tuple(host_post_is);
+    auto rewritten_arg      = w.tuple({rewritten_mem, rewritten_inputs, rewritten_post_ins});
+
     auto fun  = w.mut_fun(w.sigma({mem_ty, rewritten_inputs->type(), rewritten_post_ins->type()}), result_ty)
                     ->set("mapReduceAffGpu");
     auto call = w.app(cps::op_cps2ds_dep(fun), rewritten_arg);
-    auto [fun_mem, new_inputs, new_post_ins] = fun->var(0_n)->projs<3>();
-    auto cont                                = fun->var(1);
+    auto [fun_mem, new_host_inputs, new_host_post_ins] = fun->var(0_n)->projs<3>();
+    auto cont                                          = fun->var(1);
+
+    DefVec resolved_is(nis_n, nullptr), resolved_post_is(nps_n, nullptr);
+    for (nat_t i = 0, k = 0; i != nis_n; ++i)
+        if (!chain_in[i]) resolved_is[i] = new_host_inputs->proj(host_is.size(), k++);
+    for (nat_t j = 0, k = 0; j != nps_n; ++j)
+        if (!chain_post[j]) resolved_post_is[j] = new_host_post_ins->proj(host_post_is.size(), k++);
 
     auto [h_mem, h_global, h_const] = w.app(w.annex<gpu::auto_init>(), fun_mem)->projs<3>();
 
-    auto in_desc = extract_input_desc(nis_n, Ris, Sis, Tis, accs);
-    auto inputs  = alloc_copy_inputs(w, h_mem, h_global, in_desc.rs, in_desc.ss, in_desc.ts, new_inputs);
+    DefVec to_free;
+    auto top_cont = [&](const Def* mem, const Def* global, const Def* const_tok,
+                       const Def* out_dptr) -> const Def* {
+        return build_teardown(w, Ro, So, Tp, mem, global, const_tok, to_free, out_dptr, cont);
+    };
 
-    auto post_desc = extract_input_desc(nps_n, Rps, Sps, Tps, post_accs);
-    auto post_inputs
-        = alloc_copy_inputs(w, inputs.mem, inputs.global, post_desc.rs, post_desc.ss, post_desc.ts, new_post_ins);
-
-    auto [out_global, out_dptr] = alloc_output(w, post_inputs.global, Tp, So, ro);
-
-    auto global_comb = rebuild_lam_global_mem(comb_lam, To, w.sym("combGlobal"));
-    auto global_post = rebuild_lam_global_mem(post_lam, Tp, w.sym("postGlobal"));
-
-    Mapped mapped_ins{in_desc.rs, in_desc.ss, inputs.dptrs, in_desc.accs};
-    Mapped mapped_post{post_desc.rs, post_desc.ss, post_inputs.dptrs, post_desc.accs};
-
-    // `sched` names the schedule `%tensor.dot_product_impl` already picked for this op (see
-    // `probe_schedule`): `vdim` in the reduction range means it chose the reduction-vectorized nest,
-    // i.e. a genuine contraction along that axis -- exactly the structure a specialized kernel below
-    // wants, read off rather than rediscovered from the op's operands.
-    auto sched_vu  = probe_schedule(sched);
-    bool is_redvec = sched_vu && sched_vu->first >= ro && sched_vu->first < ro + rr;
-
-    Lam* kernel = nullptr;
-    const Def* shared_pack_ty = nullptr;
-    nat_t launch_groups = 0, launch_items = 0;
-
-    if (is_redvec && ro == 0 && nps_n == 0 && rr >= 1) {
-        nat_t total_k = 1;
-        for (nat_t d = 0; d != rr; ++d)
-            total_k *= *Lit::isa<nat_t>(Sr->proj(ro + rr, d));
-        if (is_pow2(total_k) && total_k <= 1024) {
-            std::tie(kernel, shared_pack_ty)
-                = build_kernel_reduction(w, Sr, rr, mapped_ins, To, global_comb, init, out_dptr, total_k);
-            launch_groups = 1;
-            launch_items  = total_k;
-        }
+    auto body = lower_map_reduce_chained(app, h_mem, h_global, h_const, to_free, top_cont, &resolved_is,
+                                         &resolved_post_is);
+    if (!body) {
+        // Can't happen: the checks above are exactly the ones `lower_map_reduce_chained` itself
+        // performs on this very `app`, so it never returns `std::nullopt` for the top-level call.
+        log().w("{} unexpectedly failed GPU lowering", app);
+        return Super::rewrite_imm_App(app);
     }
-    // `build_kernel_gemm_tiled` flattens the whole reduction group into one GEMM "K" and tiles it;
-    // for `rr > 1` (convolution's shape) that flattening measured slower than caching the whole
-    // filter once (`detect_conv`/`build_kernel_conv_tiled` below), so restrict this path to true
-    // single-axis GEMM/BMM shapes.
-    if (!kernel && rr == 1) {
-        if (auto shape = detect_gemm(mapped_ins, ro, rr, ro + rr)) {
-            Vector<nat_t> k_extents;
-            for (nat_t j = 0; j != rr; ++j)
-                k_extents.push_back(*Lit::isa<nat_t>(Sr->proj(ro + rr, ro + j)));
-            auto dimk = std::accumulate(k_extents.begin(), k_extents.end(), nat_t{1}, std::multiplies<>{});
-            Vector<nat_t> m_extents, n_extents;
-            for (auto p : shape->m_positions)
-                m_extents.push_back(out_dims[p]);
-            for (auto p : shape->n_positions)
-                n_extents.push_back(out_dims[p]);
-            auto m_total = std::accumulate(m_extents.begin(), m_extents.end(), nat_t{1}, std::multiplies<>{});
-            auto n_total = std::accumulate(n_extents.begin(), n_extents.end(), nat_t{1}, std::multiplies<>{});
-            if (m_total % Gemm_Tile == 0 && n_total % Gemm_Tile == 0 && dimk % Gemm_Tile == 0) {
-                std::tie(kernel, shared_pack_ty) = build_kernel_gemm_tiled(
-                    w, Ro, ro, rr, Sr, So, mapped_ins, *shape, m_extents, n_extents, To, acc_out, init, global_comb,
-                    mapped_post, global_post, Tp, out_dptr);
-                launch_groups = (m_total / Gemm_Tile) * (n_total / Gemm_Tile);
-                launch_items  = Gemm_Tile * Gemm_Tile;
-            }
-        }
-    }
-    // Falls back further to a conv-specific kernel (weight cached whole, no K-tiling) for shapes the
-    // tiled-GEMM path above declines -- chiefly a reduction extent that isn't a multiple of
-    // `Gemm_Tile` (e.g. VGG16's first layer, `cin = 3`, filter 27).
-    if (!kernel) {
-        if (auto shape = detect_conv(mapped_ins, ro, rr, ro + rr)) {
-            auto ow_extent   = out_dims[shape->data_positions.back()];
-            nat_t filter_total = 1;
-            for (nat_t j = 0; j != rr; ++j)
-                filter_total *= *Lit::isa<nat_t>(Sr->proj(ro + rr, ro + j));
-            auto max_load_iters = ow_extent == 0 ? 0 : (filter_total + ow_extent - 1) / ow_extent;
-            if (ow_extent <= Conv_Max_Ow && max_load_iters <= Conv_Max_Load_Iters) {
-                std::tie(kernel, shared_pack_ty) = build_kernel_conv_tiled(
-                    w, Ro, ro, rr, Sr, So, mapped_ins, *shape, out_dims, To, acc_out, init, global_comb, mapped_post,
-                    global_post, Tp, out_dptr);
-                Vector<nat_t> outer_positions{shape->weight_position};
-                for (auto p : shape->data_positions)
-                    if (p != shape->data_positions.back()) outer_positions.push_back(p);
-                nat_t n_groups = 1;
-                for (auto p : outer_positions)
-                    n_groups *= out_dims[p];
-                launch_groups = n_groups;
-                launch_items  = ow_extent;
-            }
-        }
-    }
-    if (!kernel) {
-        auto grid = grid_layout(out_dims);
-        kernel = build_kernel(w, Ro, rr, out_dims, Sr, So, mapped_ins, To, acc_out, init, global_comb, mapped_post,
-                              global_post, Tp, out_dptr, grid);
-        launch_groups = grid.n_groups;
-        launch_items  = grid.n_items;
-    }
-
-    DefVec kernel_arg_tys(nis_n + nps_n + 1);
-    for (nat_t i = 0; i != nis_n; ++i)
-        kernel_arg_tys[i] = inputs.dptrs[i]->type();
-    for (nat_t j = 0; j != nps_n; ++j)
-        kernel_arg_tys[nis_n + j] = post_inputs.dptrs[j]->type();
-    kernel_arg_tys[nis_n + nps_n] = out_dptr->type();
-
-    auto launch = w.app(w.annex<gpu::launch>(), Defs{w.lit_nat(nis_n + nps_n + 1), w.tuple(kernel_arg_tys)});
-    launch      = w.app(launch, Defs{w.lit_nat(launch_groups), w.lit_nat(launch_items), w.annex<gpu::default_stream>(),
-                                     shared_pack_ty ? w.lit_tt() : w.lit_ff(),
-                                     shared_pack_ty ? w.tuple({shared_pack_ty}) : w.tuple()});
-    launch      = w.app(launch, kernel);
-
-    DefVec kernel_args = inputs.dptrs;
-    kernel_args.insert(kernel_args.end(), post_inputs.dptrs.begin(), post_inputs.dptrs.end());
-    kernel_args.push_back(out_dptr);
-    launch = w.app(launch, kernel_args);
-
-    auto after_launch = build_teardown(w, Ro, So, Tp, inputs.dptrs, post_inputs.dptrs, out_dptr, cont);
-    auto launch_call  = w.app(launch, Defs{w.tuple({post_inputs.mem, out_global, h_const}), after_launch});
-    fun->set(true, launch_call);
+    fun->set(true, *body);
 
     return call;
 }
