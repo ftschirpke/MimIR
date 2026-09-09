@@ -524,7 +524,9 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
 
     auto elem_ty0       = scalar_elem_ty(ins.dptrs[0], ins.rs[0], ins.ss[0]);
     auto elem_ty1       = scalar_elem_ty(ins.dptrs[1], ins.rs[1], ins.ss[1]);
-    auto tile_ty        = [&](const Def* elem_ty) { return w.arr(w.lit_nat(tile), w.arr(w.lit_nat(tile), elem_ty)); };
+    // Padding the row stride to `tile + 1` staggers same-column accesses across banks: every thread
+    // in a warp reading column `kk_idx` of the same tile row would otherwise land in the same bank.
+    auto tile_ty = [&](const Def* elem_ty) { return w.arr(w.lit_nat(tile), w.arr(w.lit_nat(tile + 1), elem_ty)); };
     auto shared_pack_ty = w.sigma({tile_ty(elem_ty0), tile_ty(elem_ty1)});
     auto shared_ptr_ty  = w.call<gpu::SharedPtr>(shared_pack_ty);
 
@@ -566,8 +568,8 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
 
     auto par_local0_idx = w.call(core::conv::u, w.lit_nat(tile), ty_i64);
     auto par_local1_idx = w.call(core::conv::u, w.lit_nat(tile), tx_i64);
-    auto k_local0_idx    = w.call(core::conv::u, w.lit_nat(tile), tx_i64);
-    auto k_local1_idx    = w.call(core::conv::u, w.lit_nat(tile), ty_i64);
+    auto k_local0_idx    = w.call(core::conv::u, w.lit_nat(tile + 1), tx_i64);
+    auto k_local1_idx    = w.call(core::conv::u, w.lit_nat(tile + 1), ty_i64);
     auto k_local0_i64    = tx_i64;
     auto k_local1_i64    = ty_i64;
 
@@ -675,7 +677,7 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     outer_body->set(true, inner_for_call);
     auto [kk_iter, inner_acc, inner_yield] = inner_body->vars<3>();
     auto [g_in, accval_in]                 = inner_acc->projs<2>();
-    auto kk_idx                             = w.call(core::conv::u, w.lit_nat(tile), kk_iter);
+    auto kk_idx                             = w.call(core::conv::u, w.lit_nat(tile + 1), kk_iter);
 
     auto [rm0, v0] = w.call<mem::load>(Defs{s3, op_lea_tuple(shared0_ptr, w.tuple({par_local0_idx, kk_idx}))})->projs<2>();
     auto [rm1, v1] = w.call<mem::load>(Defs{rm0, op_lea_tuple(shared1_ptr, w.tuple({par_local1_idx, kk_idx}))})->projs<2>();
