@@ -237,24 +237,27 @@ struct Mapped {
     nat_t n() const { return dptrs.size(); }
 };
 
-/// The recognized shape of a 2-input, single-reduction-dim contraction (a GEMM/BMM-style op, of which
-/// `%tensor.dot_product`/`product_2d`/`bmm` are the frontend's only current producers -- but detected
-/// structurally, not by axiom identity, so any future producer of the same shape is picked up too).
-/// Generalized over however many
-/// loop positions each input's own (non-reduction) axis was split into: a schedule like
+/// The recognized shape of a 2-input contraction where each input's own (non-reduction) axis is one
+/// or more loop positions and *every* reduction position is shared by both inputs: GEMM/BMM (of which
+/// `%tensor.dot_product`/`product_2d`/`bmm` are the frontend's only current producers) with `rr == 1`,
+/// but also convolution's shape with `rr >= 2` (`cin, kh, kw` all shared by the data and weight
+/// inputs) -- detected structurally, not by axiom identity or reduction-dim count, so any op with
+/// this shape is picked up and tiled the same way, treating the whole reduction group as one
+/// flattened GEMM "K" (mirroring how `m_positions`/`n_positions` already flatten "M"/"N").
+/// `m_positions`/`n_positions` are ascending, and their sizes need not be 1: a schedule like
 /// `dot_schedule_kvec` strip-mines the two logical output dims into (block, within-block) pairs
-/// *before* GPU ever sees the op, so a real redvec call typically shows up with `m_positions`/
-/// `n_positions` of size 2 each, not size 1 -- reflected from the access maps, not assumed.
+/// *before* GPU ever sees the op, so a real redvec call typically shows up with sizes of 2, not 1.
 struct GemmShape {
     Vector<nat_t> m_positions; ///< ascending loop positions (within `[0, ro)`) forming input0's own axis
     Vector<nat_t> n_positions; ///< ditto for input1; together with `m_positions` partitions `[0, ro)`
 };
 
 std::optional<GemmShape> detect_gemm(const Mapped& ins, nat_t ro, nat_t rr, nat_t rn) {
-    if (ins.n() != 2 || rr != 1 || ro < 2) return std::nullopt;
-    auto k_pos = ro;
+    if (ins.n() != 2 || rr < 1 || ro < 2) return std::nullopt;
+    for (nat_t i = 0; i != 2; ++i)
+        for (nat_t p = ro; p != ro + rr; ++p)
+            if (!depends_on_axis(ins.accs[i], rn, p)) return std::nullopt;
     auto positions_of = [&](const Def* acc) -> std::optional<Vector<nat_t>> {
-        if (!depends_on_axis(acc, rn, k_pos)) return std::nullopt;
         Vector<nat_t> pos;
         for (nat_t p = 0; p != ro; ++p)
             if (depends_on_axis(acc, rn, p)) pos.push_back(p);
@@ -464,17 +467,22 @@ Lam* build_kernel(World& w,
 /// Thread-block edge length for `build_kernel_gemm_tiled`'s shared-memory tiles.
 constexpr nat_t Gemm_Tile = 16;
 
-/// A shared-memory-tiled kernel for a detected 2-input, single-reduction-dim contraction (`GemmShape`):
-/// each `Gemm_Tile`x`Gemm_Tile` thread block covers a tile of the two parallel dims and streams the
-/// reduction dim through cooperative loads into shared memory `Gemm_Tile` elements at a time, instead
-/// of every thread re-reading the same rows/columns from global memory independently. Requires both
-/// parallel dims and the reduction dim to be exact multiples of `Gemm_Tile` -- the caller falls back
-/// to `build_kernel` otherwise. Reuses the same write-back/epilogue shape as `build_kernel`, just fed
-/// by the tiled reduction instead of the sequential one, so an existing epilogue fusion (e.g. bias +
-/// activation) keeps working unchanged.
+/// A shared-memory-tiled kernel for a detected 2-input contraction (`GemmShape`): each
+/// `Gemm_Tile`x`Gemm_Tile` thread block covers a tile of the two parallel dims and streams the whole
+/// reduction group -- flattened into one GEMM "K", exactly like `m_extents`/`n_extents` flatten "M"/
+/// "N" -- through cooperative loads into shared memory `Gemm_Tile` elements at a time, instead of
+/// every thread re-reading the same rows/columns from global memory independently. This is what
+/// makes convolution (`rr` = `cin, kh, kw`) tile the same way GEMM/BMM (`rr` = 1) does: the K-tile
+/// loop doesn't care how many reduction positions it flattens, only that every one of them is shared
+/// by both inputs (`detect_gemm` already checked that). Requires both parallel dims and the flattened
+/// reduction extent to be exact multiples of `Gemm_Tile` -- the caller falls back to `build_kernel`
+/// otherwise. Reuses the same write-back/epilogue shape as `build_kernel`, just fed by the tiled
+/// reduction instead of the sequential one, so an existing epilogue fusion (e.g. bias + activation)
+/// keeps working unchanged.
 std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
                              const Def* Ro,
                              nat_t ro,
+                             nat_t rr,
                              const Def* Sr,
                              const Def* So,
                              const Mapped& ins,
@@ -491,11 +499,14 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
                              const Def* out_dptr) {
     auto nis  = ins.n();
     auto nps  = post_ins.n();
-    auto rn   = ro + 1;
+    auto rn   = ro + rr;
     auto n    = w.lit_nat(rn);
     auto m_total = std::accumulate(m_extents.begin(), m_extents.end(), nat_t{1}, std::multiplies<>{});
     auto n_total = std::accumulate(n_extents.begin(), n_extents.end(), nat_t{1}, std::multiplies<>{});
-    auto dimk = *Lit::isa<nat_t>(Sr->proj(rn, ro));
+    Vector<nat_t> k_extents(rr);
+    for (nat_t j = 0; j != rr; ++j)
+        k_extents[j] = *Lit::isa<nat_t>(Sr->proj(rn, ro + j));
+    auto dimk = std::accumulate(k_extents.begin(), k_extents.end(), nat_t{1}, std::multiplies<>{});
 
     auto tile      = Gemm_Tile;
     auto n_blocks0 = m_total / tile;
@@ -569,18 +580,21 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto [n_after, n_sub_coords] = unflatten_index(w, n_flat_global, n_extents, m_after);
 
     /// The full `rn`-length loop-vector for reading one input at the given global indices: `own_pos`'s
-    /// positions get `own_coords` (already `Idx`-typed, from `unflatten_index`), `ro` gets `k`, and any
-    /// remaining position (belonging to the *other* input's own axis) is unused by this input's access
-    /// map (checked by `detect_gemm`), so any in-bounds value is fine.
-    auto build_iters = [&](const Vector<nat_t>& own_pos, const DefVec& own_coords, const Def* k_val_i64) {
+    /// positions get `own_coords` (already `Idx`-typed, from `unflatten_index`), `[ro, ro+rr)` get
+    /// `k_vals` (ditto, one per reduction position), and any remaining position (belonging to the
+    /// *other* input's own axis) is unused by this input's access map (checked by `detect_gemm`), so
+    /// any in-bounds value is fine.
+    auto build_iters = [&](const Vector<nat_t>& own_pos, const DefVec& own_coords, const DefVec& k_vals) {
         DefVec iv(rn);
         Vector<bool> filled(rn, false);
         for (size_t j = 0; j != own_pos.size(); ++j) {
             iv[own_pos[j]]    = own_coords[j];
             filled[own_pos[j]] = true;
         }
-        iv[ro]     = w.call(core::conv::u, Sr->proj(rn, ro), k_val_i64);
-        filled[ro] = true;
+        for (nat_t j = 0; j != rr; ++j) {
+            iv[ro + j]     = k_vals[j];
+            filled[ro + j] = true;
+        }
         for (nat_t p = 0; p != ro; ++p)
             if (!filled[p]) iv[p] = w.call(core::conv::u, Sr->proj(rn, p), w.lit_i64(0));
         return w.tuple(iv);
@@ -594,7 +608,8 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
         wb_idx[shape.m_positions[j]] = m_sub_coords[j];
     for (size_t j = 0; j != shape.n_positions.size(); ++j)
         wb_idx[shape.n_positions[j]] = n_sub_coords[j];
-    wb_idx[ro] = w.call(core::conv::u, Sr->proj(rn, ro), w.lit_i64(0));
+    for (nat_t j = 0; j != rr; ++j)
+        wb_idx[ro + j] = w.call(core::conv::u, Sr->proj(rn, ro + j), w.lit_i64(0));
     auto [wc_mem, write_coords] = affine_map(acc_out, Ro, n, Sr, So, w.tuple(wb_idx), wb_mem);
 
     auto pcur = wc_mem;
@@ -632,11 +647,17 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
     auto k0_global   = add_i64(k_tile_base, k_local0_i64);
     auto k1_global   = add_i64(k_tile_base, k_local1_i64);
 
-    auto [g1, coords0]
-        = affine_map(ins.accs[0], ins.rs[0], n, Sr, ins.ss[0], build_iters(shape.m_positions, m_sub_coords, k0_global), g0);
+    // The global flat K position decomposes into the reduction group's own sub-positions (e.g.
+    // `cin, kh, kw`) the same way `m_flat_global`/`n_flat_global` decompose above -- the shared-memory
+    // tile itself stays a plain flat `(par_local, k_local)` array regardless of how many positions K
+    // flattens, so only this global-memory read side needs the decomposition.
+    auto [g0k, k0_vals] = unflatten_index(w, k0_global, k_extents, g0);
+    auto [g1, coords0]  = affine_map(ins.accs[0], ins.rs[0], n, Sr, ins.ss[0],
+                                     build_iters(shape.m_positions, m_sub_coords, k0_vals), g0k);
     auto [rd0, val0] = w.call<mem::load>(Defs{g1, op_lea_tuple(k_dptrs[0], fold_index(ins.ss[0], coords0))})->projs<2>();
-    auto [g2, coords1]
-        = affine_map(ins.accs[1], ins.rs[1], n, Sr, ins.ss[1], build_iters(shape.n_positions, n_sub_coords, k1_global), rd0);
+    auto [rd0k, k1_vals] = unflatten_index(w, k1_global, k_extents, rd0);
+    auto [g2, coords1]   = affine_map(ins.accs[1], ins.rs[1], n, Sr, ins.ss[1],
+                                     build_iters(shape.n_positions, n_sub_coords, k1_vals), rd0k);
     auto [rd1, val1] = w.call<mem::load>(Defs{g2, op_lea_tuple(k_dptrs[1], fold_index(ins.ss[1], coords1))})->projs<2>();
 
     auto s1 = w.call<mem::store>(Defs{s0, op_lea_tuple(shared0_ptr, w.tuple({par_local0_idx, k_local0_idx})), val0});
@@ -664,6 +685,16 @@ std::pair<Lam*, const Def*> build_kernel_gemm_tiled(World& w,
 /// Cap on `build_kernel_conv_tiled`'s thread-block size (the `ow` extent): a CUDA block is at most 1024
 /// threads.
 constexpr nat_t Conv_Max_Ow = 1024;
+
+/// Cap on the cooperative weight load's round count (`ceil(filter_total / n_items)`, `n_items = ow`):
+/// only `ow` sits on the thread dimension, so for late-network shapes (small spatial extent, large
+/// channel count -- e.g. VGG16's 512x512x3x3 filter at a 28x28 or 14x14 layer) the load can need
+/// *hundreds* of sequential, sub-warp-occupancy rounds, measured to cost 100s of ms for a single
+/// call (388ms for 512x512x3x3 @ 28x28, batch 10) versus microseconds for an early, wide-`ow` layer
+/// with the same kernel. Rather than fix the block shape now (folding more axes onto the thread
+/// dimension), decline the tiled path outright when it would need too many rounds and fall back to
+/// `build_kernel`, which has no such blind spot.
+constexpr nat_t Conv_Max_Load_Iters = 8;
 
 /// A shared-memory kernel for a detected convolution-shaped reduction (`ConvShape`): the whole weight
 /// filter for one thread block's `cout` is cooperatively loaded into shared memory once (`filter_total`
@@ -1162,9 +1193,16 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
             launch_items  = total_k;
         }
     }
-    if (!kernel && is_redvec) {
+    // `build_kernel_gemm_tiled` flattens the whole reduction group into one GEMM "K" and tiles it;
+    // for `rr > 1` (convolution's shape) that flattening measured slower than caching the whole
+    // filter once (`detect_conv`/`build_kernel_conv_tiled` below), so restrict this path to true
+    // single-axis GEMM/BMM shapes.
+    if (!kernel && rr == 1) {
         if (auto shape = detect_gemm(mapped_ins, ro, rr, ro + rr)) {
-            auto dimk = *Lit::isa<nat_t>(Sr->proj(ro + rr, ro));
+            Vector<nat_t> k_extents;
+            for (nat_t j = 0; j != rr; ++j)
+                k_extents.push_back(*Lit::isa<nat_t>(Sr->proj(ro + rr, ro + j)));
+            auto dimk = std::accumulate(k_extents.begin(), k_extents.end(), nat_t{1}, std::multiplies<>{});
             Vector<nat_t> m_extents, n_extents;
             for (auto p : shape->m_positions)
                 m_extents.push_back(out_dims[p]);
@@ -1173,21 +1211,25 @@ const Def* LowerMapReduce::lower_map_reduce_post(const App* app) {
             auto m_total = std::accumulate(m_extents.begin(), m_extents.end(), nat_t{1}, std::multiplies<>{});
             auto n_total = std::accumulate(n_extents.begin(), n_extents.end(), nat_t{1}, std::multiplies<>{});
             if (m_total % Gemm_Tile == 0 && n_total % Gemm_Tile == 0 && dimk % Gemm_Tile == 0) {
-                std::tie(kernel, shared_pack_ty)
-                    = build_kernel_gemm_tiled(w, Ro, ro, Sr, So, mapped_ins, *shape, m_extents, n_extents, To, acc_out,
-                                              init, global_comb, mapped_post, global_post, Tp, out_dptr);
+                std::tie(kernel, shared_pack_ty) = build_kernel_gemm_tiled(
+                    w, Ro, ro, rr, Sr, So, mapped_ins, *shape, m_extents, n_extents, To, acc_out, init, global_comb,
+                    mapped_post, global_post, Tp, out_dptr);
                 launch_groups = (m_total / Gemm_Tile) * (n_total / Gemm_Tile);
                 launch_items  = Gemm_Tile * Gemm_Tile;
             }
         }
     }
-    // Convolution never picks a reduction-range `vdim` (unlike GEMM's `dot_schedule_kvec`), so this
-    // path isn't gated on `is_redvec` -- `detect_conv`'s own structural check (2 inputs, >=2 shared
-    // reduction positions, a 1-vs-many parallel split) is the only signal it needs.
+    // Falls back further to a conv-specific kernel (weight cached whole, no K-tiling) for shapes the
+    // tiled-GEMM path above declines -- chiefly a reduction extent that isn't a multiple of
+    // `Gemm_Tile` (e.g. VGG16's first layer, `cin = 3`, filter 27).
     if (!kernel) {
         if (auto shape = detect_conv(mapped_ins, ro, rr, ro + rr)) {
-            auto ow_extent = out_dims[shape->data_positions.back()];
-            if (ow_extent <= Conv_Max_Ow) {
+            auto ow_extent   = out_dims[shape->data_positions.back()];
+            nat_t filter_total = 1;
+            for (nat_t j = 0; j != rr; ++j)
+                filter_total *= *Lit::isa<nat_t>(Sr->proj(ro + rr, ro + j));
+            auto max_load_iters = ow_extent == 0 ? 0 : (filter_total + ow_extent - 1) / ow_extent;
+            if (ow_extent <= Conv_Max_Ow && max_load_iters <= Conv_Max_Load_Iters) {
                 std::tie(kernel, shared_pack_ty) = build_kernel_conv_tiled(
                     w, Ro, ro, rr, Sr, So, mapped_ins, *shape, out_dims, To, acc_out, init, global_comb, mapped_post,
                     global_post, Tp, out_dptr);
