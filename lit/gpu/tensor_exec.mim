@@ -1,0 +1,67 @@
+// RUN: %mim %s -p opt -o - | %FileCheck %s
+
+// Tensor ops lowered to GPU kernels: each op's schedule, selected in the frontend (%gpu.dot_schedule,
+// %gpu.conv_schedule), picks the kernel built in gpu.mim; lit/nvptx/tensor_exec.mim executes them.
+plugin tensor;
+plugin core;
+plugin mem;
+plugin math;
+plugin gpu;
+
+let f32 = %math.f32;
+let F32 = %math.F32;
+let R: %tensor.Ring = (F32, 0:F32, %math.arith.add 0, %math.arith.mul 0);
+let add = %math.arith.add @f32 0;
+
+lam relu (x: F32): F32 = %math.extrema.fmax 0 (0:F32, x);
+
+// gemm-tiled (all of M, N, K multiples of 16)
+fun extern mm (a: «32, 48; F32», b: «48, 64; F32»): «32, 64; F32» = return (%tensor.product_2d R (a, b));
+// generic (indivisible extents)
+fun extern mm_odd (a: «20, 33; F32», b: «33, 17; F32»): «20, 17; F32» = return (%tensor.product_2d R (a, b));
+// gemm-tiled through the weight transpose's read-through
+fun extern fc (x: «32, 64; F32», w: «48, 64; F32»): «32, 48; F32» = return (%tensor.product_2d R (x, %tensor.transpose_2d w));
+// gemm-tiled with a fused bias + relu epilogue
+fun extern fc_br (x: «32, 64; F32», w: «48, 64; F32», bias: «48; F32»): «32, 48; F32» =
+    let z  = %tensor.product_2d R (x, %tensor.transpose_2d w);
+    let b2 = %tensor.repeat (1, 48) (32, 48) (%tensor.reshape 48 (1, 48) bias);
+    return (%tensor.unary relu (%tensor.binary add (z, b2)));
+// gemm-tiled with a batch dim in the grid
+fun extern bmm (a: «4, 32, 48; F32», b: «4, 48, 64; F32»): «4, 32, 64; F32» = return (%tensor.bmm R (a, b));
+// a chain: relu(a·b)·c, the intermediate device-resident
+fun extern chain (a: «32, 48; F32», b: «48, 64; F32», c: «64, 32; F32»): «32, 32; F32» =
+    return (%tensor.product_2d R (%tensor.unary relu (%tensor.product_2d R (a, b)), c));
+// conv-tiled (filter cached per block)
+fun extern cv (x: «2, 8, 18, 18; F32», w: «16, 8, 3, 3; F32»): «2, 16, 16, 16; F32» =
+    return (%tensor.conv R ((1, 1), (1, 1), (0, 0)) (x, w));
+// conv-tiled with padding and stride 2
+fun extern cv_ps (x: «2, 3, 17, 17; F32», w: «8, 3, 3, 3; F32»): «2, 8, 9, 9; F32» =
+    return (%tensor.conv R ((2, 2), (1, 1), (1, 1)) (x, w));
+// generic conv (the filter load would take 72 rounds)
+fun extern cv_big (x: «2, 64, 10, 10; F32», w: «4, 64, 3, 3; F32»): «2, 4, 8, 8; F32» =
+    return (%tensor.conv R ((1, 1), (1, 1), (0, 0)) (x, w));
+// generic elementwise
+fun extern ew (x: «32, 64; F32»): «32, 64; F32» = return (%tensor.unary relu x);
+
+// CHECK-LABEL: fun extern bmm
+// CHECK:       %gpu.launch {{.*}} (32, i8, %gpu.default_stream, tt, «2; «16; «17; %math.F (23, 8)»»»)
+// CHECK-LABEL: fun extern chain
+// CHECK-DAG:   %gpu.launch {{.*}} (4, i8, %gpu.default_stream, tt, «2; «16; «17; %math.F (23, 8)»»»)
+// CHECK-DAG:   %gpu.launch {{.*}} (8, i8, %gpu.default_stream, tt, «2; «16; «17; %math.F (23, 8)»»»)
+// CHECK-LABEL: fun extern cv
+// CHECK:       %gpu.launch {{.*}} (512, 16, %gpu.default_stream, tt, «80; %math.F (23, 8)»)
+// CHECK-LABEL: fun extern cv_big
+// CHECK:       %gpu.launch {{.*}} (1, 512, %gpu.default_stream, ff, ())
+// CHECK-LABEL: fun extern cv_ps
+// CHECK:       %gpu.launch {{.*}} (144, 9, %gpu.default_stream, tt, «27; %math.F (23, 8)»)
+// CHECK-LABEL: fun extern ew
+// CHECK:       %gpu.launch {{.*}} (2, 1024, %gpu.default_stream, ff, ())
+// CHECK-LABEL: fun extern fc
+// CHECK:       %gpu.launch {{.*}} (6, i8, %gpu.default_stream, tt, «2; «16; «17; %math.F (23, 8)»»»)
+// CHECK-NOT:   %gpu.launch
+// CHECK-LABEL: fun extern fc_br
+// CHECK:       %gpu.launch {{.*}} (6, i8, %gpu.default_stream, tt, «2; «16; «17; %math.F (23, 8)»»»)
+// CHECK-LABEL: fun extern mm
+// CHECK:       %gpu.launch {{.*}} (8, i8, %gpu.default_stream, tt, «2; «16; «17; %math.F (23, 8)»»»)
+// CHECK-LABEL: fun extern mm_odd
+// CHECK:       %gpu.launch {{.*}} (1, 340, %gpu.default_stream, ff, ())

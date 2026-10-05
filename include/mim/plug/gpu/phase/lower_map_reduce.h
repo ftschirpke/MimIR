@@ -22,26 +22,35 @@ private:
     /// index by instead of trusting its own declared `Ris`/`Sis` for that slot to match, since a
     /// schedule can pack a producer's output differently than a fresh host allocation of the same
     /// logical tensor would be shaped), returns the Def the launch's continuation should reduce to.
-    using DeviceCont = std::function<const Def*(const Def* mem, const Def* global, const Def* const_tok,
-                                                 const Def* out_dptr, const Def* producer_ro,
-                                                 const Def* producer_So)>;
+    using DeviceCont = std::function<const Def*(const Def* mem,
+                                                const Def* global,
+                                                const Def* const_tok,
+                                                const Def* out_dptr,
+                                                const Def* producer_ro,
+                                                const Def* producer_So)>;
 
-    /// Skips the whole phase if the program already contains an explicit `%gpu.init`.
+    /// Lowers no op at all if the program already contains an explicit `%gpu.init`.
     // TODO: consider different solution to %gpu.init vs %gpu.auto_init problem
     void start() final;
     const Def* rewrite_imm_App(const App*) final;
 
+    const Def* neutralize(const App*);
     const Def* lower_map_reduce_post(const App*);
-    std::optional<const Def*> lower_map_reduce_chained(const App*, const Def* mem, const Def* global,
-                                                        const Def* const_tok, DefVec& to_free, const DeviceCont&,
-                                                        const DefVec* resolved_is       = nullptr,
-                                                        const DefVec* resolved_post_is = nullptr);
+    std::optional<const Def*> lower_map_reduce_chained(const App*,
+                                                       const Def* mem,
+                                                       const Def* global,
+                                                       const Def* const_tok,
+                                                       DefVec& to_free,
+                                                       const DeviceCont&,
+                                                       const DefVec* resolved_is      = nullptr,
+                                                       const DefVec* resolved_post_is = nullptr);
 
     /// Use-count of every Def reachable from the program's roots, computed once in start(): tells
     /// `lower_map_reduce_chained` whether an input's producer is consumed only by this one call (so
     /// its result can stay device-resident) or also needed elsewhere (so it must go through the
     /// usual host round-trip instead).
     DefMap<nat_t> use_count_;
+    bool neutralize_only_ = false;
 };
 
 } // namespace mim::plug::gpu::phase

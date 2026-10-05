@@ -1,0 +1,22 @@
+// RUN: %mim %s -p opt -o - | %FileCheck %s
+
+// A program with an explicit %gpu.init keeps every tensor op on the host: the GPU lowering hands a
+// GPU-scheduled op back to %btensor.lower_map_reduce with the neutral schedule.
+plugin tensor;
+plugin core;
+plugin mem;
+plugin math;
+plugin gpu;
+
+let F32 = %math.F32;
+let R: %tensor.Ring = (F32, 0:F32, %math.arith.add 0, %math.arith.mul 0);
+
+fun extern mm (a: «32, 48; F32», b: «48, 64; F32»): «32, 64; F32» = return (%tensor.product_2d R (a, b));
+
+fun extern touch (m0: %mem.M 0): %mem.M 0 =
+    let (m0, m1, m4) = %gpu.init m0;
+    return (%gpu.deinit (m0, m1, m4));
+
+// CHECK-NOT: %gpu.launch
+// CHECK-NOT: %gpu.Sched
+// CHECK:     %gpu.init
